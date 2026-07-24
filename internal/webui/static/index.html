@@ -1,0 +1,224 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>backup-maker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>backup-maker</h1>
+    <span id="machine" class="badge"></span>
+    <span id="engine" class="badge"></span>
+  </header>
+
+  <!-- Setup wizard. Takes over the page on a fresh install, and is reopened by
+       the "Set up a backup" button afterwards. -->
+  <main id="wizard" hidden>
+    <section class="wiz-head">
+      <p id="wiz-context" class="muted eyebrow"></p>
+      <!-- The heading is the question being asked, so it changes per step. -->
+      <h2 id="wiz-title"></h2>
+      <p id="wiz-lede" class="muted"></p>
+      <ol id="wiz-progress" class="wiz-progress"></ol>
+    </section>
+
+    <!-- Step: kind of backup -->
+    <section class="wiz-panel" data-step="kind">
+      <ul class="choices">
+        <li>
+          <label class="choice">
+            <input type="radio" name="mode" value="incremental" checked>
+            <span class="choice-body">
+              <strong>Incremental</strong>
+              <span class="muted">Only changed files are copied, continuously, within
+                seconds of you saving. The destination holds a normal, browsable copy of
+                your files, plus about 30 days of previous versions.</span>
+              <span class="muted small">Best for: day-to-day protection against mistakes,
+                a failed drive, or a deleted file.</span>
+            </span>
+          </label>
+        </li>
+        <li>
+          <label class="choice">
+            <input type="radio" name="mode" value="timed">
+            <span class="choice-body">
+              <strong>Timed</strong>
+              <span class="muted">A complete copy of the folder, frozen at one moment and
+                packed into a single password-protected zip, on a schedule — hourly, daily
+                or weekly. Nothing is copied in between runs. Your exclude list still
+                applies, so junk like node_modules is skipped.</span>
+              <span class="muted small">Best for: going back to how things were on a
+                particular day, or carrying a sealed copy off-site.</span>
+            </span>
+          </label>
+        </li>
+      </ul>
+    </section>
+
+    <!-- Step: choose a folder -->
+    <section class="wiz-panel" data-step="folder">
+      <!-- Folders already protected. Without this a folder mirrored to the SD
+           card could never also be given a snapshot: re-adding the same path
+           is rejected as a duplicate. -->
+      <div id="existing-folders" hidden>
+        <h3>Add another kind of backup to a folder you're already protecting</h3>
+        <ul id="existing-folder-list" class="cards"></ul>
+        <p class="muted">…or choose a new folder below.</p>
+      </div>
+      <div class="picker">
+        <div class="row">
+          <button type="button" id="pick-up">↑ Up</button>
+          <span id="pick-path" class="muted mono"></span>
+        </div>
+        <ul id="pick-list" class="picker-list"></ul>
+        <p id="pick-truncated" class="muted" hidden>Only the first 500 folders are shown.</p>
+      </div>
+      <label class="muted" for="pick-manual">Or type a path</label>
+      <div class="row">
+        <input id="pick-manual" placeholder="/home/you/code" autocomplete="off">
+        <button type="button" id="pick-manual-go">Use this</button>
+      </div>
+      <p id="pick-chosen" class="chosen" hidden></p>
+    </section>
+
+    <!-- Step: choose destinations -->
+    <section class="wiz-panel" data-step="dest">
+      <div class="row">
+        <button type="button" id="dest-scan">Look for computers on my network</button>
+        <span id="dest-scan-status" class="muted"></span>
+      </div>
+      <ul id="dest-machines" class="machines"></ul>
+      <details id="dest-manual">
+        <summary class="muted">Add by address instead</summary>
+        <div class="share-form">
+          <input id="dm-url" placeholder="//nas-or-ip/share" autocomplete="off">
+          <input id="dm-user" placeholder="username (blank = guest)" autocomplete="off">
+          <input id="dm-pass" type="password" placeholder="password" autocomplete="new-password">
+          <button type="button" id="dm-add">Add this destination</button>
+        </div>
+      </details>
+      <div class="notice subtle">
+        <strong>Backing up to another computer running backup-maker?</strong>
+        That machine decides where backups land, so set it up over there first:
+        <code>backup-maker receive enable --root &lt;path&gt;</code> then
+        <code>backup-maker pair</code>. You can add it here once it's paired —
+        no need to hold up this setup.
+      </div>
+      <p id="dest-count" class="chosen" hidden></p>
+    </section>
+
+    <!-- Step: schedule (timed backups only) -->
+    <section class="wiz-panel" data-step="schedule">
+      <div class="share-form">
+        <label class="muted" for="arc-every">Run a snapshot</label>
+        <select id="arc-every">
+          <option value="hourly">every hour</option>
+          <option value="12h">every 12 hours</option>
+          <option value="daily">every day</option>
+          <option value="weekly" selected>every week</option>
+        </select>
+        <label class="muted" for="arc-keep">Keep this many snapshots (older ones are deleted)</label>
+        <input id="arc-keep" type="number" min="1" value="5">
+        <label class="muted"><input type="checkbox" id="arc-everything">
+          Include everything, even node_modules and build output</label>
+        <p class="muted small">Off by default: snapshots skip the same junk the live
+          mirror skips. Tick this to seal a complete copy — useful for an archive you
+          might restore years later, when a package may no longer be downloadable.
+          It makes each snapshot much larger.</p>
+        <label class="muted" for="arc-pass">Password</label>
+        <input id="arc-pass" type="password" placeholder="password" autocomplete="new-password">
+        <input id="arc-pass2" type="password" placeholder="repeat password" autocomplete="new-password">
+        <input id="arc-name" placeholder="name for this schedule (optional)" autocomplete="off">
+      </div>
+      <div class="notice warn">
+        <strong>There is no way to recover this password.</strong>
+        Snapshots are AES-256 encrypted zips. If you lose it, they cannot be
+        opened — by you or by anyone. Store it somewhere safe.
+      </div>
+    </section>
+
+    <!-- Step: review -->
+    <section class="wiz-panel" data-step="review">
+      <dl id="wiz-review" class="review"></dl>
+    </section>
+
+    <!-- Outside the step panels: a validation message must be visible on the
+         step that produced it, not only on the last one. -->
+    <section>
+      <p id="wiz-error" class="notice warn" hidden></p>
+    </section>
+
+    <section class="wiz-nav">
+      <button type="button" id="wiz-back">Back</button>
+      <button type="button" id="wiz-next">Continue</button>
+      <button type="button" id="wiz-finish" hidden>Start backing up</button>
+      <a href="#" id="wiz-skip" class="muted skip">Skip — I'll use the command line</a>
+    </section>
+  </main>
+
+  <!-- Normal dashboard -->
+  <main id="dashboard" hidden>
+    <section id="pending-section" hidden>
+      <div id="pending" class="notice"></div>
+    </section>
+
+    <section>
+      <div class="row spread">
+        <p id="status-line" class="muted">Connecting to daemon…</p>
+        <button type="button" id="open-wizard">Set up a backup</button>
+      </div>
+      <div class="table-wrap">
+        <table id="rows" hidden>
+          <thead>
+            <tr><th>Folder</th><th>Destination</th><th>State</th><th>Progress</th><th>Last seen/sync</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="folders-section" hidden>
+      <h2>Folders being protected</h2>
+      <ul id="folder-list" class="cards"></ul>
+    </section>
+
+    <section id="targets-section" hidden>
+      <h2>Where backups go</h2>
+      <ul id="target-list" class="cards"></ul>
+    </section>
+
+    <section id="archives-section" hidden>
+      <h2>Scheduled snapshots</h2>
+      <p class="muted">Password-protected zip snapshots, frozen at a moment in time.</p>
+      <div class="table-wrap">
+        <table id="archive-rows">
+          <thead>
+            <tr><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="receive-section" hidden>
+      <p id="receive-line" class="muted"></p>
+    </section>
+
+    <section id="identity">
+      <p class="muted">Device ID: <code id="device-id"></code></p>
+    </section>
+  </main>
+
+  <footer class="muted">
+    backup-maker is free and open source.
+    <a href="https://ko-fi.com/phil9922" target="_blank" rel="noopener noreferrer">Buy me a coffee</a>
+    if it saved you a hard drive.
+  </footer>
+
+  <script src="wizard.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

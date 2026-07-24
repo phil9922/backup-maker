@@ -1,0 +1,200 @@
+/* SPDX-License-Identifier: MIT */
+
+:root {
+  --bg: #10141a;
+  --fg: #e6e9ee;
+  --muted: #8a94a3;
+  --accent: #4fc3f7;
+  --ok: #66bb6a;
+  --busy: #ffca28;
+  --bad: #ef5350;
+  font-family: system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+/* An author `display` rule beats the UA stylesheet's [hidden]{display:none},
+   so `main { display: grid }` would leave hidden panels on screen. */
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); min-height: 100vh; }
+header {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 1rem 1.5rem; border-bottom: 1px solid #232a34;
+}
+h1 { font-size: 1.2rem; font-weight: 600; }
+.badge {
+  background: #1c2430; color: var(--accent);
+  border-radius: 999px; padding: 0.15rem 0.7rem; font-size: 0.85rem;
+}
+.badge.ok { color: var(--ok); }
+.badge.bad { color: var(--bad); }
+main { padding: 1.5rem; max-width: 60rem; margin: 0 auto; display: grid; gap: 1.25rem; }
+/* Grid items default to min-width:auto, which lets a wide table push the page
+   sideways instead of scrolling inside .table-wrap. */
+main > section { min-width: 0; }
+footer {
+  max-width: 60rem; margin: 0 auto; padding: 1.25rem 1.5rem 2rem;
+  border-top: 1px solid #232a34; font-size: 0.85rem;
+}
+footer a { color: var(--accent); }
+#status-line, .muted { color: var(--muted); }
+.notice {
+  background: #2b2417; border: 1px solid #6d5a1f; border-radius: 8px;
+  padding: 0.75rem 1rem; white-space: pre-line;
+}
+.table-wrap { overflow-x: auto; margin-top: 0.75rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 0.5rem 0.9rem; white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 0.85rem; border-bottom: 1px solid #232a34; }
+tr + tr td { border-top: 1px solid #1a212b; }
+td.ok { color: var(--ok); }
+td.busy { color: var(--busy); }
+td.bad { color: var(--bad); }
+code { background: #1c2430; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85rem; }
+h2 { font-size: 1rem; font-weight: 600; margin-bottom: 0.35rem; }
+.row { display: flex; align-items: center; gap: 0.75rem; margin: 0.6rem 0; }
+button {
+  background: #1c2430; color: var(--accent); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.35rem 0.9rem; cursor: pointer; font-size: 0.9rem;
+}
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+#scan-results { list-style: none; display: grid; gap: 0.5rem; margin: 0.5rem 0; }
+#scan-results li { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.share-form { display: grid; gap: 0.5rem; max-width: 24rem; margin-top: 0.6rem; }
+.share-form input {
+  background: #151b23; color: var(--fg); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.4rem 0.6rem;
+}
+details summary { cursor: pointer; margin-top: 0.5rem; }
+
+/* Phones. The dashboard is often checked from a phone over an SSH tunnel or
+   on the machine itself, so the layout has to survive a ~390px viewport.
+   Tables keep their horizontal scroll (.table-wrap) — five columns of status
+   genuinely don't fit, and scrolling beats truncating. */
+@media (max-width: 40rem) {
+  header { flex-wrap: wrap; gap: 0.5rem; padding: 0.9rem 1rem; }
+  main { padding: 1rem; gap: 1rem; }
+  footer { padding: 1rem 1rem 1.5rem; }
+  th, td { padding: 0.45rem 0.6rem; }
+  /* 24rem exceeds the viewport once main's padding is counted. */
+  .share-form { max-width: 100%; }
+  /* A device ID is 71 unbroken characters. */
+  #identity code { overflow-wrap: anywhere; }
+  .row { flex-wrap: wrap; }
+}
+
+/* --- progress bars ---------------------------------------------------- */
+.progress-cell { min-width: 11rem; }
+.bar {
+  background: #1a212b; border-radius: 999px; height: 6px;
+  overflow: hidden; min-width: 6rem;
+}
+.bar-fill {
+  height: 100%; width: 0; border-radius: 999px; background: var(--accent);
+  /* Rows are updated in place, so the bar can ease between polls instead of
+     jumping. A full DOM rebuild would discard this. */
+  transition: width 0.6s linear;
+}
+.bar-fill.ok { background: var(--ok); }
+.bar-fill.busy { background: var(--busy); }
+.bar-fill.bad { background: var(--bad); }
+.bar-fill.indeterminate {
+  width: 100%;
+  background: repeating-linear-gradient(90deg, #2b3542 0 10px, #1a212b 10px 20px);
+  animation: slide 1s linear infinite;
+}
+@keyframes slide { to { background-position: 20px 0; } }
+.bar-label { font-size: 0.8rem; color: var(--muted); }
+
+/* --- cards (folders / destinations) ----------------------------------- */
+.cards { list-style: none; display: grid; gap: 0.5rem; margin: 0.5rem 0 0; }
+.card {
+  display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+  background: #151b23; border: 1px solid #232a34;
+  border-radius: 8px; padding: 0.6rem 0.9rem;
+}
+.card .mono { font-size: 0.85rem; }
+.card button { margin-left: auto; }
+/* The destination's free-space readout: its own full-width line under the
+   metadata row, so a fixed-width bar sits beside "N free of M". */
+.card .storage {
+  flex-basis: 100%; display: flex; align-items: center;
+  gap: 0.6rem; margin-top: 0.1rem;
+}
+.card .storage .bar { flex: 0 0 8rem; }
+button.danger { color: var(--bad); border-color: #3a2a2e; }
+button.danger:hover { border-color: var(--bad); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.row.spread { justify-content: space-between; }
+
+/* --- wizard ----------------------------------------------------------- */
+#wizard { padding: 1.5rem; max-width: 46rem; margin: 0 auto; display: grid; gap: 1.25rem; }
+#wizard > section { min-width: 0; }
+.wiz-head h2 { font-size: 1.3rem; }
+.wiz-progress {
+  list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem;
+  margin: 0.75rem 0 0; padding: 0; font-size: 0.85rem;
+}
+.wiz-progress li {
+  color: var(--muted); background: #151b23; border: 1px solid #232a34;
+  border-radius: 999px; padding: 0.2rem 0.75rem;
+}
+.wiz-progress li.current { color: var(--accent); border-color: var(--accent); }
+.wiz-progress li.done { color: var(--ok); border-color: #2b4030; }
+.wiz-panel h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+.wiz-nav { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.wiz-nav .skip { margin-left: auto; font-size: 0.85rem; }
+#wiz-finish { color: var(--ok); border-color: #2b4030; }
+.chosen { color: var(--ok); margin-top: 0.6rem; font-size: 0.9rem; }
+.notice.warn { background: #2b1a1a; border-color: #6d2f2f; }
+.notice.subtle { background: #151b23; border-color: #232a34; color: var(--muted); margin-top: 0.75rem; }
+
+/* folder picker */
+.picker { border: 1px solid #232a34; border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
+.picker-list { list-style: none; margin: 0.4rem 0 0; padding: 0; max-height: 15rem; overflow-y: auto; }
+.picker-list li { display: flex; align-items: center; gap: 0.6rem; padding: 0.15rem 0; }
+button.link {
+  background: none; border: none; color: var(--fg); padding: 0.15rem 0;
+  text-align: left; flex: 1; cursor: pointer;
+}
+button.link:hover { color: var(--accent); }
+
+/* machine list */
+.machines { list-style: none; margin: 0.6rem 0; padding: 0; display: grid; gap: 0.5rem; }
+.machine { background: #151b23; border: 1px solid #232a34; border-radius: 8px; padding: 0.6rem 0.9rem; }
+.machine-body { margin-top: 0.5rem; display: grid; gap: 0.35rem; }
+.storage {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.35rem 0.5rem; border-radius: 6px; cursor: pointer;
+}
+.storage:hover { background: #1c2430; }
+.review { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin-top: 0.5rem; }
+.review dt { color: var(--muted); }
+.review dd { margin: 0; white-space: pre-line; }
+select {
+  background: #151b23; color: var(--fg); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.4rem 0.6rem;
+}
+
+@media (max-width: 40rem) {
+  #wizard { padding: 1rem; gap: 1rem; }
+  .card button { margin-left: 0; }
+  .review { grid-template-columns: 1fr; gap: 0.15rem 0; }
+  .review dd { margin-bottom: 0.5rem; }
+}
+
+/* backup-kind choice */
+.eyebrow { font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
+.wiz-head h2 { margin-top: .15rem; }
+#wiz-lede { margin-top: .35rem; max-width: 46rem; line-height: 1.5; }
+.choices { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.choice {
+  display: flex; gap: .8rem; align-items: flex-start; cursor: pointer;
+  background: #151b23; border: 1px solid #232a34;
+  border-radius: 8px; padding: .9rem 1rem;
+}
+.choice:hover { border-color: #2b3542; }
+.choice:has(input:checked) { border-color: var(--accent); background: #161f29; }
+.choice input { margin-top: .25rem; }
+.choice-body { display: grid; gap: .3rem; }
+.choice-body strong { font-size: 1rem; }
+.choice-body .small { font-size: .85rem; }
