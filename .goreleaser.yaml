@@ -1,0 +1,118 @@
+# SPDX-License-Identifier: MIT
+#
+# Release packaging. Cut a release by pushing a tag:
+#
+#     git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+#
+# .github/workflows/release.yml takes it from there. To check what a release
+# would produce without publishing anything:
+#
+#     goreleaser release --snapshot --clean
+#
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: backup-maker
+
+before:
+  hooks:
+    # Deliberately NOT "go mod tidy": it can rewrite go.sum, and goreleaser
+    # refuses to release from a dirty tree.
+    - go mod download
+    - go vet ./...
+
+builds:
+  - id: backup-maker
+    main: .
+    binary: backup-maker
+    env:
+      - CGO_ENABLED=0
+    flags:
+      # Keep the build free of local filesystem paths.
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/phil9922/backup-maker/internal/version.version={{ .Version }}
+      - -X github.com/phil9922/backup-maker/internal/version.commit={{ .FullCommit }}
+      - -X github.com/phil9922/backup-maker/internal/version.date={{ .CommitDate }}
+    # Timestamp binaries from the commit, not from when the build ran, so the
+    # same tag always produces byte-identical output.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      # 32-bit ARM is here for older Raspberry Pis. Note the README caveat:
+      # on 32-bit ARM there is no pinned Syncthing build to fetch, so machine
+      # targets need Syncthing installed by hand.
+      - "7"
+    ignore:
+      - goos: windows
+        goarch: arm
+      - goos: darwin
+        goarch: arm
+
+archives:
+  - id: default
+    ids:
+      - backup-maker
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    files:
+      - README.md
+      - LICENSE
+      - THIRD-PARTY-NOTICES.md
+      - config.toml.example
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  # History here is deliberately kept as a single amended commit, so a
+  # commit-derived changelog would say nothing useful. Release notes are
+  # written by hand in the GitHub release body.
+  disable: true
+
+release:
+  github:
+    owner: phil9922
+    name: backup-maker
+  draft: false
+  # Tags like v0.2.0-rc1 publish as prereleases automatically.
+  prerelease: auto
+  name_template: "v{{ .Version }}"
+  header: |
+    Real-time, versioned, one-way backups to local drives and LAN machines.
+
+    Download the archive for your OS below, unpack it, and put the
+    `backup-maker` binary somewhere on your `PATH`. There is nothing else to
+    install, and nothing to install on the destinations. Then:
+
+    ```sh
+    backup-maker web        # set everything up in the browser
+    ```
+
+    Verify a download against `checksums.txt`:
+
+    ```sh
+    sha256sum -c checksums.txt --ignore-missing
+    ```
+  footer: |
+    ---
+    See the [README](https://github.com/phil9922/backup-maker#readme) for setup,
+    the Raspberry Pi destination guide, and restoring from a backup.

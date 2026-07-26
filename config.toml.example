@@ -1,0 +1,229 @@
+# backup-maker example configuration
+# ===================================
+#
+# This is an EXAMPLE. Copy it to your real config location and edit:
+#   Linux:   ~/.config/backup-maker/config.toml
+#   macOS:   ~/Library/Application Support/backup-maker/config.toml
+#   Windows: %AppData%\backup-maker\config.toml
+#
+# You rarely need to write this file by hand — `backup-maker init`,
+# `add-folder`, `add-target`, and `receive enable` create and update it for
+# you. Hand-edits are picked up by a running daemon within seconds.
+#
+# PASSWORDS ARE NEVER STORED IN THIS FILE. Network-share passwords live in
+# the private state.json (file mode 0600) next to this file — set or change
+# them with:  backup-maker set-password <target-name>
+#
+# All values below are placeholders — replace them with your own.
+
+[general]
+# Name shown to backup targets and in dashboards. Default: this machine's
+# hostname.
+machine_name = "my-laptop"
+
+# Port for the local web dashboard. It always binds to 127.0.0.1 only — this
+# is never reachable from the network, whatever port you pick. Default: 8666.
+dashboard_port = 8666
+
+# Optional read-only view for other devices on your network (a phone, another
+# PC). Off by default: the dashboard otherwise answers only on this computer.
+# Setting up or changing backups always stays local — the network view is a
+# separate listener with an allow-list, so writes are refused even with a
+# valid token. No password is needed to view it, and folder paths, destination
+# addresses and the device ID are stripped from what it publishes.
+# lan_view = true
+# lan_view_port = 8667
+
+[defaults]
+# How long backup targets keep old versions of changed/deleted files, in
+# days. Versions are pruned on a staggered schedule (denser recent history,
+# sparser older history). Default: 30.
+versioning_max_age_days = 30
+
+# Keep this much room free on every destination by automatically deleting the
+# OLDEST BACKUP HISTORY when it runs low. 0 (the default) disables it — nothing
+# is ever deleted to make room unless you ask for it.
+#
+# Only history is eligible: old file versions and old snapshots. The live
+# mirror is never touched (it IS the backup), and a snapshot job's newest
+# archive is never deleted (that would leave it with no protection at all).
+# Deletion is spread evenly across your folders, oldest first, so one large
+# folder can't consume everyone else's history. Every deletion is logged and
+# shown on the dashboard.
+#
+# Ignored for type="device" targets: that machine manages its own storage.
+min_free_gb = 0
+
+# A target that hasn't been seen for this many days shows a stale warning
+# (!!) in `backup-maker status` and the dashboard. Days, not hours, so a
+# laptop that sleeps doesn't false-alarm. Default: 7.
+stale_after_days = 7
+
+# Junk excluded from every backup. A bare name ("node_modules") matches any
+# file or directory with that name anywhere; a name with a slash
+# ("target/debug") matches that sub-path anywhere; simple globs ("*.pyc")
+# work on names. NOTE: .git is deliberately NOT ignored — losing repositories
+# is unacceptable. This list below is the built-in default.
+ignore = [
+  "node_modules",
+  "__pycache__",
+  ".venv",
+  "venv",
+  ".tox",
+  "target/debug",
+  "target/release",
+  "build",
+  "dist",
+  ".next",
+  ".gradle",
+  "*.pyc",
+  ".DS_Store",
+  "Thumbs.db",
+  ".cache",
+]
+
+# ---------------------------------------------------------------------------
+# Folders to back up — one [[folder]] block per folder.
+# Usually created with:  backup-maker add-folder /home/you/code
+# ---------------------------------------------------------------------------
+
+# [[folder]]
+# # Stable unique identifier, shared with backup targets. `add-folder`
+# # generates one like "kqz3d-8xh2p"; if writing by hand, any unique string
+# # works, but NEVER change it later (targets know the folder by this id).
+# id = "aaaaa-00000"
+# # Absolute path of the folder to protect.
+# path = "/home/you/code"
+# # Display name; also the folder's directory name on targets.
+# label = "code"
+# # Extra ignore patterns for this folder only (appended to [defaults].ignore).
+# extra_ignore = ["*.iso", "scratch"]
+# # Set true to disable the [defaults].ignore list for this folder (junk like
+# # node_modules will then be backed up too). Default: false.
+# no_default_ignores = false
+
+# [[folder]]
+# id = "bbbbb-11111"
+# path = "/home/you/documents"
+# label = "documents"
+
+# ---------------------------------------------------------------------------
+# Backup targets — one [[target]] block per destination. Three types; mix
+# freely. Every target mirrors every folder unless its `folders` list says
+# otherwise.
+# ---------------------------------------------------------------------------
+
+# --- Type "drive": storage attached to THIS computer (SD card, USB stick,
+# --- external disk). Usually created with:
+# ---   backup-maker add-target drive /media/you/SDCARD
+# [[target]]
+# type = "drive"
+# # Your name for this target (must be unique across targets).
+# name = "sdcard"
+# # Absolute path of the drive's mount point. backup-maker stamps it with a
+# # marker file; if a different drive appears at this path it is refused.
+# path = "/media/you/SDCARD"
+# # Folder ids backed up to this target; empty list = all folders. Default: all.
+# folders = []
+# # Optional: read back and checksum-verify every written file. Default for
+# # drives: false (unnecessary overhead on local storage).
+# # verify = true
+
+# --- Type "share": a network drive reached over SMB — a NAS, a USB drive
+# --- plugged into your router, or a folder shared by any computer. Find
+# --- addresses with `backup-maker scan`. Usually created with:
+# ---   backup-maker add-target share //192.168.1.1/usb1 --user someuser
+# [[target]]
+# type = "share"
+# name = "nas"
+# # Share address: //host[:port]/share[/subfolder]. Host may be a name or IP.
+# url = "//NAS/backups/my-laptop"
+# # Username for the share. Leave out for guest/anonymous shares. The
+# # password is NOT stored here — run: backup-maker set-password nas
+# username = "someuser"
+# # Read-back checksum verification. Default for shares: true (SMB has no
+# # end-to-end integrity checking of its own). Only set false if the share is
+# # painfully slow and you accept the risk.
+# # verify = false
+# # Override [defaults].min_free_gb for this destination — a 64GB card and a
+# # 4TB NAS want different headroom. Omit to inherit the default.
+# # min_free_gb = 5
+# # Set true for a destination that only receives scheduled snapshots and
+# # keeps no continuously-updated mirror. Needed because an empty `folders`
+# # list below already means "every folder", so there would otherwise be no
+# # way to say "snapshots here, nothing live".
+# # archives_only = true
+# # Optional Wake-on-LAN: the MAC address of the machine hosting this share.
+# # When set, backup-maker broadcasts a "magic packet" while the target is
+# # offline, to try to wake it. Use the WIRED adapter's address — wifi
+# # adapters almost never wake. This ALSO requires Wake-on-LAN to be enabled
+# # in that machine's BIOS/UEFI and OS; see the README. Waking is
+# # best-effort and never guaranteed. Set with: backup-maker set-mac nas <mac>
+# # mac = "aa:bb:cc:dd:ee:ff"
+# # Rarely needed: force a specific broadcast address for the magic packet.
+# # By default backup-maker broadcasts on every local subnet.
+# # wake_broadcast = "192.168.1.255"
+# folders = []
+
+# --- Type "device": another computer on your network running backup-maker
+# --- (strongest option: block-level verified, delta transfers, works on any
+# --- OS). Get the ID from `backup-maker pair` on the other machine; it must
+# --- approve you once with `backup-maker pair accept`. Usually created with:
+# ---   backup-maker add-target device <DEVICE-ID>
+# [[target]]
+# type = "device"
+# name = "other-pc"
+# # The other machine's device ID: 8 groups of 7 characters (letters/digits),
+# # e.g. real format "ABCDEFG-HIJKLMN-OPQRSTU-VWXYZ23-4567ABC-DEFGHIJ-KLMNOPQ-RSTUV24".
+# # This placeholder is fake — paste the ID `backup-maker pair` prints.
+# device_id = "AAAAAAA-BBBBBBB-CCCCCCC-DDDDDDD-EEEEEEE-FFFFFFF-GGGGGGG-HHHHHHH"
+# # Optional Wake-on-LAN for this machine — same rules as the share example
+# # above (wired adapter, BIOS/UEFI + OS setup required, best-effort only).
+# # mac = "aa:bb:cc:dd:ee:ff"
+# folders = []
+
+# ---------------------------------------------------------------------------
+# Scheduled snapshots — password-protected (AES-256) zips of
+# chosen folders, written to a drive/share target on a timer. These complement
+# the real-time mirror: a mirror follows every change, a snapshot freezes a
+# moment in time. Snapshots honour the same ignore list as the mirror, so
+# excluded junk (node_modules and friends) is skipped in both. Usually created with:  backup-maker wizard
+# The password is REQUIRED and is stored in the private state.json, never
+# here — set it via the wizard. Losing it means losing access to the archives.
+# ---------------------------------------------------------------------------
+
+# [[archive]]
+# # Unique name; also used in the archive filenames.
+# name = "weekly-code"
+# # By default a snapshot skips the same junk the mirror skips. Set true to
+# # seal EVERYTHING instead — node_modules, build output, caches — while the
+# # live mirror stays lean. Useful for an archive you might restore years
+# # later, when a dependency may no longer be downloadable. Much larger.
+# # no_default_ignores = true
+# # Extra patterns excluded from THIS snapshot only, leaving the mirror alone.
+# # extra_ignore = ["*.iso"]
+# # Folder ids to include; empty list = all folders.
+# folders = []
+# # Schedule: "hourly", "daily", "weekly", or a duration like "12h" (min 5m).
+# every = "weekly"
+# # Which drive/share target the zips are written to (not a machine target).
+# target = "sdcard"
+# # How many archives to keep; oldest are pruned. Default: 5.
+# keep = 5
+
+# ---------------------------------------------------------------------------
+# Receiving backups FROM other machines (the "device" counterpart above).
+# Usually configured with:  backup-maker receive enable --root /mnt/backups
+# ---------------------------------------------------------------------------
+
+[receive]
+# Whether this machine accepts backups from approved machines. Default: false.
+enabled = false
+
+# Absolute path where received backups land, in per-machine subfolders
+# (e.g. /mnt/backups/their-laptop/code). Required when enabled.
+root = ""
+
+# Device IDs approved to back up here. Managed by `backup-maker pair accept`;
+# remove an ID to stop accepting from that machine.
+accepted_sources = []
