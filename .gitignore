@@ -1,0 +1,34 @@
+# Build output
+/backup-maker
+/backup-maker.exe
+/dist/
+
+# Live configuration and machine state — NEVER commit these.
+# (They normally live in ~/.config/backup-maker, but belt and braces:
+# state.json holds credentials and API keys.)
+config.toml
+state.json
+*.env
+.env*
+
+# Local test artifacts
+*.log
+coverage.out
+/smbtest/
+/testdata-local/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Release signing key must never be committed. It lives outside the repo
+# (~/.config/backup-maker-signing/) but guard against a stray copy.
+*signing.key
+release-signing.key

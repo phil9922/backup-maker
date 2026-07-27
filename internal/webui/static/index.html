@@ -1,0 +1,542 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>backup-maker</title>
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <!-- iOS ignores favicon.ico for a home-screen shortcut and wants a PNG. The
+       read-only network view tells phone users how to add one, so the icon they
+       end up with should be ours rather than a screenshot of the page. -->
+  <link rel="apple-touch-icon" href="icon-256.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>backup-maker</h1>
+    <span id="machine" class="badge"></span>
+    <span id="engine" class="badge"></span>
+  </header>
+
+  <!-- Setup wizard. Takes over the page on a fresh install, and is reopened by
+       the "Set up a backup" button afterwards. -->
+  <main id="wizard" hidden>
+    <section class="wiz-head">
+      <p id="wiz-context" class="muted eyebrow"></p>
+      <!-- The heading is the question being asked, so it changes per step. -->
+      <h2 id="wiz-title"></h2>
+      <p id="wiz-lede" class="muted"></p>
+      <ol id="wiz-progress" class="wiz-progress"></ol>
+    </section>
+
+    <!-- Step: kind of backup -->
+    <section class="wiz-panel" data-step="kind">
+      <ul class="choices">
+        <li>
+          <label class="choice">
+            <input type="radio" name="mode" value="incremental" checked>
+            <span class="choice-body">
+              <strong>Incremental</strong>
+              <span class="muted">Only changed files are copied, continuously, within
+                seconds of you saving. The destination holds a normal, browsable copy of
+                your files, plus about 30 days of previous versions.</span>
+              <span class="muted small">Best for: day-to-day protection against mistakes,
+                a failed drive, or a deleted file.</span>
+            </span>
+          </label>
+        </li>
+        <li>
+          <label class="choice">
+            <input type="radio" name="mode" value="timed">
+            <span class="choice-body">
+              <strong>Timed</strong>
+              <span class="muted">A complete copy of the folder, frozen at one moment and
+                packed into a single password-protected zip, on a schedule — hourly, daily
+                or weekly. Nothing is copied in between runs. Your exclude list still
+                applies, so junk like node_modules is skipped.</span>
+              <span class="muted small">Best for: going back to how things were on a
+                particular day, or carrying a sealed copy off-site.</span>
+            </span>
+          </label>
+        </li>
+        <!-- Only offered on a fresh machine (no folders, no targets); shown by
+             the wizard's open(). Selecting it hands off to the adopt flow. -->
+        <li id="kind-adopt" hidden>
+          <label class="choice">
+            <input type="radio" name="mode" value="adopt">
+            <span class="choice-body">
+              <strong>Restore this machine</strong>
+              <span class="muted">I already have backups on a drive or network share. Rebuild
+                this computer's setup from them, continuing where the old machine left off.</span>
+              <span class="muted small">Best for: a reinstall, a replacement machine, or
+                recovering after a lost configuration.</span>
+            </span>
+          </label>
+        </li>
+      </ul>
+    </section>
+
+    <!-- Step: choose a folder -->
+    <section class="wiz-panel" data-step="folder">
+      <!-- Folders already protected. Without this a folder mirrored to the SD
+           card could never also be given a snapshot: re-adding the same path
+           is rejected as a duplicate. -->
+      <div id="existing-folders" hidden>
+        <h3>Add another kind of backup to a folder you're already protecting</h3>
+        <ul id="existing-folder-list" class="cards"></ul>
+        <p class="muted">…or choose a new folder below.</p>
+      </div>
+      <div class="picker">
+        <div class="row">
+          <button type="button" id="pick-up">↑ Up</button>
+          <span id="pick-path" class="muted mono"></span>
+        </div>
+        <ul id="pick-list" class="picker-list"></ul>
+        <p id="pick-truncated" class="muted" hidden>Only the first 500 folders are shown.</p>
+      </div>
+      <label class="muted" for="pick-manual">Or type a path</label>
+      <div class="row">
+        <input id="pick-manual" placeholder="/home/you/code" autocomplete="off">
+        <button type="button" id="pick-manual-go">Use this</button>
+      </div>
+      <p id="pick-chosen" class="chosen" hidden></p>
+    </section>
+
+    <!-- Step: choose destinations -->
+    <section class="wiz-panel" data-step="dest">
+      <div class="row">
+        <button type="button" id="dest-scan">Look for computers on my network</button>
+        <span id="dest-scan-status" class="muted"></span>
+      </div>
+      <ul id="dest-machines" class="machines"></ul>
+      <!-- Machines added by device ID in this run of the wizard. Kept outside
+           the collapsible below so a ticked machine stays visible after the
+           panel is closed again. -->
+      <ul id="dest-paired" class="machines"></ul>
+      <details id="dest-manual">
+        <summary class="muted">Add by address instead</summary>
+        <div class="share-form">
+          <input id="dm-url" placeholder="//nas-or-ip/share" autocomplete="off">
+          <input id="dm-user" placeholder="username (blank = guest)" autocomplete="off">
+          <input id="dm-pass" type="password" placeholder="password" autocomplete="new-password">
+          <button type="button" id="dm-add">Add this destination</button>
+        </div>
+      </details>
+      <details id="dest-pair">
+        <summary class="muted">Add a computer by device ID</summary>
+        <p class="muted small">Backing up to another computer running backup-maker? That
+          machine decides where the backups land, so set it up over there first:
+          <code>backup-maker receive enable --root &lt;path&gt;</code> then
+          <code>backup-maker pair</code>, which prints its device ID. Paste that ID here.
+          That machine's own dashboard also shows the ID as a QR code you can scan with a
+          phone, and <code>backup-maker pair</code> prints one in the terminal.</p>
+        <div class="share-form">
+          <input id="dp-id" placeholder="XXXXXXX-XXXXXXX-XXXXXXX-… (from &quot;backup-maker pair&quot;)" autocomplete="off">
+          <input id="dp-name" placeholder="a name for that machine, e.g. attic-pi" autocomplete="off">
+          <button type="button" id="dp-add">Add this computer</button>
+          <p id="dp-error" class="field-error" hidden></p>
+        </div>
+      </details>
+      <p id="dest-count" class="chosen" hidden></p>
+    </section>
+
+    <!-- Step: schedule (timed backups only) -->
+    <section class="wiz-panel" data-step="schedule">
+      <div class="share-form">
+        <label class="muted" for="arc-every">Run a snapshot</label>
+        <select id="arc-every">
+          <option value="hourly">every hour</option>
+          <option value="12h">every 12 hours</option>
+          <option value="daily">every day</option>
+          <option value="weekly" selected>every week</option>
+        </select>
+        <label class="muted" for="arc-keep">Keep this many snapshots (older ones are deleted)</label>
+        <input id="arc-keep" type="number" min="1" value="5">
+        <label class="muted"><input type="checkbox" id="arc-everything">
+          Include everything, even node_modules and build output</label>
+        <p class="muted small">Off by default: snapshots skip the same junk the live
+          mirror skips. Tick this to seal a complete copy — useful for an archive you
+          might restore years later, when a package may no longer be downloadable.
+          It makes each snapshot much larger.</p>
+        <label class="muted" for="arc-pass">Password</label>
+        <input id="arc-pass" type="password" placeholder="password" autocomplete="new-password">
+        <input id="arc-pass2" type="password" placeholder="repeat password" autocomplete="new-password">
+        <input id="arc-name" placeholder="name for this schedule (optional)" autocomplete="off">
+      </div>
+      <div class="notice warn">
+        <strong>There is no way to recover this password.</strong>
+        <p>Snapshot contents are AES-256 encrypted. Lose the password and nothing inside can be read again — by you or by anyone. Store it somewhere safe.</p>
+        <p class="small">It protects the contents, not the file list. Like every zip, a snapshot records its file names and sizes in the clear, so anyone holding one can see <em>what</em> you backed up without being able to open any of it. Keep snapshots somewhere you would be content to leave a list of your filenames.</p>
+      </div>
+    </section>
+
+    <!-- Step: review -->
+    <section class="wiz-panel" data-step="review">
+      <dl id="wiz-review" class="review"></dl>
+    </section>
+
+    <!-- Shown INSTEAD of the steps once a backup to another computer has been
+         created: that copy doesn't start until the other machine approves this
+         one, and saying "done" while nothing is happening would be a lie. Not a
+         .wiz-panel — it replaces the steps rather than being one of them. -->
+    <section id="wiz-pairwait" hidden>
+      <ul id="pairwait-list" class="cards"></ul>
+      <p class="muted">You can close this — the dashboard shows when it pairs.</p>
+      <div class="wiz-nav">
+        <button type="button" id="pairwait-close">Close</button>
+      </div>
+    </section>
+
+    <!-- Outside the step panels: a validation message must be visible on the
+         step that produced it, not only on the last one. -->
+    <section>
+      <p id="wiz-error" class="notice warn" hidden></p>
+    </section>
+
+    <section class="wiz-nav" id="wiz-nav">
+      <button type="button" id="wiz-back">Back</button>
+      <button type="button" id="wiz-next">Continue</button>
+      <button type="button" id="wiz-finish" hidden>Start backing up</button>
+      <a href="#" id="wiz-skip" class="muted skip">Skip — I'll use the command line</a>
+    </section>
+  </main>
+
+  <!-- Restore-this-machine (adopt) wizard. Its own chrome, reusing the wizard's
+       CSS classes; entered from the "Restore this machine" card above. -->
+  <main id="adopt" hidden>
+    <section class="wiz-head">
+      <p id="adopt-context" class="muted eyebrow"></p>
+      <h2 id="adopt-title"></h2>
+      <p id="adopt-lede" class="muted"></p>
+      <ol id="adopt-progress" class="wiz-progress"></ol>
+    </section>
+
+    <!-- Step: where the backups are -->
+    <section class="wiz-panel" data-step="source">
+      <ul id="adopt-candidates" class="cards"></ul>
+      <p id="adopt-scan-status" class="muted"></p>
+      <details id="adopt-browse-wrap">
+        <summary class="muted">Browse this computer…</summary>
+        <div id="adopt-browse"></div>
+      </details>
+      <details id="adopt-share-wrap">
+        <summary class="muted">Connect to a network share…</summary>
+        <div class="share-form">
+          <input id="adopt-share-url" placeholder="//nas-or-ip/share" autocomplete="off">
+          <input id="adopt-share-user" placeholder="username (blank = guest)" autocomplete="off">
+          <input id="adopt-share-pass" type="password" placeholder="password" autocomplete="new-password">
+          <button type="button" id="adopt-share-go">Connect</button>
+        </div>
+      </details>
+    </section>
+
+    <!-- Step: continue as the old machine, or start fresh -->
+    <section class="wiz-panel" data-step="identity">
+      <div id="adopt-identity"></div>
+    </section>
+
+    <!-- Step: where each folder lives on this machine -->
+    <section class="wiz-panel" data-step="folders">
+      <ul id="adopt-folders" class="cards"></ul>
+      <p id="adopt-folders-note" class="muted" hidden></p>
+    </section>
+
+    <!-- Step: passwords for shares and snapshots -->
+    <section class="wiz-panel" data-step="passwords">
+      <ul id="adopt-passwords" class="cards"></ul>
+    </section>
+
+    <!-- Step: review -->
+    <section class="wiz-panel" data-step="review">
+      <dl id="adopt-review" class="review"></dl>
+      <p class="muted">Nothing has been saved yet. If a destination can't be reached, none of this is written.</p>
+    </section>
+
+    <section>
+      <p id="adopt-error" class="notice warn" hidden></p>
+    </section>
+
+    <section class="wiz-nav">
+      <button type="button" id="adopt-back">Back</button>
+      <button type="button" id="adopt-next">Continue</button>
+      <button type="button" id="adopt-finish" hidden>Restore this machine</button>
+    </section>
+  </main>
+
+  <!-- Normal dashboard -->
+  <main id="dashboard" hidden>
+    <section id="pending-section" hidden>
+      <div id="pending" class="notice"></div>
+    </section>
+
+    <!-- The verdict. This page has one job — answering "are my backups fine?"
+         — and it should answer it before anything else on the screen, in a
+         line you can read from across a room. Everything below is the detail
+         behind this sentence. -->
+    <section class="verdict" id="verdict">
+      <span class="verdict-dot" id="verdict-dot"></span>
+      <div class="verdict-text">
+        <p class="verdict-line" id="verdict-line">Checking…</p>
+        <p id="status-line" class="muted">Connecting to daemon…</p>
+      </div>
+      <button type="button" id="open-wizard">Set up a backup</button>
+    </section>
+
+    <section>
+      <div class="table-wrap">
+        <table id="rows" hidden>
+          <thead>
+            <tr><th>Folder</th><th>Destination</th><th>State</th><th>Progress</th><th>Last seen/sync</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="folders-section" hidden>
+      <h2>Folders being protected</h2>
+      <ul id="folder-list" class="cards"></ul>
+    </section>
+
+    <section id="targets-section" hidden>
+      <h2>Where backups go</h2>
+      <ul id="target-list" class="cards"></ul>
+    </section>
+
+    <section id="archives-section" hidden>
+      <h2>Scheduled snapshots</h2>
+      <p class="muted">Password-protected zip snapshots, frozen at a moment in time.</p>
+      <div class="table-wrap">
+        <table id="archive-rows">
+          <thead>
+            <tr><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="receive-section" hidden>
+      <p id="receive-line" class="muted"></p>
+      <!-- Only backups that have been changed ON THIS COMPUTER appear here:
+           with nothing to undo there is nothing to show. -->
+      <ul id="received-list" class="cards"></ul>
+    </section>
+
+    <!-- The lifetime odometer: one muted line, the same weight as the identity
+         line below it. It is a fact about work done, not a health signal, so it
+         gets no panel, no bar and no colour. Hidden entirely on the read-only
+         network view, which is not told this figure. -->
+    <section id="totals" hidden>
+      <p id="totals-line" class="muted"></p>
+    </section>
+
+    <!-- Settings. Hidden on the read-only network view, which may not change
+         anything and is not told what is switched off here. -->
+    <section id="settings-section" hidden>
+      <h2>Settings</h2>
+
+      <div class="picker">
+        <h3 class="small">Notifications - Delivery</h3>
+        <div class="delivery">
+          <label class="row-check">
+            <input type="checkbox" id="set-desktop-alerts">
+            <span><strong>Desktop notifications</strong>
+              <span class="muted small">A popup on this computer when backups stop, and again when they recover.</span>
+            </span>
+          </label>
+          <!-- The test matters more here than anywhere else on this page: a
+               working setup is silent by design, so without it "are alerts
+               reaching me?" is only ever answered by a real failure. -->
+          <button type="button" class="test-delivery" data-method="desktop">Test</button>
+        </div>
+        <p class="delivery-state small" data-for="desktop" hidden></p>
+        <!-- A second, independent method. Checkboxes rather than a choice:
+             both can be on, and somebody with a phone relay usually wants the
+             desktop popup as well. -->
+        <div class="delivery">
+          <label class="row-check">
+            <input type="checkbox" id="set-webhook-enabled">
+            <span><strong>Webhook</strong>
+              <span class="muted small">POST the same alerts to an address you choose — a phone relay, a
+                hub, a chat room. Off by default; backups never need it.</span>
+            </span>
+          </label>
+          <button type="button" class="test-delivery" data-method="webhook">Test</button>
+        </div>
+        <p class="delivery-state small" data-for="webhook" hidden></p>
+        <div id="webhook-config" class="sub-checks" hidden>
+          <label class="muted small" for="set-webhook-url">Address to POST to</label>
+          <div class="row">
+            <input id="set-webhook-url" type="url" placeholder="https://…" autocomplete="off" spellcheck="false">
+            <button type="button" id="save-webhook-url">Save</button>
+          </div>
+          <p class="muted small" id="webhook-url-state"></p>
+          <label class="row-check">
+            <input type="checkbox" id="set-webhook-minimal">
+            <span>Don't include any detail
+              <span class="muted small">Sends only that attention is needed, and how urgent — no machine
+                name, no folder or destination names. The last hop to a phone always crosses somebody
+                else's server; this still makes it buzz without telling them what you back up.</span>
+            </span>
+          </label>
+        </div>
+
+        <!-- ntfy. Its own method rather than a preset for the webhook above:
+             going through ntfy's own format is what gets the phone a title, a
+             priority it acts on, and an icon, instead of a page of JSON. -->
+        <div class="delivery">
+          <label class="row-check">
+            <input type="checkbox" id="set-ntfy-enabled">
+            <span><strong>ntfy</strong>
+              <span class="muted small">Push the same alerts to your phone through ntfy.sh or your own ntfy
+                server — install the ntfy app, subscribe to a topic, and put that topic below. Off by
+                default; backups never need it.</span>
+            </span>
+          </label>
+          <button type="button" class="test-delivery" data-method="ntfy">Test</button>
+        </div>
+        <p class="delivery-state small" data-for="ntfy" hidden></p>
+        <div id="ntfy-config" class="sub-checks" hidden>
+          <label class="muted small" for="set-ntfy-topic">Topic address</label>
+          <div class="row">
+            <input id="set-ntfy-topic" type="url" placeholder="https://ntfy.sh/your-topic" autocomplete="off"
+              spellcheck="false">
+            <button type="button" id="save-ntfy-topic">Save</button>
+          </div>
+          <p class="muted small" id="ntfy-topic-state"></p>
+          <!-- Saved on its own, not alongside the topic: the browser is never
+               told the token, so one shared Save would throw it away every time
+               the topic was edited. -->
+          <label class="muted small" for="set-ntfy-token">Access token (only for a protected topic)</label>
+          <div class="row">
+            <input id="set-ntfy-token" type="password" placeholder="tk_…" autocomplete="off" spellcheck="false">
+            <button type="button" id="save-ntfy-token">Save</button>
+          </div>
+          <p class="muted small" id="ntfy-token-state"></p>
+          <label class="row-check">
+            <input type="checkbox" id="set-ntfy-minimal">
+            <span>Don't include any detail
+              <span class="muted small">Sends only that attention is needed, and how urgent — no machine
+                name, no folder or destination names. Worth more here than anywhere: a topic name is not
+                a password, and anyone who guesses yours reads everything sent to it.</span>
+            </span>
+          </label>
+        </div>
+
+        <p id="delivery-test-msg" class="muted small" hidden></p>
+      </div>
+
+      <div class="picker">
+        <h3 class="small">Notifications - Triggers</h3>
+        <fieldset id="alert-kinds" class="sub-checks">
+          <legend class="muted small">Switching one off silences its all-clear too, so you are never
+            left with a warning that nothing withdraws.</legend>
+          <label class="row-check">
+            <input type="checkbox" id="set-alert-backups-stopped">
+            <span>Backups stopped reaching a destination
+              <span class="muted small">Stale, full, or unreachable — and the all-clear when it comes back.</span>
+            </span>
+          </label>
+          <label class="row-check">
+            <input type="checkbox" id="set-alert-snapshot-failed">
+            <span>A scheduled snapshot failed
+              <span class="muted small">And the all-clear when a later run succeeds.</span>
+            </span>
+          </label>
+          <label class="row-check">
+            <input type="checkbox" id="set-alert-unrecognised-storage">
+            <span>Unrecognised storage where a destination should be
+              <span class="muted small">A reformatted card, or a different disk at the same place. Nothing is
+                written there, so this alert is the only way you find out.</span>
+            </span>
+          </label>
+          <label class="row-check">
+            <input type="checkbox" id="set-alert-pair-requests">
+            <span>A computer asks to back up to this one
+              <span class="muted small">Not a fault — a request waiting for you to approve it.</span>
+            </span>
+          </label>
+        </fieldset>
+      </div>
+
+      <div class="picker">
+        <label class="row-check">
+          <input type="checkbox" id="set-lan-view">
+          <span><strong>Let other devices on this network see backup status</strong>
+            <span class="muted small">A second, read-only page for a phone or another computer. It can never
+              change anything, and shows no paths, addresses or capacities.</span>
+          </span>
+        </label>
+        <p id="lan-view-url" class="muted small" hidden></p>
+
+        <!-- Revealed only once the view is on: a choice about who may read
+             something that is not being served is noise. -->
+        <fieldset id="lan-access" class="sub-checks" hidden>
+          <legend class="muted small">Who can open it</legend>
+          <label class="row-check">
+            <input type="radio" name="lan-access" value="all" id="lan-access-all">
+            <span>All devices on this network
+              <span class="muted small">Anyone who can reach the address. No password.</span>
+            </span>
+          </label>
+          <label class="row-check">
+            <input type="radio" name="lan-access" value="approved" id="lan-access-approved">
+            <span>Specific devices on this network
+              <span class="muted small">Each new device shows a short code and waits here until you
+                approve it. Approval is remembered per browser, so clearing cookies or using a
+                different browser asks again.</span>
+            </span>
+          </label>
+        </fieldset>
+
+        <div id="lan-devices" hidden>
+          <p class="muted small" id="lan-devices-title">Devices</p>
+          <ul id="lan-device-list" class="cards"></ul>
+        </div>
+
+        <p class="notice warn small" id="lan-open-warning"><strong>Anyone on your wifi can open it — there is no password.</strong> They see your folder labels and whether backups are working. Leave this off on a network you do not control.</p>
+      </div>
+
+      <p id="settings-msg" class="muted small" hidden></p>
+    </section>
+
+    <section id="identity">
+      <p class="muted">Device ID: <code id="device-id"></code></p>
+      <!-- Revealed by app.js only once this machine HAS an identity: until the
+           sync engine runs there is nothing to draw, and the image is not even
+           requested. -->
+      <figure id="device-qr" hidden>
+        <img id="device-qr-img" alt="This machine's device ID as a QR code">
+        <figcaption class="muted small">or scan it with a phone instead of typing it</figcaption>
+      </figure>
+    </section>
+  </main>
+
+  <footer class="muted">
+    <div class="footer-row">
+      <span>
+        backup-maker is free and open source.
+        <a href="https://ko-fi.com/phil9922" target="_blank" rel="noopener noreferrer">Buy me a coffee</a>
+        if it saved you a hard drive.
+      </span>
+      <!-- Its own element on the opposite end of the row, NOT trailing the
+           sentence above. As the last few words of a muted paragraph it read as
+           prose and was missed entirely — reported three times as "there is no
+           version in the footer" while it was on screen the whole time. -->
+      <span id="version" class="version" hidden></span>
+    </div>
+    <!-- Filled in by app.js on a phone-sized read-only view. No browser lets a
+         page add itself to the home screen, so this tells you how rather than
+         pretending to be a button that does it. -->
+    <span id="homescreen-hint" hidden></span>
+  </footer>
+
+  <!-- First: everything below calls mutate() for anything that changes. -->
+  <script src="api.js"></script>
+  <script src="wizard.js"></script>
+  <script src="adopt.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
