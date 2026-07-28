@@ -339,6 +339,28 @@
       <ul id="target-list" class="cards"></ul>
     </section>
 
+    <!-- Folders that were stopped, and whose backups are still out there.
+         WHY THIS PANEL EXISTS: "Stop protecting" deletes nothing, so the copy
+         on every destination outlives the folder that made it — and the
+         destination's own manifest is rebuilt from the live folders, so it
+         stops listing them too. The copies were left named by nothing at all,
+         and simply vanished from this page. Here they can be turned back on,
+         or deleted on purpose.
+
+         NOT CALLED "Syncing disabled": `backup-maker status` already prints
+         "Machine-sync engine: off" and the table above uses syncing/in sync
+         for live mirror state, so that heading would read as the sync engine
+         being off. This one pairs with "Folders being protected" and with the
+         button that puts things here, and it reads as reversible — which it
+         is. -->
+    <section id="retired-section" hidden>
+      <h2>No longer protected</h2>
+      <p class="muted">These folders are not being backed up any more, but the copies
+        already made are still on your destinations. Turn one back on to carry on where
+        it left off, or delete its backups for good.</p>
+      <ul id="retired-list" class="cards"></ul>
+    </section>
+
     <section id="archives-section" hidden>
       <h2>Scheduled snapshots</h2>
       <p class="muted">Password-protected zip snapshots, frozen at a moment in time.</p>

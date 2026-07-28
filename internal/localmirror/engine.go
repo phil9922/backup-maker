@@ -8,9 +8,9 @@ package localmirror
 
 import (
 	"context"
+	"github.com/phil9922/backup-maker/internal/config"
 	"log/slog"
 	"os"
-	"path"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -146,7 +146,7 @@ func New(o Options) *Engine {
 		TargetType: o.TargetType,
 		sourcePath: o.SourcePath,
 		backend:    o.Backend,
-		destRoot:   path.Join(sanitize(o.MachineName), sanitize(o.Label)),
+		destRoot:   config.DestRoot(o.MachineName, o.Label),
 		uuid:       o.UUID,
 		maxAge:     time.Duration(o.MaxAgeDays) * 24 * time.Hour,
 		verify:     o.Verify,
@@ -457,19 +457,6 @@ func (e *Engine) shouldCopy(srcInfo os.FileInfo, destPath string) bool {
 }
 
 // sanitize keeps names usable on FAT/NTFS/SMB targets.
-func sanitize(name string) string {
-	out := []rune(name)
-	for i, r := range out {
-		switch r {
-		case '<', '>', ':', '"', '/', '\\', '|', '?', '*':
-			out[i] = '_'
-		}
-	}
-	if len(out) == 0 {
-		return "unnamed"
-	}
-	return string(out)
-}
 
 // ensureHeadroom deletes the oldest backup history until the destination has
 // minFree bytes spare, plus extra for a file about to be written.

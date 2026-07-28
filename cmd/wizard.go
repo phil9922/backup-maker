@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/phil9922/backup-maker/internal/config"
+	"github.com/phil9922/backup-maker/internal/setup"
 )
 
 var wizardCmd = &cobra.Command{
@@ -122,6 +124,11 @@ func runWizard(cfg *config.Config) error {
 				continue
 			}
 			removed := cfg.Folders[idx]
+			// Recorded BEFORE the links are torn out — resolving which
+			// destinations hold a copy needs them. Without this the CLI would
+			// leave exactly the orphan the dashboard's Stop protecting no
+			// longer does: copies on disk that nothing anywhere names.
+			rec := setup.RetireRecord(cfg, removed, time.Now())
 			cfg.Folders = append(cfg.Folders[:idx], cfg.Folders[idx+1:]...)
 			// Drop dangling references.
 			for ti := range cfg.Targets {
@@ -130,7 +137,8 @@ func runWizard(cfg *config.Config) error {
 			for ai := range cfg.Archives {
 				cfg.Archives[ai].Folders = removeString(cfg.Archives[ai].Folders, removed.ID)
 			}
-			fmt.Println("  removed:", removed.Path, "(existing backups on targets stay put)")
+			cfg.Retired = append(cfg.Retired, rec)
+			fmt.Println("  removed:", removed.Path, "(moved to \"no longer protected\"; the copies on your destinations stay put)")
 		default:
 			fmt.Println("  a, x, r, or Enter to continue")
 		}

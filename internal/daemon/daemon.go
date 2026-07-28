@@ -120,6 +120,12 @@ type daemon struct {
 	// versionOverride replaces this build's release version. Tests only; empty
 	// means the real one from internal/version.
 	versionOverride string
+
+	// retireMu serialises the actions on stopped folders. Each is a
+	// read-modify-write cycle over config.toml, and one of them deletes
+	// backups: two interleaved would lose a record or delete against a stale
+	// one.
+	retireMu sync.Mutex
 }
 
 // shareCredentials copies the stored share passwords out from under the lock,
@@ -306,28 +312,35 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 			// setup writes config.toml; the config watcher applies it.
 			return setup.AddShareTarget(req.URL, req.Username, req.Password, req.Name, req.Verify)
 		},
-		Wake:               d.WakeNow,
-		AcceptPair:         d.acceptPair,
-		DeviceID:           d.deviceID,
-		RevertFolder:       d.revertFolder,
-		Machines:           d.listMachines,
-		Storage:            d.machineStorage,
-		CreateBackup:       d.createBackup,
-		RemoveFolder:       setup.RemoveFolder,
-		RemoveTarget:       setup.RemoveTarget,
-		SetFolderIgnores:   setup.SetFolderIgnores,
-		AddArchive:         d.addArchive,
-		CompleteSetup:      d.completeSetup,
-		AdoptAllowed:       setup.AdoptAllowed,
-		AdoptScan:          d.adoptScan,
-		AdoptInspect:       d.adoptInspect,
-		AdoptTestShare:     d.adoptTestShare,
-		Adopt:              d.adopt,
-		SetArchivePassword: d.setArchivePassword,
-		SetSettings:        d.setSettings,
-		TestAlert:          d.testAlert,
-		ApproveLANDevice:   d.approveLANDevice,
-		ForgetLANDevice:    d.forgetLANDevice,
+		Wake:         d.WakeNow,
+		AcceptPair:   d.acceptPair,
+		DeviceID:     d.deviceID,
+		RevertFolder: d.revertFolder,
+		Machines:     d.listMachines,
+		Storage:      d.machineStorage,
+		CreateBackup: d.createBackup,
+		RemoveFolder: setup.RemoveFolder,
+		// The three actions on a stopped folder. Methods rather than bare
+		// setup functions because each one has to say what it did in a
+		// sentence, and the delete needs the daemon's own way of opening a
+		// destination.
+		ReenableFolder:       d.reenableFolder,
+		DeleteRetiredBackups: d.deleteRetiredBackups,
+		ForgetRetired:        d.forgetRetired,
+		RemoveTarget:         setup.RemoveTarget,
+		SetFolderIgnores:     setup.SetFolderIgnores,
+		AddArchive:           d.addArchive,
+		CompleteSetup:        d.completeSetup,
+		AdoptAllowed:         setup.AdoptAllowed,
+		AdoptScan:            d.adoptScan,
+		AdoptInspect:         d.adoptInspect,
+		AdoptTestShare:       d.adoptTestShare,
+		Adopt:                d.adopt,
+		SetArchivePassword:   d.setArchivePassword,
+		SetSettings:          d.setSettings,
+		TestAlert:            d.testAlert,
+		ApproveLANDevice:     d.approveLANDevice,
+		ForgetLANDevice:      d.forgetLANDevice,
 		LANGate: &webui.LANGate{
 			ApprovedOnly: d.lanViewApprovedOnly,
 			Seen:         d.lanDeviceSeen,
@@ -425,6 +438,33 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 		}
 		d.state = fresh
 		d.mu.Unlock()
+	}
+
+	// A machine that is demonstrably set up is RECORDED as set up, once.
+	//
+	// THE BUG THIS FIXES. state.SetupComplete was only ever written by the
+	// browser wizard and by adopt, so an install built with the CLI never had
+	// it — and status derived "is this set up" from the live config instead,
+	// which is not a fact that only moves one way. Removing the last folder
+	// therefore reported a fresh install, and the dashboard threw the
+	// first-run wizard over the whole page in front of somebody who had just
+	// clicked "Stop protecting" on a machine they had been using for days. It
+	// took the Settings panel down with it, for the same reason.
+	//
+	// Here rather than at startup because a machine can become configured
+	// while running — the wizard, adopt, or a CLI add-target landing in the
+	// config the watcher is reading.
+	//
+	// The in-memory flag is checked FIRST so the steady state costs nothing.
+	// completeSetup re-reads state.json to avoid clobbering a setup command's
+	// concurrent write, and applyConfig runs on every watcher tick — without
+	// this guard a configured machine would re-read and re-parse that file
+	// every two seconds for ever to learn something it already knows. d.state
+	// was refreshed from disk immediately above, so the flag is current.
+	if cfg.Configured() && !d.setupDone() {
+		if err := d.completeSetup(); err != nil {
+			d.log.Warn("could not record that setup is finished; the dashboard may offer the first-run wizard again", "err", err)
+		}
 	}
 
 	// The slow part, deliberately outside the lock: open each destination and

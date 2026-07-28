@@ -25,6 +25,10 @@ type Config struct {
 	Targets  []Target  `toml:"target"`
 	Archives []Archive `toml:"archive"`
 	Receive  Receive   `toml:"receive"`
+	// Retired are folders that have been stopped but whose backups are still
+	// sitting on the destinations. See the Retired type for why they are
+	// recorded at all.
+	Retired []Retired `toml:"retired"`
 }
 
 type General struct {
@@ -187,6 +191,83 @@ type Folder struct {
 	Label            string   `toml:"label"`
 	ExtraIgnore      []string `toml:"extra_ignore,omitempty"`
 	NoDefaultIgnores bool     `toml:"no_default_ignores,omitempty"`
+}
+
+// Retired is a folder that has been stopped but whose backups are still out
+// there on the destinations.
+//
+// WHY THIS EXISTS AT ALL. "Stop protecting" deletes nothing — that is a
+// deliberate promise, not an oversight. But it also removed the folder from
+// this file, and the destination's own manifest is rebuilt from the live
+// folders, so it started reporting "folders": [] as well. The copy on the drive
+// was then named by nothing: not the config, not the manifest, not the adopt
+// flow. Gigabytes of somebody's files, reachable only by browsing the disk and
+// recognising a directory name. This record is the thing that still knows.
+//
+// HERE RATHER THAN IN state.json, for three reasons. The daemon watches
+// config.toml and reloads from it, so the whole feature rides that for free.
+// The contents are user data of the same kind as [[folder]] — a path, a label,
+// destination names — with no secret in them, where state.json is 0600
+// machine-owned bookkeeping holding tokens and passwords. And this record is
+// the only trace of an orphaned backup, so it has to be something a person can
+// open, read, and delete by hand.
+type Retired struct {
+	// ID is the folder's ORIGINAL id, kept verbatim. A paired machine holds the
+	// folder under this id, so turning the folder back on with a fresh one
+	// would stand up a second copy over there and retransfer everything.
+	ID               string    `toml:"id"`
+	Path             string    `toml:"path"`
+	Label            string    `toml:"label"`
+	ExtraIgnore      []string  `toml:"extra_ignore,omitempty"`
+	NoDefaultIgnores bool      `toml:"no_default_ignores,omitempty"`
+	StoppedAt        time.Time `toml:"stopped_at,omitzero"`
+	// MachineName as it was when the folder was stopped. The destination
+	// subtree is <machine>/<label>, and a machine can be renamed by a hand edit
+	// or by adopting — the name recorded here is the one the files are actually
+	// filed under, which is the only one a later delete may act on.
+	MachineName string `toml:"machine_name,omitempty"`
+	// Copies is where a copy actually landed, RESOLVED at stop time rather than
+	// copied from the literal Target.Folders lists. An empty Folders list means
+	// EVERY folder, so a literal reading would record no copies at all for
+	// exactly the destinations most likely to be holding one.
+	Copies []RetiredCopy `toml:"copy,omitempty"`
+	// Archives names the snapshot jobs this folder belonged to. Recorded for
+	// honesty, never for deletion: a snapshot is one encrypted zip per run that
+	// may hold other folders too, and there is no way to remove one folder from
+	// inside it. Nothing in this feature ever touches them.
+	Archives []RetiredArchive `toml:"archive,omitempty"`
+}
+
+// RetiredCopy is one destination's copy of a stopped folder.
+type RetiredCopy struct {
+	Target string `toml:"target"`
+	Type   string `toml:"type"` // drive | share | device
+	// Location as it was, purely so a confirmation dialog can name the place a
+	// person recognises rather than a config key.
+	Location string `toml:"location,omitempty"`
+	// Explicit records whether the destination NAMED this folder, as opposed to
+	// covering it with an empty "every folder" list. Turning the folder back on
+	// must not convert an every-folder destination into an explicitly scoped
+	// one — that would silently stop every folder added since from reaching it.
+	Explicit bool `toml:"explicit,omitempty"`
+	// DestPath and VersionsPath are the exact slash paths, relative to the
+	// destination root, that this folder's live copy and version history
+	// occupy. Recorded rather than recomputed later, because the label and the
+	// machine name can both change in between — and because a recursive delete
+	// should aim at a path written down when it was known to be right.
+	DestPath     string `toml:"dest_path,omitempty"`
+	VersionsPath string `toml:"versions_path,omitempty"`
+	// Removed and Error carry the outcome of a delete attempt, so a destination
+	// that was unplugged when the button was pressed is REPORTED rather than
+	// quietly counted as done and forgotten.
+	Removed bool   `toml:"removed,omitempty"`
+	Error   string `toml:"error,omitempty"`
+}
+
+// RetiredArchive is one snapshot job a stopped folder belonged to.
+type RetiredArchive struct {
+	Name     string `toml:"name"`
+	Explicit bool   `toml:"explicit,omitempty"`
 }
 
 type Target struct {
@@ -544,6 +625,23 @@ func (c *Config) FoldersForTarget(t Target) []Folder {
 		}
 	}
 	return out
+}
+
+// Configured reports that this machine has evidently been set up: it protects
+// something of its own, or it exists to receive backups for somebody else.
+//
+// ONE DEFINITION RATHER THAN THE EXPRESSION WRITTEN OUT AT EACH CALL SITE. Two
+// readings of "is this machine set up" that disagree is exactly how the
+// dashboard came to throw a first-run wizard over a working install: status
+// derived the answer from the live config, the daemon only ever wrote the flag
+// from the browser wizard, and removing the last folder made the two disagree.
+//
+// NOTE WHAT THIS IS NOT: it is a statement about the config in front of it, and
+// therefore not monotonic — emptying a config makes it false again. Anything
+// that needs "has this machine EVER been set up" must consult the persisted
+// State.SetupComplete, which is what this predicate is used to set.
+func (c *Config) Configured() bool {
+	return (len(c.Folders) > 0 && len(c.Targets) > 0) || c.Receive.Enabled
 }
 
 // NewFolderID generates a short random, stable folder identifier such as

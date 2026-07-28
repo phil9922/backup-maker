@@ -653,3 +653,110 @@ func TestCollectFlagsArchiveNeedingPassword(t *testing.T) {
 		t.Errorf("daily (no password) = %+v", byName["daily"])
 	}
 }
+
+// setupCollector is the minimum wiring Collect needs: the funcs it dereferences
+// unconditionally, and nothing else.
+func setupCollector(cfg *config.Config, done func() bool) *Collector {
+	return &Collector{
+		Cfg:       func() *config.Config { return cfg },
+		Client:    func() *syncthing.Client { return nil },
+		Engines:   func() []*localmirror.Engine { return nil },
+		SetupDone: done,
+	}
+}
+
+// THE REGRESSION, at the model level. SetupComplete used to be derived from the
+// live config alone on a CLI-created machine, and "has a folder AND a target"
+// is not a fact that only moves one way: removing the last folder reported a
+// fresh install, and app.js throws the first-run wizard over the whole page
+// when it sees that. The persisted flag is what has to carry the answer.
+func TestSetupCompleteSurvivesTheLastFolderBeingRemoved(t *testing.T) {
+	cfg := &config.Config{
+		General: config.General{MachineName: "my-laptop"},
+		Targets: []config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/card"}},
+	}
+
+	m := setupCollector(cfg, func() bool { return true }).Collect()
+
+	if !m.SetupComplete {
+		t.Error("a machine that has been set up reported a fresh install after its last folder was removed")
+	}
+}
+
+// The other half: with nothing configured and nothing ever recorded, the wizard
+// is still owed.
+func TestAFreshInstallIsStillOwedTheWizard(t *testing.T) {
+	cfg := &config.Config{General: config.General{MachineName: "brand-new"}}
+
+	m := setupCollector(cfg, func() bool { return false }).Collect()
+
+	if m.SetupComplete {
+		t.Error("an empty install claimed to be set up; the first-run wizard would never appear")
+	}
+}
+
+// A destination whose folder list is empty covers EVERY folder — so when there
+// are none, it covers nothing. The panel used to read the length of the config
+// list and announce "every folder" on a machine that had just stopped
+// protecting its only folder, which is the opposite of true.
+func TestADestinationWithNoFoldersDoesNotClaimEveryFolder(t *testing.T) {
+	cfg := &config.Config{
+		General: config.General{MachineName: "my-laptop"},
+		Targets: []config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/card"}},
+	}
+
+	m := setupCollector(cfg, func() bool { return true }).Collect()
+
+	if len(m.Targets) != 1 {
+		t.Fatalf("expected one destination, got %d", len(m.Targets))
+	}
+	if m.Targets[0].AllFolders {
+		t.Error(`a destination with nothing to back up reported "every folder"`)
+	}
+	if m.Targets[0].FolderCount != 0 {
+		t.Errorf("FolderCount = %d, want 0 — nothing is being sent there", m.Targets[0].FolderCount)
+	}
+}
+
+// And the convention still holds when there IS something to cover: an empty
+// list means every folder, and the count is the resolved one rather than the
+// length of a list that is deliberately blank.
+func TestAnEmptyFolderListStillMeansEveryFolder(t *testing.T) {
+	cfg := &config.Config{
+		General: config.General{MachineName: "my-laptop"},
+		Folders: []config.Folder{
+			{ID: "f1", Path: "/home/pk/one", Label: "one"},
+			{ID: "f2", Path: "/home/pk/two", Label: "two"},
+		},
+		Targets: []config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/card"}},
+	}
+
+	m := setupCollector(cfg, func() bool { return true }).Collect()
+
+	if !m.Targets[0].AllFolders {
+		t.Error("a destination with a blank folder list stopped meaning every folder")
+	}
+	if m.Targets[0].FolderCount != 2 {
+		t.Errorf("FolderCount = %d, want 2 (the resolved count, not the blank list's length)", m.Targets[0].FolderCount)
+	}
+}
+
+// A snapshot-only destination holds no live mirror at all, so it must not claim
+// to cover every folder either — FoldersForTarget already returns nothing for
+// it, and the flag has to agree.
+func TestASnapshotOnlyDestinationDoesNotClaimEveryFolder(t *testing.T) {
+	cfg := &config.Config{
+		General: config.General{MachineName: "my-laptop"},
+		Folders: []config.Folder{{ID: "f1", Path: "/home/pk/one", Label: "one"}},
+		Targets: []config.Target{{Type: "drive", Name: "coldstore", Path: "/media/cold", ArchivesOnly: true}},
+	}
+
+	m := setupCollector(cfg, func() bool { return true }).Collect()
+
+	if m.Targets[0].AllFolders {
+		t.Error(`a snapshot-only destination reported "every folder"; it mirrors none of them`)
+	}
+	if m.Targets[0].FolderCount != 0 {
+		t.Errorf("FolderCount = %d, want 0 for a snapshot-only destination", m.Targets[0].FolderCount)
+	}
+}

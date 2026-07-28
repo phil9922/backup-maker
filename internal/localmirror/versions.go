@@ -4,6 +4,7 @@ package localmirror
 
 import (
 	"errors"
+	"github.com/phil9922/backup-maker/internal/config"
 	"io/fs"
 	"path"
 	"regexp"
@@ -15,7 +16,11 @@ import (
 // VersionsDirName holds displaced file versions inside the target root,
 // mirroring syncthing's .stversions concept and naming scheme
 // (name~20060102-150405.ext).
-const VersionsDirName = ".backup-maker-versions"
+//
+// Defined in config and re-exported here: the destination's layout is shared
+// with the code that deletes a stopped folder's backups, and one constant with
+// two definitions is how a delete misses half of what it was asked to remove.
+const VersionsDirName = config.VersionsDirName
 
 const stampLayout = "20060102-150405"
 

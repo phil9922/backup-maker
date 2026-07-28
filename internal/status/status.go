@@ -5,7 +5,6 @@
 package status
 
 import (
-	"strings"
 	"time"
 
 	"github.com/phil9922/backup-maker/internal/archive"
@@ -37,9 +36,14 @@ type Model struct {
 	EngineOK     bool `json:"engine_ok"`
 	// SetupComplete is false on a fresh install, which is what makes the
 	// dashboard open the setup wizard instead of an empty table.
-	SetupComplete   bool                    `json:"setup_complete"`
-	Folders         []FolderInfo            `json:"folders"`
-	Targets         []TargetInfo            `json:"targets"`
+	SetupComplete bool         `json:"setup_complete"`
+	Folders       []FolderInfo `json:"folders"`
+	Targets       []TargetInfo `json:"targets"`
+	// Retired are folders that were stopped and whose backups are still on the
+	// destinations. Stripped from the network view: the paths of things
+	// somebody stopped backing up, and where those copies live, is exactly the
+	// reconnaissance that view withholds.
+	Retired         []RetiredInfo           `json:"retired,omitempty"`
 	Rows            []Row                   `json:"rows"`
 	Archives        []ArchiveRow            `json:"archives,omitempty"`
 	Receive         ReceiveInfo             `json:"receive"`
@@ -620,17 +624,60 @@ func (col *Collector) Collect() Model {
 			NoDefaultIgnores: f.NoDefaultIgnores,
 		})
 	}
+	// Stopped folders. Built straight from the config: every question this
+	// answers — can it go back, can its copies be deleted — is a pure reading
+	// of what is configured right now, and both predicates live in config so
+	// that the button and the daemon's refusal are the same function.
+	configuredTargets := map[string]bool{}
+	for _, t := range cfg.Targets {
+		configuredTargets[t.Name] = true
+	}
+	for _, r := range cfg.Retired {
+		info := RetiredInfo{
+			ID:              r.ID,
+			Label:           r.Label,
+			Path:            r.Path,
+			StoppedAt:       r.StoppedAt,
+			ReenableBlocked: cfg.ReenableBlockedReason(r),
+			DeleteBlocked:   cfg.DeleteBlockedReason(r),
+		}
+		for _, cp := range r.Copies {
+			info.Copies = append(info.Copies, RetiredCopyInfo{
+				Target:          cp.Target,
+				Type:            cp.Type,
+				Location:        cp.Location,
+				DestPath:        cp.DestPath,
+				Deletable:       cp.Deletable(),
+				StillConfigured: configuredTargets[cp.Target],
+				Removed:         cp.Removed,
+				Error:           cp.Error,
+			})
+		}
+		for _, a := range r.Archives {
+			info.Archives = append(info.Archives, a.Name)
+		}
+		m.Retired = append(m.Retired, info)
+	}
+
 	var space map[string]SpaceSample
 	if col.Space != nil {
 		space = col.Space()
 	}
 	for _, t := range cfg.Targets {
 		info := TargetInfo{
-			Name:         t.Name,
-			Type:         t.Type,
-			Location:     TargetLocation(t),
-			FolderCount:  len(t.Folders),
-			AllFolders:   len(t.Folders) == 0,
+			Name:     t.Name,
+			Type:     t.Type,
+			Location: TargetLocation(t),
+			// WHAT THIS DESTINATION ACTUALLY HOLDS, not what shape its config
+			// entry happens to be in. An empty Folders list means "every
+			// folder", so reading its length reported a destination with
+			// nothing to do as covering "every folder" — which is how a card
+			// claimed it was backing everything up on a machine that had just
+			// stopped protecting its only folder. FoldersForTarget is the same
+			// choke point the mirror engines resolve through, so the panel and
+			// the engines cannot disagree about who backs up where.
+			FolderCount:  len(cfg.FoldersForTarget(t)),
+			AllFolders:   len(t.Folders) == 0 && len(cfg.Folders) > 0 && !t.ArchivesOnly,
 			WakeEnabled:  t.WakeEnabled(),
 			MinFreeBytes: cfg.MinFreeBytes(t),
 		}
@@ -670,9 +717,15 @@ func (col *Collector) Collect() Model {
 	// first-run wizard for ever — and the wizard covers the whole page, which
 	// puts the "approve this machine" panel permanently out of reach on the one
 	// computer that needs it.
-	configured := len(cfg.Folders) > 0 && len(cfg.Targets) > 0
+	//
+	// THE FLAG IS WHAT MAKES THIS STICK, and it is why the daemon now persists
+	// it the moment a configured install is observed. Config.Configured() is a
+	// statement about the config in front of it and can go from true back to
+	// false: somebody who clicked "Stop protecting" on their last folder used to
+	// be told they had a fresh install and handed the first-run wizard, mid-session,
+	// over a dashboard they were using. See daemon.applyConfig.
 	flagged := col.SetupDone != nil && col.SetupDone()
-	m.SetupComplete = configured || flagged || cfg.Receive.Enabled
+	m.SetupComplete = cfg.Configured() || flagged
 
 	// Scheduled archive jobs.
 	if col.Archives != nil && len(cfg.Archives) > 0 {
@@ -753,22 +806,53 @@ func firstError(errs map[string]string, n int) string {
 	return ""
 }
 
-// TargetLocation renders where a target actually is, in the words a user would
-// recognise: a mount path, a network address, or a shortened device ID.
-func TargetLocation(t config.Target) string {
-	switch t.Type {
-	case "drive":
-		return t.Path
-	case "share":
-		return t.URL
-	case "device":
-		if i := strings.IndexByte(t.DeviceID, '-'); i > 0 {
-			return t.DeviceID[:i] + "…"
-		}
-		return t.DeviceID
-	}
-	return ""
+// RetiredInfo is one folder that has been stopped but whose backups are still
+// on the destinations.
+//
+// WHETHER EACH ACTION IS POSSIBLE IS DECIDED HERE, by the daemon, and shipped
+// as a reason string. The page renders the daemon's own words rather than
+// re-deriving a rule it could get wrong — and the rules in question are "would
+// turning this back on collide with a live folder" and "would deleting this
+// remove a backup something is still maintaining", neither of which is a thing
+// to have two opinions about.
+type RetiredInfo struct {
+	ID        string            `json:"id"`
+	Label     string            `json:"label"`
+	Path      string            `json:"path"`
+	StoppedAt time.Time         `json:"stopped_at,omitzero"`
+	Copies    []RetiredCopyInfo `json:"copies,omitempty"`
+	// Archives names snapshot jobs this folder belonged to. Shown so the
+	// confirmation can say they are not touched.
+	Archives []string `json:"archives,omitempty"`
+	// ReenableBlocked and DeleteBlocked are empty when the action is available,
+	// and otherwise carry the reason to show in place of the button.
+	ReenableBlocked string `json:"reenable_blocked,omitempty"`
+	DeleteBlocked   string `json:"delete_blocked,omitempty"`
 }
+
+// RetiredCopyInfo is one destination's copy of a stopped folder.
+type RetiredCopyInfo struct {
+	Target   string `json:"target"`
+	Type     string `json:"type"`
+	Location string `json:"location,omitempty"`
+	DestPath string `json:"dest_path,omitempty"`
+	// Deletable is false for a paired computer: that copy is on another
+	// machine's disk and cannot be reached from here at all.
+	Deletable bool `json:"deletable"`
+	// StillConfigured is false when the destination has since been removed from
+	// this machine. The files may well still be there; nothing here knows how
+	// to reach them.
+	StillConfigured bool   `json:"still_configured"`
+	Removed         bool   `json:"removed,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+// TargetLocation is where a destination is, in words a person recognises.
+//
+// A thin forwarder: the function is a pure reading of a Target and is now
+// needed by setup as well, when it records where a stopped folder's copies
+// were. config is the package both already depend on.
+func TargetLocation(t config.Target) string { return config.TargetLocation(t) }
 
 // rollUp reduces a target's per-folder rows to one headline state. The worst
 // state wins: a target with one broken folder is not "in sync", and saying so

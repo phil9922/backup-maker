@@ -194,6 +194,13 @@ func RedactForNetwork(v any) any {
 	// be noticed. The LAN view's own address is in there too, which a reader of
 	// the LAN view manifestly does not need.
 	delete(m, "settings")
+	// Folders somebody stopped backing up, and the destinations still holding
+	// those copies. Every field of it is reconnaissance rather than health: the
+	// paths name what is on this machine, the copies name where the backups
+	// live, and "stopped six weeks ago" is not something a reader in another
+	// room can act on. It is also the one part of the model attached to a
+	// permanent-delete action, which this view may never reach.
+	delete(m, "retired")
 	// The lifetime volume figure is a measurement of the household, not a
 	// health fact: it says roughly how much data lives here and how fast it
 	// churns, and nobody watching from another room can act on it. Same reason

@@ -261,8 +261,65 @@ func (s *Server) handleRemoveFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
+		"ok": true,
+		"message": "stopped backing up this folder; it has moved to \"No longer protected\", " +
+			"and the copies already on your destinations were left exactly where they are",
+	})
+}
+
+// handleReenableFolder puts a stopped folder back into service.
+func (s *Server) handleReenableFolder(w http.ResponseWriter, r *http.Request) {
+	if s.actions.ReenableFolder == nil {
+		unavailable(w, "turning a stopped folder back on")
+		return
+	}
+	out, err := s.actions.ReenableFolder(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// handleDeleteRetiredBackups deletes a stopped folder's backed-up copies.
+//
+// The only route on this API that removes a user's backups. The confirmation
+// is re-checked by the daemon: a page can be reloaded, scripted, or simply
+// wrong, and the check that matters is the one nearest the deletion.
+func (s *Server) handleDeleteRetiredBackups(w http.ResponseWriter, r *http.Request) {
+	if s.actions.DeleteRetiredBackups == nil {
+		unavailable(w, "deleting backups")
+		return
+	}
+	var req RetiredDeleteRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Confirm) == "" {
+		http.Error(w, "nothing was deleted: type the folder's name to confirm", http.StatusUnprocessableEntity)
+		return
+	}
+	out, err := s.actions.DeleteRetiredBackups(r.PathValue("id"), req.Confirm)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// handleForgetRetired drops the record and touches no files.
+func (s *Server) handleForgetRetired(w http.ResponseWriter, r *http.Request) {
+	if s.actions.ForgetRetired == nil {
+		unavailable(w, "forgetting a stopped folder")
+		return
+	}
+	if err := s.actions.ForgetRetired(r.PathValue("id")); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]any{
 		"ok":      true,
-		"message": "stopped backing up this folder; files already on your targets were left alone",
+		"message": "forgotten; nothing on your destinations was touched",
 	})
 }
 

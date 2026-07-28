@@ -73,6 +73,20 @@ type Actions struct {
 	// the target is never deleted.
 	RemoveFolder func(id string) error
 	RemoveTarget func(name string) error
+	// ReenableFolder puts a stopped folder back into service. It never copies
+	// anything: the destination layout is keyed by label, so the mirror
+	// reconciles against the copy already there.
+	ReenableFolder func(id string) (any, error)
+	// DeleteRetiredBackups deletes the backed-up copies themselves.
+	//
+	// THE ONLY ACTION IN THIS PROGRAM THAT DELETES A BACKUP ON PURPOSE.
+	// confirm must be the folder's label, and it is checked in the daemon —
+	// not trusted from the page — because every other decision here is made
+	// server-side and the destructive one does not get to be the exception.
+	DeleteRetiredBackups func(id, confirm string) (any, error)
+	// ForgetRetired drops the record and touches no files, which is the same
+	// promise every other DELETE on this API makes.
+	ForgetRetired func(id string) error
 	// SetFolderIgnores replaces one folder's exclude patterns. Excluding
 	// something stops it being copied; it never deletes an existing backup.
 	SetFolderIgnores func(id string, extraIgnore []string, noDefaultIgnores bool) error
@@ -147,6 +161,15 @@ type SettingsRequest struct {
 	// UpdateCheck asks github.com once a day whether a newer release exists.
 	// Off by default; the only setting on this route that reaches the internet.
 	UpdateCheck *bool `json:"update_check,omitempty"`
+}
+
+// RetiredDeleteRequest confirms a permanent deletion of backed-up files.
+//
+// A TYPED NAME RATHER THAN A FLAG. "Are you sure" is answered yes by reflex;
+// typing the folder's own label is not something done by accident, and it is
+// re-checked in the daemon so the guarantee does not live in the browser.
+type RetiredDeleteRequest struct {
+	Confirm string `json:"confirm"`
 }
 
 // AdoptSourceRequest locates the destination to adopt from: a local path, or
@@ -321,6 +344,13 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("POST /api/backups", s.requireToken(s.handleCreateBackup))
 	mux.HandleFunc("DELETE /api/folders/{id}", s.requireToken(s.handleRemoveFolder))
 	mux.HandleFunc("POST /api/folders/{id}/ignores", s.requireToken(s.handleSetFolderIgnores))
+	// Stopped folders. NOTE THE ASYMMETRY, WHICH IS DELIBERATE: every DELETE on
+	// this API is config-only and removes no data, here included. The one route
+	// that removes files is a POST to a path that says so, carrying a typed
+	// confirmation in its body.
+	mux.HandleFunc("POST /api/retired/{id}/reenable", s.requireToken(s.handleReenableFolder))
+	mux.HandleFunc("POST /api/retired/{id}/delete", s.requireToken(s.handleDeleteRetiredBackups))
+	mux.HandleFunc("DELETE /api/retired/{id}", s.requireToken(s.handleForgetRetired))
 	mux.HandleFunc("DELETE /api/targets/{name}", s.requireToken(s.handleRemoveTarget))
 	mux.HandleFunc("POST /api/archives", s.requireToken(s.handleAddArchive))
 	mux.HandleFunc("POST /api/setup/complete", s.requireToken(s.handleCompleteSetup))

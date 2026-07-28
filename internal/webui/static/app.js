@@ -80,6 +80,10 @@ const timeCells = new Map();
 
 let lastModel = null;
 let polling = 3000;
+// Whether this page load has painted a status snapshot yet. Guards the one
+// thing that may only happen on arrival: throwing the first-run wizard over
+// the whole page. See where it is read in applyStatus.
+let paintedOnce = false;
 // True when served by the read-only network view. Controls that would 403 are
 // hidden rather than left to fail when tapped.
 let readOnly = false;
@@ -221,6 +225,154 @@ function renderFolders(st) {
   }
 }
 
+// Folders that were stopped, whose backups are still on the destinations.
+//
+// The card says where each copy actually is, because that is the whole reason
+// the panel exists: without it those copies are named by nothing — not this
+// config, not the destination's manifest, not the adopt flow.
+function renderRetired(st) {
+  const sec = document.getElementById('retired-section');
+  const list = document.getElementById('retired-list');
+  if (!sec || !list) return;
+  const retired = st.retired || [];
+  // Never on the read-only view — which is not even sent this — and never as
+  // an empty panel explaining a situation nobody is in.
+  if (readOnly || retired.length === 0) { sec.hidden = true; return; }
+  sec.hidden = false;
+  list.replaceChildren();
+
+  for (const r of retired) {
+    const li = el('li', 'card');
+    li.appendChild(icon('folder'));
+    li.appendChild(el('strong', null, r.label));
+
+    const meta = el('div', 'card-meta');
+    if (r.path) meta.appendChild(el('span', 'muted mono', r.path));
+    if (r.stopped_at) meta.appendChild(el('span', 'muted', 'stopped ' + humanTime(r.stopped_at)));
+    for (const c of r.copies || []) {
+      // A failed delete attempt is reported against the destination it failed
+      // on, so "some of it went" is visible rather than implied.
+      if (c.error) {
+        meta.appendChild(el('span', 'bad', c.target + ' — ' + c.error));
+      } else if (c.removed) {
+        meta.appendChild(el('span', 'muted', c.target + ' — deleted'));
+      } else if (!c.deletable) {
+        meta.appendChild(el('span', 'muted', c.target + ' — on another computer'));
+      } else if (!c.still_configured) {
+        meta.appendChild(el('span', 'muted', c.target + ' — no longer set up here'));
+      } else {
+        meta.appendChild(el('span', 'muted', 'copy on ' + c.target));
+      }
+    }
+    li.appendChild(meta);
+
+    const actions = el('div', 'card-actions');
+    // Each action renders as a button OR as the daemon's reason for refusing
+    // it — never a button that would be rejected on click. The reasons are
+    // computed by the daemon (status.RetiredInfo) so the page and the refusal
+    // cannot drift apart.
+    if (r.reenable_blocked) {
+      actions.appendChild(el('span', 'muted small', r.reenable_blocked));
+    } else {
+      const on = el('button', 'small-btn', 'Turn back on');
+      on.onclick = () => reenableFolder(r);
+      actions.appendChild(on);
+    }
+    const forget = el('button', 'small-btn', 'Forget this');
+    forget.onclick = () => forgetRetired(r);
+    actions.appendChild(forget);
+    if (r.delete_blocked) {
+      actions.appendChild(el('span', 'muted small', r.delete_blocked));
+    } else {
+      const del = el('button', 'danger', 'Delete backups…');
+      del.onclick = () => deleteRetiredBackups(r, del);
+      actions.appendChild(del);
+    }
+    li.appendChild(actions);
+    list.appendChild(li);
+  }
+}
+
+async function reenableFolder(r) {
+  const where = (r.copies || []).filter((c) => c.still_configured).map((c) => c.target);
+  if (!confirm(`Start backing up ${r.path} again?\n\n` +
+    (where.length ? `It reconnects to ${where.join(', ')} and picks up from the backup already there — nothing is copied again from scratch.`
+      : 'Nothing it used to back up to is still set up here, so you will need to choose a destination.'))) return;
+  const resp = await mutate('/api/retired/' + encodeURIComponent(r.id) + '/reenable', { method: 'POST' });
+  await reportAndRefresh(resp);
+}
+
+async function forgetRetired(r) {
+  const where = (r.copies || []).map((c) => c.target).join(', ');
+  if (!confirm(`Forget this record?\n\n` +
+    (where ? `The backups on ${where} are left exactly where they are — ` : '') +
+    `this only removes the reminder that they exist. Nothing on this page will mention them again.`)) return;
+  const resp = await mutate('/api/retired/' + encodeURIComponent(r.id), { method: 'DELETE' });
+  await reportAndRefresh(resp);
+}
+
+// The one action in this program that deletes a backup on purpose.
+//
+// TWO STEPS, AND THE SECOND IS TYPING THE NAME. "Are you sure" is answered yes
+// by reflex; typing the folder's own label is not done by accident. The daemon
+// checks the typed name again — the guarantee does not live in this file.
+async function deleteRetiredBackups(r, btn) {
+  const here = (r.copies || []).filter((c) => c.deletable && !c.removed);
+  const elsewhere = (r.copies || []).filter((c) => !c.deletable).map((c) => c.target);
+  const where = here
+    .map((c) => `  • ${c.target}${c.location ? ' — ' + c.location : ''}${c.dest_path ? ' (' + c.dest_path + ')' : ''}`)
+    .join('\n');
+
+  if (!confirm(
+    `PERMANENTLY DELETE the backups of "${r.label}"?\n\n` +
+    `This deletes the backed-up copies themselves, and every saved previous version of them, from:\n\n` +
+    `${where}\n\n` +
+    `The folder on this computer (${r.path}) is NOT touched.\n\n` +
+    (elsewhere.length
+      ? `A copy also sits on ${elsewhere.join(', ')}, which is another computer. It cannot be deleted from here — do that on that machine.\n\n`
+      : '') +
+    ((r.archives && r.archives.length)
+      ? `Scheduled snapshots are not touched. A snapshot is one encrypted zip that may hold other folders too, so there is no way to remove just this one from it.\n\n`
+      : '') +
+    `There is no undo. Once these are gone, the only copy of "${r.label}" is the folder on this computer.`)) return;
+
+  const typed = prompt(`To confirm, type the folder's name exactly:\n\n${r.label}`);
+  if (typed === null) return;
+  if (typed.trim() !== r.label) { alert('That did not match. Nothing was deleted.'); return; }
+
+  // A network drive can take a while, and the answer IS the value of the
+  // button, so the wait is shown rather than hidden behind an optimistic
+  // re-render.
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Deleting…';
+  try {
+    const resp = await mutate('/api/retired/' + encodeURIComponent(r.id) + '/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: r.label }),
+    });
+    await reportAndRefresh(resp);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+}
+
+// Show what the daemon said, then re-read the model. Shared by the three
+// stopped-folder actions because each of them answers with a sentence worth
+// reading — "2 of 3 destinations cleared" is not something to swallow.
+async function reportAndRefresh(resp) {
+  let said = '';
+  try {
+    const body = await resp.clone().json();
+    said = body && body.message ? body.message : '';
+  } catch { said = (await resp.text()).trim(); }
+  if (!resp.ok) alert(said || 'That did not work.');
+  else if (said) alert(said);
+  refresh();
+}
+
 // Inline editor for one folder's excludes. Comma-separated, matching the
 // wizard, so the same list can be typed the same way in either place.
 function openIgnoreEditor(li, f) {
@@ -327,7 +479,20 @@ function renderTargets(st) {
   const sec = document.getElementById('targets-section');
   const list = document.getElementById('target-list');
   const targets = st.targets || [];
-  sec.hidden = targets.length === 0;
+  // Hidden when nothing is protected, not just when there are no destinations.
+  // A destination that mirrors no folders is not "where backups go" — it is a
+  // place nothing is being sent, and the panel described it as covering "every
+  // folder" because an empty folder list means exactly that in the config.
+  // Rather than explain a destination doing nothing, the section waits until
+  // there is something for it to be about.
+  //
+  // A destination still holding a STOPPED folder's copies counts as something
+  // to be about: "No longer protected" names those destinations, and hiding
+  // the panel that describes them would leave that section referring to
+  // somewhere the page refuses to show.
+  const nothingProtected = (st.folders || []).length === 0;
+  const nothingStopped = (st.retired || []).length === 0;
+  sec.hidden = targets.length === 0 || (nothingProtected && nothingStopped);
   list.replaceChildren();
   const kind = { drive: 'drive on this computer', share: 'network drive', device: 'paired computer' };
   for (const t of targets) {
@@ -341,8 +506,15 @@ function renderTargets(st) {
     if (t.location) meta.appendChild(el('span', 'muted mono', t.location));
     meta.appendChild(el('span', 'muted', kind[t.type] || t.type));
     meta.appendChild(el('span', stateClass(t.state) + ' dot', stateLabel(t.state)));
-    meta.appendChild(el('span', 'muted',
-      t.all_folders ? 'every folder' : `${t.folder_count} folder(s)`));
+    // Said once, in words. "0 folder(s)" repeated what the state beside it
+    // already says, and the "(s)" was there because the count was rendered
+    // without ever looking at it.
+    if (t.all_folders) {
+      meta.appendChild(el('span', 'muted', 'every folder'));
+    } else if (t.folder_count > 0) {
+      meta.appendChild(el('span', 'muted',
+        t.folder_count === 1 ? '1 folder' : `${t.folder_count} folders`));
+    }
     if (t.wake_enabled) meta.appendChild(el('span', 'muted', 'wakes on demand'));
     // Deleting a user's backup history is never silent.
     if (t.reclaim_note) meta.appendChild(el('span', 'busy', t.reclaim_note));
@@ -362,7 +534,13 @@ function renderTargets(st) {
 }
 
 async function removeFolder(f) {
-  if (!confirm(`Stop backing up ${f.path}?\n\nBackups already written to your destinations are left exactly where they are — this only stops future copying.`)) return;
+  // Says where it goes, not just what stops. The old wording promised the
+  // backups were left alone and was true — but the folder then vanished from
+  // the page entirely, so "left exactly where they are" described files
+  // nothing on screen could reach any more.
+  if (!confirm(`Stop backing up ${f.path}?\n\n` +
+    `It moves to "No longer protected" below, where you can turn it back on or delete its backups later.\n\n` +
+    `Nothing is deleted now — the copies already on your destinations are left exactly where they are.`)) return;
   const resp = await mutate('/api/folders/' + encodeURIComponent(f.id), { method: 'DELETE' });
   if (!resp.ok) alert(await resp.text()); else refresh();
 }
@@ -649,9 +827,18 @@ function applyStatus(st) {
   // A fresh install goes straight into the wizard rather than showing an
   // empty table that explains nothing. Never on the read-only view: setting
   // up a backup is only possible on the machine itself.
-  if (!readOnly && !st.setup_complete && !Wizard.isOpen() && !AdoptWizard.isOpen()) {
+  //
+  // ONLY ON ARRIVAL, NEVER MID-SESSION. A wizard that covers the whole page is
+  // right when there is nothing behind it and an interruption when there is:
+  // this used to fire the moment somebody removed their last folder, taking
+  // the dashboard away from them in the middle of using it. The daemon-side
+  // fix is to persist that setup happened (see config.Configured), and this is
+  // the belt to that braces — it also holds on a machine whose state.json
+  // cannot be written at all.
+  if (!readOnly && !paintedOnce && !st.setup_complete && !Wizard.isOpen() && !AdoptWizard.isOpen()) {
     Wizard.open(st, { firstRun: true });
   }
+  paintedOnce = true;
   // Both panels start hidden in the markup, so an already-configured install
   // must be revealed here — otherwise the dashboard only ever appears after
   // finishing the wizard, and a normal page load shows a blank screen. The
@@ -672,6 +859,7 @@ function applyStatus(st) {
   renderVerdict(st);
   renderRows(st);
   renderFolders(st);
+  renderRetired(st);
   renderTargets(st);
   renderArchives(st);
   renderTotals(st);
@@ -831,11 +1019,23 @@ function renderVerdict(st) {
   const working = rows.some((r) => r.state === 'syncing' || r.state === 'scanning');
   const offline = targets.filter((t) => t.state === 'offline');
 
+  const folders = st.folders || [];
+
   let state = 'ok';
   let text;
-  if (targets.length === 0) {
+  // BOTH HALVES, OR THE ANSWER IS VACUOUS. This asked only whether a
+  // destination existed, so a machine with a destination and no folders fell
+  // through to "Everything is backed up" — which is true the way an empty list
+  // satisfies any claim, and a lie in the only sense that matters. It is what
+  // the page said the moment somebody stopped protecting their last folder.
+  if (targets.length === 0 || folders.length === 0) {
     state = '';
-    text = 'Nothing is being backed up yet';
+    // "yet" is right for a machine that has never backed anything up and wrong
+    // for one that has just been emptied, so it is only claimed when nothing
+    // has been set up at all.
+    text = targets.length === 0 && folders.length === 0
+      ? 'Nothing is being backed up yet'
+      : 'Nothing is being backed up';
   } else if (broken.length > 0) {
     state = 'bad';
     text = broken.length === 1
