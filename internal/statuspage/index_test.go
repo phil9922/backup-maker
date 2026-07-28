@@ -13,7 +13,7 @@ func TestTheIndexListsEveryMachineOnTheDrive(t *testing.T) {
 	page, err := RenderIndex([]IndexEntry{
 		{Machine: "my-laptop", Written: now.Add(-2 * time.Minute)},
 		{Machine: "attic-pi", Written: now.Add(-10 * time.Minute)},
-	}, now)
+	}, nil, now)
 	if err != nil {
 		t.Fatalf("RenderIndex: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestAMachineThatStoppedWritingIsMarkedStaleOnTheIndex(t *testing.T) {
 	page, err := RenderIndex([]IndexEntry{
 		{Machine: "my-laptop", Written: now.Add(-time.Minute)},
 		{Machine: "dead-box", Written: now.Add(-8 * 24 * time.Hour), Stale: true},
-	}, now)
+	}, nil, now)
 	if err != nil {
 		t.Fatalf("RenderIndex: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestAMachineThatStoppedWritingIsMarkedStaleOnTheIndex(t *testing.T) {
 // A destination nobody has written to yet must say so rather than render an
 // empty table that reads as "no problems".
 func TestAnEmptyIndexSaysThereIsNothingHere(t *testing.T) {
-	page, err := RenderIndex(nil, time.Now())
+	page, err := RenderIndex(nil, nil, time.Now())
 	if err != nil {
 		t.Fatalf("RenderIndex: %v", err)
 	}
@@ -83,5 +83,31 @@ func TestAMachinesPageLivesInsideItsOwnDirectory(t *testing.T) {
 	// with them.
 	if strings.ContainsAny(PathFor(`a:b*c`), `:*`) {
 		t.Errorf("PathFor left characters FAT and NTFS refuse: %q", PathFor(`a:b*c`))
+	}
+}
+
+// A folder on the same storage that is a destination in its own right gets
+// named, but NOT among the computers. Listing it as a machine would link to
+// another index and claim a computer exists that does not; leaving it out
+// entirely means somebody picking up the drive never finds backups sitting on
+// it.
+func TestANestedDestinationIsNamedButNotCountedAsAComputer(t *testing.T) {
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	page, err := RenderIndex(
+		[]IndexEntry{{Machine: "my-laptop", Written: now.Add(-time.Minute)}},
+		[]string{"Backups"}, now)
+	if err != nil {
+		t.Fatalf("RenderIndex: %v", err)
+	}
+	html := string(page)
+
+	if !strings.Contains(html, `<a href="Backups/`+FileName+`">Backups</a>`) {
+		t.Errorf("the nested destination is not reachable from this page:\n%s", html)
+	}
+	if strings.Contains(html, "<td><a href=\"Backups/") {
+		t.Error("the nested destination was listed as though it were a computer")
+	}
+	if !strings.Contains(html, "reports separately") {
+		t.Error("nothing explains why the nested folder is listed apart from the computers")
 	}
 }

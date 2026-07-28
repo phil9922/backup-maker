@@ -289,7 +289,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 		}
 		defer backend.Close()
 		if err := EnsureTargetMarkerAs(backend, d.Name, cfg.General.MachineName, d.TakeOver); err != nil {
-			return config.Target{}, "", err
+			return config.Target{}, "", locate(err, "share", d.URL)
 		}
 		t := config.Target{
 			Type: "share", Name: d.Name, URL: d.URL,

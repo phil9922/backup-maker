@@ -167,3 +167,73 @@ func TestTwoComputersCanShareADriveThroughFoldersOfTheirOwn(t *testing.T) {
 		t.Error("the drive root was stamped even though the destinations are folders on it")
 	}
 }
+
+// The refusal is the one message somebody meets while their backup is not
+// running. Describing the remedy without giving it leaves them guessing at flag
+// names, so the error carries the exact commands.
+func TestTheRefusalPrintsCommandsRatherThanDescribingThem(t *testing.T) {
+	isolate(t)
+	root := t.TempDir()
+	claimedBy(t, root, "ubuntu", "install-theirs")
+
+	cfg := config.New()
+	cfg.General.MachineName = "ubuntu"
+
+	_, err := AppendDriveTarget(cfg, root, "card")
+	var c *ClaimConflictError
+	if !errors.As(err, &c) {
+		t.Fatalf("expected a claim conflict, got: %v", err)
+	}
+	if c.Location != root || c.Kind != "drive" {
+		t.Fatalf("the error does not know where the destination is: kind=%q location=%q", c.Kind, c.Location)
+	}
+
+	r := c.Remedy()
+	for _, want := range []string{
+		"backup-maker add-target drive " + root + "/ubuntu-2 --create",
+		"backup-maker add-target drive " + root + " --take-over",
+	} {
+		if !strings.Contains(r, want) {
+			t.Errorf("the remedy does not offer:\n  %s\ngot:\n%s", want, r)
+		}
+	}
+	// The suggested folder must not be the name that just collided.
+	if strings.Contains(r, root+"/ubuntu ") {
+		t.Error("the remedy suggests the very name that collided")
+	}
+}
+
+// The softer case has a different answer — there is nobody to take the name
+// from, only a confirmation to give — so it must not offer a folder as though
+// somebody else held the name.
+func TestTheLegacyRefusalOffersOnlyTheConfirmation(t *testing.T) {
+	isolate(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "my-laptop", "Development"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.New()
+	cfg.General.MachineName = "my-laptop"
+
+	_, err := AppendDriveTarget(cfg, root, "card")
+	var c *ClaimConflictError
+	if !errors.As(err, &c) {
+		t.Fatalf("expected a claim conflict, got: %v", err)
+	}
+	r := c.Remedy()
+	if !strings.Contains(r, "--take-over") {
+		t.Errorf("no way to confirm these are this computer's backups:\n%s", r)
+	}
+	if strings.Contains(r, "--create") {
+		t.Errorf("a folder was offered for a name nobody else holds:\n%s", r)
+	}
+}
+
+// A conflict raised without a recorded location must print nothing rather than
+// half a command line.
+func TestARemedyWithNoLocationIsSilent(t *testing.T) {
+	c := &ClaimConflictError{MachineName: "ubuntu"}
+	if r := c.Remedy(); r != "" {
+		t.Errorf("printed a command with no destination in it: %q", r)
+	}
+}

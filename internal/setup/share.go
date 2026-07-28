@@ -49,7 +49,7 @@ func AddShareTargetAs(url, username, password, name string, verify, takeOver boo
 	}
 	defer backend.Close()
 	if err := EnsureTargetMarkerAs(backend, name, cfg.General.MachineName, takeOver); err != nil {
-		return err
+		return locate(err, "share", url)
 	}
 
 	state, err := config.LoadState()

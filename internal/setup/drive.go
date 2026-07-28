@@ -94,7 +94,7 @@ func AppendDriveTargetIn(cfg *config.Config, path, name string, create, takeOver
 		return config.Target{}, err
 	}
 	if err := EnsureTargetMarkerAs(localmirror.NewLocalFS(root), name, cfg.General.MachineName, takeOver); err != nil {
-		return config.Target{}, err
+		return config.Target{}, locate(err, "drive", root)
 	}
 	t := config.Target{Type: "drive", Name: name, Path: root, Folders: []string{}}
 	cfg.Targets = append(cfg.Targets, t)

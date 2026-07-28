@@ -110,16 +110,20 @@ func (d *daemon) writeStatusIndex(b namedBackend, now time.Time) {
 		return
 	}
 	var entries []statuspage.IndexEntry
+	var nested []string
 	for _, dir := range dirs {
 		if dir == config.VersionsDirName || dir == archive.DirName {
 			continue
 		}
-		// A destination can be a FOLDER on a drive, and that folder has an index
-		// page of its own. Without this, a drive holding both a machine's
-		// backups and a separate destination folder would list the folder as
-		// though it were a computer, linking to a page that is another index.
-		// The marker is what tells them apart: a machine directory never has one.
+		// A destination can be a FOLDER on a drive, and that folder keeps an
+		// index page of its own. It is named further down the page rather than
+		// listed among the machines: it is a separate destination, and its
+		// health is its own page's to report. The marker is what tells the two
+		// apart — a machine directory never has one.
 		if _, err := b.backend.Stat(path.Join(dir, localmirror.MarkerName)); err == nil {
+			if _, err := b.backend.Stat(path.Join(dir, statuspage.FileName)); err == nil {
+				nested = append(nested, dir)
+			}
 			continue
 		}
 		fi, err := b.backend.Stat(path.Join(dir, statuspage.FileName))
@@ -132,7 +136,7 @@ func (d *daemon) writeStatusIndex(b namedBackend, now time.Time) {
 			Stale:   now.Sub(fi.ModTime()) > statuspage.StaleAfter,
 		})
 	}
-	index, err := statuspage.RenderIndex(entries, now)
+	index, err := statuspage.RenderIndex(entries, nested, now)
 	if err != nil {
 		d.log.Warn("could not render the destination status index", "err", err)
 		return

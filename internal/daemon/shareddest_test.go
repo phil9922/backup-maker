@@ -215,11 +215,16 @@ func TestANestedDestinationIsNotListedAsAComputer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no index at the destination root: %v", err)
 	}
-	// Matched on the row's link, not the bare word: the page's own heading is
-	// "Backups on this storage", and asserting on that would pass for the wrong
-	// reason and fail if the heading were ever reworded.
-	if strings.Contains(string(index), `href="Backups/`) {
+	// It is NAMED — otherwise somebody picking up this drive never discovers
+	// the backups in that folder — but not as a computer, which would link to
+	// another index and claim a machine that does not exist. Matched on the
+	// table cell rather than the bare word: the page's own heading is "Backups
+	// on this storage", which would pass for entirely the wrong reason.
+	if strings.Contains(string(index), `<td><a href="Backups/`) {
 		t.Errorf("a nested destination folder was listed as a computer:\n%s", index)
+	}
+	if !strings.Contains(string(index), `<a href="Backups/`) {
+		t.Errorf("the nested destination is unreachable from the page beside it:\n%s", index)
 	}
 	if !strings.Contains(string(index), "laptop") {
 		t.Errorf("the real machine is missing from the index:\n%s", index)

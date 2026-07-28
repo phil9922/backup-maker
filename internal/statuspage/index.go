@@ -33,7 +33,15 @@ type IndexEntry struct {
 // RenderIndex produces the destination-root page listing every machine that has
 // backups here. Self-contained, like the per-machine page, so it works opened
 // straight off a drive with no web server at all.
-func RenderIndex(entries []IndexEntry, now time.Time) ([]byte, error) {
+//
+// nested names folders on the same storage that are destinations in their own
+// right — someone chose to keep a computer's backups in a folder rather than at
+// the root. They are listed SEPARATELY from the machines rather than among
+// them, because this page reports on one destination and those are not part of
+// it: their contents, their health and their staleness are their own page's to
+// state. But they are named, because the alternative is that somebody picking
+// up this drive never discovers backups that are sitting on it.
+func RenderIndex(entries []IndexEntry, nested []string, now time.Time) ([]byte, error) {
 	type row struct {
 		IndexEntry
 		Href string
@@ -47,11 +55,17 @@ func RenderIndex(entries []IndexEntry, now time.Time) ([]byte, error) {
 		}
 		rows[i] = row{IndexEntry: e, Href: dirFor(e.Machine) + "/" + FileName, Age: age}
 	}
+	type link struct{ Name, Href string }
+	others := make([]link, len(nested))
+	for i, n := range nested {
+		others[i] = link{Name: n, Href: n + "/" + FileName}
+	}
 	var buf bytes.Buffer
 	if err := indexTmpl.Execute(&buf, struct {
 		Rows        []row
+		Nested      []link
 		WrittenText string
-	}{Rows: rows, WrittenText: now.Format("2 Jan 2006, 15:04 MST")}); err != nil {
+	}{Rows: rows, Nested: others, WrittenText: now.Format("2 Jan 2006, 15:04 MST")}); err != nil {
 		return nil, fmt.Errorf("rendering status index: %w", err)
 	}
 	return buf.Bytes(), nil
@@ -107,6 +121,13 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
 </tr>{{end}}
 </tbody></table>
 {{else}}<p class="muted">No computer has written a status page here yet.</p>{{end}}
+
+{{if .Nested}}
+<p class="muted">This storage also holds backups in a folder of its own, which
+reports separately:
+{{range $i, $n := .Nested}}{{if $i}}, {{end}}<a href="{{$n.Href}}">{{$n.Name}}</a>{{end}}
+</p>
+{{end}}
 
 <footer>
 This page lists the computers that keep backups on this storage, and is built

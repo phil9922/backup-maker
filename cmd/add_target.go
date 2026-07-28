@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -47,7 +48,7 @@ var addTargetDriveCmd = &cobra.Command{
 			if os.IsNotExist(err) {
 				return errNotInitialized
 			}
-			return err
+			return withRemedy(err)
 		}
 		fmt.Printf("Added drive target %q at %s — it now mirrors every backed-up folder.\n", t.Name, t.Path)
 		return nil
@@ -91,6 +92,7 @@ default (disable with --no-verify).`,
 		noVerify, _ := cmd.Flags().GetBool("no-verify")
 		takeOver, _ := cmd.Flags().GetBool("take-over")
 		if err := setup.AddShareTargetAs(url, user, pass, name, !noVerify, takeOver); err != nil {
+			err = withRemedy(err)
 			if user == "" {
 				return fmt.Errorf("%w\n(if the share is locked, retry with --user <name>)", err)
 			}
@@ -232,4 +234,23 @@ func init() {
 	addTargetDeviceCmd.Flags().String("mac", "", "wired MAC address of that machine, to wake it when asleep (Wake-on-LAN)")
 	addTargetCmd.AddCommand(addTargetDriveCmd, addTargetShareCmd, addTargetDeviceCmd)
 	rootCmd.AddCommand(addTargetCmd)
+}
+
+// withRemedy prints the exact commands that resolve a destination-name
+// conflict, then returns the error unchanged so the command still fails.
+//
+// PRINTED RATHER THAN FOLDED INTO THE ERROR STRING, because cobra renders an
+// error as a single "Error: ..." line and multi-line shell commands inside it
+// come out as one unreadable run. The sentence explaining what happened stays
+// in the error; the commands go above it, where they can be copied.
+func withRemedy(err error) error {
+	var c *setup.ClaimConflictError
+	if errors.As(err, &c) {
+		if r := c.Remedy(); r != "" {
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, r)
+			fmt.Fprintln(os.Stderr)
+		}
+	}
+	return err
 }
