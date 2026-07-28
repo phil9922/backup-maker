@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: MIT
+#
+# Tests on every push and pull request, plus a cross-compile check so a break
+# on Windows or macOS shows up here rather than at release time.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
+      # THE GAP THIS CLOSES. The dashboard is a large part of this program and
+      # `go test` cannot see a line of it: the JavaScript is an embedded asset,
+      # so a syntax error compiles, ships, and produces a completely dead page —
+      # every control inert, with nothing in any log. That happened on
+      # 2026-07-28 (an unbalanced brace left by an edit), and only a browser
+      # test caught it. `node --check` catches it in under a second.
+      #
+      # Deliberately only a PARSE check, not a linter: it asserts the one thing
+      # whose failure is catastrophic and silent, and adds no style opinions
+      # that would need maintaining.
+      - name: Check dashboard JavaScript parses
+        run: |
+          for f in internal/webui/static/*.js; do
+            node --check "$f" || { echo "::error file=$f::$f is not valid JavaScript — the dashboard would be dead on arrival"; exit 1; }
+            echo "ok  $f"
+          done
+
+  cross-compile:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath ./...
