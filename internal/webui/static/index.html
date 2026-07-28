@@ -483,23 +483,6 @@
       </div>
 
       <div class="picker">
-        <h3 class="small">Updates</h3>
-        <!-- The ONLY thing in backup-maker that contacts the internet on its
-             own, so it is off until switched on and says exactly what it does.
-             It only ever tells you: nothing is downloaded, replaced or run. -->
-        <label class="row-check">
-          <input type="checkbox" id="set-update-check">
-          <span>Tell me when a new version is available
-            <span class="muted small">Asks github.com once a day, and announces a new release the same way
-              as any other alert. Nothing is downloaded or installed — you choose when to upgrade.
-              Off by default; this is the only part of backup-maker that contacts the internet
-              by itself.</span>
-          </span>
-        </label>
-        <p id="update-state" class="small" hidden></p>
-      </div>
-
-      <div class="picker">
         <h3 class="small">Notifications - Triggers</h3>
         <fieldset id="alert-kinds" class="sub-checks">
           <legend class="muted small">Switching one off silences its all-clear too, so you are never
@@ -530,6 +513,35 @@
             </span>
           </label>
         </fieldset>
+      </div>
+      </details>
+
+      <!-- Updates. Its own group rather than a panel inside Alerts, where it
+           used to live: it was filed there because finding a release is
+           announced like an alert, but that is how it is DELIVERED, not what
+           it is. Somebody looking for what this machine does on its own — the
+           one thing here that contacts the internet — should not have to open
+           a group about notifications to find it. -->
+      <details class="settings-group" id="settings-updates">
+        <summary>
+          <span class="group-title">Updates</span>
+          <span class="group-note muted small">Whether you are told when a new version is out</span>
+        </summary>
+
+      <div class="picker">
+        <!-- The ONLY thing in backup-maker that contacts the internet on its
+             own, so it is off until switched on and says exactly what it does.
+             It only ever tells you: nothing is downloaded, replaced or run. -->
+        <label class="row-check">
+          <input type="checkbox" id="set-update-check">
+          <span><strong>Tell me when a new version is available</strong>
+            <span class="muted small">Asks github.com once a day, and announces a new release the same way
+              as any other alert. Nothing is downloaded or installed — you choose when to upgrade.
+              Off by default; this is the only part of backup-maker that contacts the internet
+              by itself.</span>
+          </span>
+        </label>
+        <p id="update-state" class="small" hidden></p>
       </div>
       </details>
 

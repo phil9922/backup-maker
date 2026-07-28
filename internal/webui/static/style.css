@@ -11,6 +11,17 @@
   --line: #232a34;
   --panel: #151b23;
   --panel-2: #1a212b;
+  /* Explanatory text — the sentence under a switch, the note beside a group
+     title. It is muted because it is subordinate, NOT because it is optional:
+     it is where every consequence of a setting is actually spelled out, so at
+     --muted it was the least readable text on the page carrying the most
+     meaning. A step lighter, and never below --fs-hint. */
+  --hint: #a2adbc;
+  /* Two sizes for text that is smaller than body, rather than one 0.85rem
+     `.small` doing both jobs. A caption in a table cell can be small; a
+     sentence explaining what a setting does has to be readable. */
+  --fs-small: 0.85rem;
+  --fs-hint: 0.95rem;
   /* One spacing scale, used everywhere. The dashboard's ragged look came from
      a dozen hand-picked values (0.6rem here, 0.35rem there) that never lined
      up with each other. */
@@ -32,7 +43,12 @@
 /* An author `display` rule beats the UA stylesheet's [hidden]{display:none},
    so `main { display: grid }` would leave hidden panels on screen. */
 [hidden] { display: none !important; }
-body { background: var(--bg); color: var(--fg); min-height: 100vh; }
+/* One global line-height. Without it every paragraph inherited the UA's
+   `normal` — around 1.2 — so the multi-line hints under the settings switches
+   were set tighter than the body text they explained, which is most of why
+   that panel read as crowded rather than merely dense. Components that need
+   to be tighter (cards, the verdict, table rows) still say so themselves. */
+body { background: var(--bg); color: var(--fg); min-height: 100vh; line-height: 1.5; }
 header {
   display: flex; align-items: center; gap: 0.75rem;
   padding: 1rem 1.5rem; border-bottom: 1px solid #232a34;
@@ -86,7 +102,7 @@ td.busy { color: var(--busy); }
 td.bad { color: var(--bad); }
 code { background: #1c2430; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85rem; }
 h2 {
-  font-size: 0.8rem; font-weight: 600; margin-bottom: var(--s3);
+  font-size: 0.85rem; font-weight: 600; margin-bottom: var(--s3);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
   padding-left: var(--gutter);
 }
@@ -296,7 +312,7 @@ select {
 .choice input { margin-top: .25rem; }
 .choice-body { display: grid; gap: .3rem; }
 .choice-body strong { font-size: 1rem; }
-.choice-body .small, .small { font-size: .85rem; }
+.choice-body .small, .small { font-size: var(--fs-small); }
 
 /* The running build, in the footer. Quiet on purpose: worth being able to find
    when checking whether a fix has landed, not worth competing with the backup
@@ -306,14 +322,22 @@ select {
 /* Settings checkboxes. The label is a row so the text can wrap under itself
    rather than under the box, and the hint sits on its own line beneath the
    thing it explains. */
-.row-check { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.35rem 0; cursor: pointer; }
-.row-check input { margin-top: 0.25rem; flex: none; }
+.row-check { display: flex; align-items: flex-start; gap: 0.7rem; padding: 0.4rem 0; cursor: pointer; }
+.row-check input { margin-top: 0.3rem; flex: none; }
 .row-check span { display: block; }
-.row-check .small { display: block; margin-top: 0.1rem; }
+/* The sentence under a switch. Bigger than a table caption and set on its own
+   line-height: this is the text that says what the setting actually does, and
+   at 0.85rem/1.2 it was the hardest thing on the page to read. */
+.row-check .small {
+  display: block; margin-top: 0.2rem;
+  font-size: var(--fs-hint); line-height: 1.55;
+}
+.row-check .muted.small { color: var(--hint); }
 /* The per-category list is subordinate to the master switch above it, and says
    so by indentation rather than by a second heading. */
 .sub-checks { border: 0; margin: 0.2rem 0 0; padding: 0; }
-.sub-checks legend { padding: 0; margin-bottom: 0.2rem; }
+.sub-checks legend { padding: 0; margin-bottom: var(--s2); font-size: var(--fs-hint); line-height: 1.55; }
+.sub-checks legend.muted { color: var(--hint); }
 /* Switched off wholesale when the master switch is off: still readable, plainly
    not in force. */
 .sub-checks[disabled] { opacity: 0.45; }
@@ -332,6 +356,15 @@ select {
 .delivery { display: flex; align-items: flex-start; gap: 0.75rem; }
 .delivery .row-check { flex: 1; }
 .delivery button { flex: none; margin-top: 0.2rem; }
+/* Three delivery methods used to run together as one wall of checkboxes and
+   paragraphs, because each one's address fields and status line sit BETWEEN it
+   and the next — so `+` never matched and nothing separated them. `~` does
+   match across those in-between elements, which is what lets each method read
+   as its own block. */
+.delivery ~ .delivery {
+  margin-top: var(--s4); padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
 
 /* The address a delivery method needs (webhook URL, ntfy topic, ntfy token),
    on the line beneath its switch.
@@ -357,10 +390,10 @@ select {
 /* A collapsed settings group. These are set once and then left for months, so
    shut is the right default; the summary has to say enough that nobody has to
    open one to find out whether it is the group they wanted. */
-.settings-group { margin: 0 0 var(--s2); }
+.settings-group { margin: 0 0 var(--s3); }
 .settings-group > summary {
-  display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
-  cursor: pointer; padding: 0.55rem var(--gutter);
+  display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap;
+  cursor: pointer; padding: 0.75rem var(--gutter);
   border: 1px solid var(--line); border-radius: 8px; background: #141a22;
   list-style: none;
 }
@@ -374,13 +407,51 @@ select {
 .settings-group[open] > summary::before { transform: rotate(90deg); }
 .settings-group > summary:hover { border-color: var(--accent); }
 .settings-group > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.settings-group .group-title { font-weight: 600; color: var(--fg); }
+.settings-group .group-title { font-weight: 600; color: var(--fg); font-size: 1rem; }
+/* The one line that has to sell what is inside a shut group — so it is set at
+   hint size, not caption size. At 0.85rem muted it was smaller and fainter
+   than anything else on the summary row while doing the most work on it. */
+.settings-group .group-note { font-size: var(--fs-hint); color: var(--hint); }
 /* Pushed to the right so a fault is the last thing on the line and reads as a
    status rather than part of the group's name. */
 .settings-group .group-warn { margin-left: auto; }
-.settings-group > .picker:first-of-type { margin-top: var(--s2); }
+.settings-group > .picker:first-of-type { margin-top: var(--s3); }
+/* Room around the contents of an open group, so the panels inside it are not
+   flush against the summary that opened them. */
+.settings-group[open] > summary { margin-bottom: var(--s2); }
 
-#settings-section h3 { font-weight: 600; margin-bottom: 0.3rem; color: var(--fg); }
+/* Each panel inside Settings gets real padding and real separation. The
+   wizard's folder picker shares the .picker class and is a scrolling list of
+   one-line rows, so it keeps the tighter original spacing — this is scoped. */
+#settings-section .picker {
+  padding: var(--s4) var(--gutter);
+  margin: var(--s3) 0;
+}
+/* A panel heading, not a caption: the .small class in the markup would have
+   set these at table-caption size. Given a rule beneath it so "Updates" reads
+   as the start of a block rather than as one more line in the block above. */
+#settings-section h3 {
+  font-weight: 600; color: var(--fg);
+  font-size: 0.95rem; text-transform: none; letter-spacing: normal;
+  margin-bottom: var(--s3); padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+/* The address fields belonging to a delivery method, indented to that method's
+   text so they read as part of it rather than as a new setting. */
+#settings-section .delivery + .delivery-state + .sub-checks,
+#settings-section .delivery + .sub-checks {
+  margin: var(--s3) 0 0 1.6rem;
+  padding-left: var(--s3); border-left: 2px solid var(--line);
+}
+/* Each choice in a subordinate list is its own decision with its own
+   explanation under it, so consecutive ones need air between them or the
+   hints run into the next switch's label. */
+#settings-section .sub-checks .row-check + .row-check { margin-top: var(--s2); }
+/* Every standalone line in Settings — the delivery result, the saved-address
+   echo, the update state, the wifi warning — is a sentence to be read, not a
+   caption. `.small` in the markup would have set them all at caption size. */
+#settings-section p.small { font-size: var(--fs-hint); }
+#settings-section p.muted.small { color: var(--hint); }
 
 
 /* --- the verdict ------------------------------------------------------- */
@@ -569,4 +640,10 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
 .lan-request-actions { display: flex; gap: var(--s2); margin-left: auto; }
 @media (max-width: 40rem) {
   .lan-request-actions { margin-left: 0; width: 100%; }
+  /* The indent that shows an address field belongs to the method above it
+     costs about a fifth of a 390px column, which the hints inside it cannot
+     spare. The left rule alone still says "part of the thing above". */
+  #settings-section .delivery + .delivery-state + .sub-checks,
+  #settings-section .delivery + .sub-checks { margin-left: 0; }
+  .delivery-state { margin-left: 0; }
 }
