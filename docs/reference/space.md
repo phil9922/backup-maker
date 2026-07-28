@@ -57,6 +57,6 @@ backup-maker and manages its own storage.
 
 - [Choosing destinations](../guide/3-destinations.md) — sizing a destination before you
   buy it, so this page matters less.
-- [Scheduled snapshots](../guide/4-snapshots.md) — retention counts, which prune snapshots
+- [Timed snapshots](../guide/4-snapshots.md) — retention counts, which prune snapshots
   independently of the headroom figure.
 - [Reference](building.md) — where `config.toml` lives.

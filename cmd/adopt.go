@@ -98,7 +98,7 @@ func runAdopt(dest string) error {
 	fmt.Printf("This destination holds backups from machine %q.\n", insp.MachineName)
 	fmt.Printf("  Folders being backed up: %d\n", len(insp.Folders))
 	fmt.Printf("  Destinations configured: %d\n", len(insp.Targets))
-	fmt.Printf("  Scheduled snapshots:     %d\n", len(insp.Archives))
+	fmt.Printf("  Timed snapshots:         %d\n", len(insp.Archives))
 	fmt.Println()
 
 	dec := setup.AdoptDecisions{
@@ -162,7 +162,7 @@ func runAdopt(dest string) error {
 	}
 	for _, a := range insp.Archives {
 		fmt.Println()
-		fmt.Printf("Scheduled snapshot %q is an encrypted zip — enter its password:\n", a.Name)
+		fmt.Printf("Timed snapshot %q is an encrypted zip — enter its password:\n", a.Name)
 		p, err := promptPasswordVia(in, "  Password (Enter to skip for now): ")
 		if err != nil {
 			return err

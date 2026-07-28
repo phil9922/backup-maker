@@ -93,7 +93,7 @@ without `--yes`.
 
 ## See also
 
-- [Scheduled snapshots](4-snapshots.md) — how to open an encrypted archive, and
+- [Timed snapshots](4-snapshots.md) — how to open an encrypted archive, and
   why the password can't be recovered.
 - [Security & safety properties](../reference/security.md) — the guarantees that make a
   destination worth restoring from.

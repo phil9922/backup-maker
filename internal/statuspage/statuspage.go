@@ -176,7 +176,7 @@ var tmpl = template.Must(template.New("status").Parse(`<!doctype html>
 {{end}}
 
 {{if .Snapshots}}
-<h1>Scheduled snapshots</h1>
+<h1>Timed snapshots</h1>
 <table>
 <thead><tr><th>Name</th><th>Destination</th><th>State</th><th>Last run</th></tr></thead>
 <tbody>

@@ -152,7 +152,7 @@ archives:
 	}
 	for {
 		fmt.Println()
-		fmt.Println("Scheduled snapshots (password-protected zips, frozen at one moment):")
+		fmt.Println("Timed snapshots (password-protected zips, frozen at one moment):")
 		if len(cfg.Archives) == 0 {
 			fmt.Println("  (none yet — the real-time mirror still protects your folders continuously)")
 		}

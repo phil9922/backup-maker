@@ -78,6 +78,46 @@ your encrypted snapshots on the same disk as the snapshots. Only that exact
 folder is skipped: a directory of your own that merely happens to be *named*
 `backup-maker` is backed up like anything else.
 
+## Stopping a folder
+
+**Stop protecting** on a folder's card stops future copying. It deletes
+nothing: the copies already on your destinations stay exactly where they are.
+
+Because those copies outlive the folder that made them, the folder does not
+simply disappear from the dashboard — it moves into a section called **No
+longer protected**, listing where its backups still sit. Otherwise 1.4GB on a
+drive would be named by nothing at all.
+
+Each stopped folder there offers three things:
+
+- **Turn back on** — start backing it up again. It reconnects to the
+  destinations that are still set up and carries on from the copy already
+  there; nothing is copied again from scratch. If none of its old destinations
+  still exists here, it says so rather than offering a button that would fail.
+- **Forget this** — remove the reminder only. The backups are left where they
+  are; the page just stops mentioning them. Use this for a drive you no longer
+  own.
+- **Delete backups…** — the one action in backup-maker that deletes a backup on
+  purpose. It removes the mirrored copies **and their saved previous versions**
+  from each destination it can reach, and it asks twice: a confirmation listing
+  every path it will delete, then the folder's own name typed back exactly. The
+  daemon checks that typed name again on its side.
+
+Three things **Delete backups…** never touches:
+
+- **The folder on this computer.** backup-maker is one-way; a source folder is
+  read from and never written to or deleted from. That rule has no exception.
+- **Copies on another computer.** A paired machine manages its own storage, so
+  the deletion has to be done over there. The card says which destination that
+  applies to.
+- **Timed snapshots.** A snapshot is a single encrypted zip that may hold other
+  folders too, so there is no way to remove just this folder from one. Old
+  snapshots go when their retention count prunes them — see
+  [4. Timed snapshots](4-snapshots.md).
+
+Removing a *destination* or a *schedule* behaves the same way: it changes what
+happens next, and never deletes a backup already written.
+
 ---
 
 Next: **[3. Choosing destinations](3-destinations.md)** — which arrangement of

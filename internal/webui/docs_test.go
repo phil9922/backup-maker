@@ -110,6 +110,26 @@ func TestTheSidebarIsBuiltFromTheTreeInReadingOrder(t *testing.T) {
 	}
 }
 
+// A dozen cross-references in the tree point at a heading rather than the top
+// of a page. rewriteDocsLinks keeps the fragment; this is the other half —
+// without auto heading IDs goldmark emits no id at all, so every one of those
+// links silently lands at the top here while working correctly on GitHub.
+func TestHeadingsCarryAnchorsSoCrossReferencesLand(t *testing.T) {
+	prev := docsRoot
+	t.Cleanup(func() { docsRoot = prev })
+	SetDocs(fstest.MapFS{
+		"docs/guide/1-install.md": {Data: []byte(
+			"# 1. Installing\n\nSee [later](2-first.md#adding-backup-targets).\n\n## Adding backup targets\n")},
+	})
+	body := getDocs(t, "/docs/guide/1-install.md").Body.String()
+	if !strings.Contains(body, `id="adding-backup-targets"`) {
+		t.Errorf("heading carries no anchor, so #adding-backup-targets goes nowhere:\n%s", body)
+	}
+	if !strings.Contains(body, `href="/docs/guide/2-first.md#adding-backup-targets"`) {
+		t.Errorf("the fragment did not survive link rewriting:\n%s", body)
+	}
+}
+
 // The tree is embedded and read-only, but a request must still not be able to
 // name its way out of it.
 func TestDocsRefuseTraversalAndUnknownPages(t *testing.T) {

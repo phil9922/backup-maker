@@ -18,7 +18,7 @@ the binary.
 | **[1. Installing backup-maker](guide/1-install.md)** | Getting the binary onto a machine and making it survive a reboot. | 10 min |
 | **[2. Your first backup](guide/2-first-backup.md)** | Choosing what to protect, adding a destination, and what actually gets copied. | 10 min |
 | **[3. Choosing destinations](guide/3-destinations.md)** | Which arrangement of drives and machines covers the most failure modes for the least money. | 5 min |
-| **[4. Scheduled snapshots](guide/4-snapshots.md)** | Encrypted point-in-time copies on a timer, alongside the live mirror. | 5 min |
+| **[4. Timed snapshots](guide/4-snapshots.md)** | Encrypted point-in-time copies on a timer, alongside the live mirror. | 5 min |
 | **[5. Monitoring your backups](guide/5-monitoring.md)** | Alerts when backups stop, delivery to your phone, the read-only network view, and the status page written onto each destination. | 15 min |
 | **[6. Restoring & recovery](guide/6-restoring.md)** | Getting a file back, rebuilding a machine from a destination, repairing a backup someone edited. | 10 min |
 

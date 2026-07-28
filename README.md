@@ -117,9 +117,10 @@ to know.
 You can have both: run the wizard twice.
 
 **2. Which folder should be protected?** Click through your folders, or type a
-path.
+path. Whatever folder you're looking at can be protected from the path bar, so
+you can navigate into the thing you want and choose it there.
 
-![Wizard step 2: a folder picker listing Home, Documents, Desktop and Pictures, each with a "Protect this" button, and a box to type a path](docs/screenshots/02-wizard-folder.png)
+![Wizard step 2: a folder picker showing /home/alex/Desktop in a path bar with a "Protect this folder" button beside it, the sub-folders Development and notes listed below each with their own "Protect this" button, and a box to type a path](docs/screenshots/02-wizard-folder.png)
 
 **3. Where should the copies go?** You get a list of *computers* — this one,
 and any on your network sharing storage. Click one to see what it offers, and
@@ -157,10 +158,13 @@ a different drive, without being set up twice.
 
 ### Watching it work
 
-The dashboard shows every folder against every destination, what's being
-protected, and where it all goes.
+The dashboard shows every folder against every destination, and keeps the two
+kinds of backup apart: **Incremental backups** and **Timed snapshots** are
+separate panels, so you can see at a glance which promise a folder actually
+has. Folders you've stopped move to **No longer protected**, where the copies
+they left behind are still named.
 
-![Dashboard showing folder-and-destination rows all in sync, a "Folders being protected" panel listing code, documents and photos with their paths, and a "Where backups go" panel listing each destination with its location and health](docs/screenshots/07-dashboard.png)
+![Dashboard with a green "Everything is backed up" verdict, folder-and-destination rows all in sync, an "Incremental backups" panel listing code, documents and photos with their paths, a "Where backups go" panel listing each destination with its location, health and free space, a "No longer protected" panel showing a stopped folder whose copies are still on two destinations, and a "Timed snapshots" table naming the folder each schedule covers with Pause, Change and Stop beside it](docs/screenshots/07-dashboard.png)
 
 While files are moving you get live progress per destination — real byte
 counts, updating in place. Nothing needs refreshing.
@@ -252,8 +256,8 @@ it.
 
 **Using it**
 
-- [Scheduled snapshots](docs/guide/4-snapshots.md) — encrypted point-in-time copies on
-  a timer, alongside the live mirror.
+- [Timed snapshots](docs/guide/4-snapshots.md) — encrypted point-in-time copies on
+  a timer, alongside the live mirror, and how to pause or change a schedule.
 - [Monitoring your backups](docs/guide/5-monitoring.md) — desktop alerts when backups
   stop working, the read-only network view, the status page written onto each
   destination, and the phone layout.

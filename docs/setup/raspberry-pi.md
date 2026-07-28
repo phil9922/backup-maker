@@ -554,7 +554,7 @@ the page says so itself when it's stale.
 > backup jobs worth running, and deliberately filling a destination to watch
 > space reclamation delete old versions while leaving the live mirror intact.
 
-In the meantime, [Getting started](../guide/1-install.md#adding-backup-targets)
+In the meantime, [Your first backup](../guide/2-first-backup.md#adding-backup-targets)
 covers adding a network drive from the CLI, and
 [Choosing destinations](../guide/3-destinations.md) describes the three backup jobs.
 

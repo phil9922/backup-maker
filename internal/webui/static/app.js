@@ -211,7 +211,7 @@ function renderFolders(st) {
   const sec = document.getElementById('folders-section');
   const list = document.getElementById('folder-list');
   // Only the folders that actually have a live mirror. A snapshot-only folder
-  // belongs under "Snapshots on a schedule", where its schedule and password
+  // belongs under "Timed snapshots", where its schedule and password
   // are — listing it here alongside folders copied within seconds of a save
   // claimed a protection it does not have.
   const folders = (st.folders || []).filter((f) => f.continuous !== false);
@@ -351,7 +351,7 @@ async function deleteRetiredBackups(r, btn) {
       ? `A copy also sits on ${elsewhere.join(', ')}, which is another computer. It cannot be deleted from here — do that on that machine.\n\n`
       : '') +
     ((r.archives && r.archives.length)
-      ? `Scheduled snapshots are not touched. A snapshot is one encrypted zip that may hold other folders too, so there is no way to remove just this one from it.\n\n`
+      ? `Timed snapshots are not touched. A snapshot is one encrypted zip that may hold other folders too, so there is no way to remove just this one from it.\n\n`
       : '') +
     `There is no undo. Once these are gone, the only copy of "${r.label}" is the folder on this computer.`)) return;
 

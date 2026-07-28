@@ -17,6 +17,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
 )
 
 // docsFS is the embedded documentation tree, installed by the main package.
@@ -57,7 +58,17 @@ func docsFiles() fs.FS {
 }
 
 // md renders CommonMark plus tables, which the documentation uses.
-var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
+//
+// WithAutoHeadingID is not optional here. Without it goldmark emits headings
+// with no id attribute, so every `page.md#some-heading` cross-reference in the
+// tree — and there are a dozen — silently lands at the top of the page in this
+// viewer while working correctly on GitHub. rewriteDocsLinks goes to the
+// trouble of preserving those fragments; this is what makes them mean
+// something. goldmark's slug matches GitHub's for the headings used here.
+var md = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithParserOptions(parser.WithAutoHeadingID()),
+)
 
 // docsPage is one entry in the sidebar.
 type docsPage struct {
