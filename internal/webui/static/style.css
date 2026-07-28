@@ -84,6 +84,14 @@ footer a { color: var(--accent); }
    sentences into a ragged column. Both were visible in the network-view
    warning. */
 p.notice { white-space: normal; }
+/* A notice built out of BLOCKS is not a blob either, and this is the case the
+   rule above missed. pre-line applies to the text nodes BETWEEN those blocks —
+   the newlines and indentation separating <strong> from <p> in the markup —
+   so each one rendered as a literal blank line inside the box. The snapshot
+   password warning came out with two empty lines in the middle of it, which
+   reads as a box with far too much padding rather than as stray whitespace.
+   The <p> margins already space these properly. */
+.notice:has(> p) { white-space: normal; }
 /* Room between a warning and whatever it is warning about. Without it the red
    box reads as attached to the line above rather than as a remark on it. */
 .picker .notice { margin-top: var(--s4); }
@@ -104,8 +112,20 @@ code { background: #1c2430; padding: 0.1rem 0.4rem; border-radius: 4px; font-siz
 h2 {
   font-size: 0.85rem; font-weight: 600; margin-bottom: var(--s3);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
-  padding-left: var(--gutter);
 }
+/* The gutter is a DASHBOARD concern, and now says so.
+ *
+ * It exists so a section heading lines up with the table cells and card
+ * contents underneath it, which share the same inset — worth having, and only
+ * meaningful where those tables and cards are. As a rule on bare `h2` it
+ * followed the element into every other context: the wizard's step question
+ * and the adopt flow's title both sat 0.9rem right of their own eyebrow, lede
+ * and panels, which is what somebody setting up their first backup sees. The
+ * docs page had already had to undo it by hand, which was the warning.
+ *
+ * Scoped rather than reset a third time, so the next thing built outside the
+ * dashboard inherits nothing it has to remember to cancel. */
+#dashboard h2 { padding-left: var(--gutter); }
 /* Table cells and card contents share this inset, which is the whole reason
    the sections now line up with each other rather than each starting wherever
    its own padding happened to land. */
@@ -268,6 +288,44 @@ button.danger:hover { border-color: var(--bad); }
    takes a full line rather than being squeezed into the row. */
 #wizard .card .share-form, #adopt .card .share-form,
 #wizard .card .chosen, #adopt .card .chosen { flex-basis: 100%; margin-left: 0; }
+
+/* The wizard's own forms — the snapshot schedule step above all.
+ *
+ * .share-form is a flat grid with ONE gap, which is right for the two-field
+ * password box it was written for and wrong for a form of eight controls: a
+ * label sat exactly as far from its own input as one field did from the next,
+ * so nothing grouped and the whole step read as an undifferentiated stack.
+ * Labels bind tightly to what they label, and a new field is what gets the
+ * air. */
+.wiz-panel .share-form { gap: var(--s1); max-width: 26rem; }
+.wiz-panel .share-form > label { margin-top: var(--s4); }
+.wiz-panel .share-form > label:first-child { margin-top: 0; }
+/* A sentence explaining the control above it belongs to that control. */
+.wiz-panel .share-form > p { margin-top: var(--s1); }
+/* "repeat password" is part of the field above it, not a new one. */
+.wiz-panel .share-form > input + input { margin-top: var(--s2); }
+
+/* AND CONTROLS ARE SIZED TO WHAT THEY HOLD. A grid stretches every child to
+   the column, so "keep this many snapshots" got the same 24rem box as a
+   password — a number field wide enough for a sentence, which is what made the
+   widths look arbitrary. Text still takes the full width, because a path or a
+   password genuinely needs it. */
+.wiz-panel .share-form > select { justify-self: start; width: auto; min-width: 12rem; }
+.wiz-panel .share-form > input[type="number"] { justify-self: start; width: 7rem; }
+/* A tickbox and its sentence, laid out like the dashboard's .row-check rather
+   than left inline — the box had no space before its text, and a label long
+   enough to wrap ran back underneath the box instead of staying in its own
+   column. */
+.wiz-panel .share-form > label:has(> input[type="checkbox"]) {
+  display: flex; align-items: flex-start; gap: var(--s2);
+}
+.wiz-panel .share-form > label > input[type="checkbox"] { margin-top: 0.35rem; flex: none; }
+
+/* A warning is a remark on the form above it, and needs to read as one. Inside
+   a .picker this spacing already existed; the wizard's panels are not pickers,
+   so the snapshot password warning sat flush against the last input as though
+   it were part of it. */
+.wiz-panel > .notice { margin-top: var(--s4); }
 #wizard, #adopt { padding: 1.5rem; max-width: 46rem; margin: 0 auto; display: grid; gap: 1.25rem; }
 #wizard > section, #adopt > section { min-width: 0; }
 .wiz-head h2 { font-size: 1.3rem; }
