@@ -467,13 +467,18 @@ const AdoptWizard = (() => {
     return wrap;
   }
 
+  // The name opens the folder and "Use" chooses it; they must not sit a few
+  // pixels apart with stretched dead space between them that opens on click.
+  // See the same treatment in wizard.js.
   function pickRow(entry, show, onPick) {
     const li = mk("li");
-    const open = mk("button", "link", "📁 " + entry.name);
+    const open = mk("button", "link pick-open", "📁 " + entry.name);
+    open.title = "Open " + entry.name;
     open.onclick = () => show(entry.path);
-    const use = mk("button", null, "Use");
+    const use = mk("button", "pick-use", "Use");
+    use.title = "Use " + entry.path;
     use.onclick = () => onPick(entry.path);
-    li.append(open, use);
+    li.append(open, mk("span", "pick-gap"), use);
     return li;
   }
 

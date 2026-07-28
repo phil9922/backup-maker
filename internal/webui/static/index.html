@@ -97,10 +97,17 @@
         <ul id="existing-folder-list" class="cards"></ul>
         <p class="muted">…or choose a new folder below.</p>
       </div>
+      <!-- THE FOLDER YOU ARE LOOKING AT IS SELECTABLE, from the path bar.
+           Without this the picker was inverted from every other file picker
+           anyone has used: to protect ~/Desktop/Development you had to be in
+           ~/Desktop and press "Protect this" beside it, and navigating INTO it
+           left no way to choose it at all. That is almost certainly how a
+           snapshot of Desktop got made by somebody who meant Development. -->
       <div class="picker">
-        <div class="row">
+        <div class="row pick-bar">
           <button type="button" id="pick-up">↑ Up</button>
           <span id="pick-path" class="muted mono"></span>
+          <button type="button" id="pick-here" hidden>Protect this folder</button>
         </div>
         <ul id="pick-list" class="picker-list"></ul>
         <p id="pick-truncated" class="muted" hidden>Only the first 500 folders are shown.</p>
@@ -362,7 +369,7 @@
          NOT CALLED "Syncing disabled": `backup-maker status` already prints
          "Machine-sync engine: off" and the table above uses syncing/in sync
          for live mirror state, so that heading would read as the sync engine
-         being off. This one pairs with "Folders being protected" and with the
+         being off. This one pairs with "Incremental backups" and with the
          button that puts things here, and it reads as reversible — which it
          is. -->
     <section id="retired-section" hidden>

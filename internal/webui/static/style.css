@@ -401,6 +401,23 @@ button.link {
 }
 button.link:hover { color: var(--accent); }
 
+/* OPEN AND SELECT MUST NOT BE NEIGHBOURS. The name opens the folder and
+   "Protect this" chooses it — two different outcomes from one row. The name
+   used to be flex:1, so it stretched across the row and stopped a few pixels
+   short of the other button: the whole empty middle of the row opened a
+   folder, and a slightly-off click on either was a hit on the other. The name
+   now takes only its own width and .pick-gap holds the rest of the row open,
+   inert. */
+.picker-list button.link.pick-open { flex: 0 1 auto; min-width: 0; }
+.picker-list .pick-gap { flex: 1 1 2.5rem; min-width: 1.5rem; }
+.picker-list .pick-use { flex: 0 0 auto; }
+
+/* The bar above the list: where you are, and the button that protects it.
+   Pushed to the far end so it is nowhere near the row buttons below. */
+.pick-bar { flex-wrap: wrap; }
+.pick-bar #pick-path { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.pick-bar #pick-here { margin-left: auto; color: var(--accent); border-color: var(--accent); }
+
 /* machine list */
 .machines { list-style: none; margin: 0.6rem 0; padding: 0; display: grid; gap: 0.5rem; }
 /* A grid still takes its margin with nothing in it, which would leave a gap

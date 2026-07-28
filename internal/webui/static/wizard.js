@@ -169,6 +169,11 @@ const Wizard = (() => {
     list.replaceChildren();
     $('pick-path').textContent = '';
     $('pick-up').disabled = true;
+    // No directory is open at the top level, so there is nothing for "Protect
+    // this folder" to mean. Hidden rather than disabled: a greyed button here
+    // invites a click that can never work.
+    $('pick-here').hidden = true;
+    $('pick-here').dataset.path = '';
     for (const r of data.roots || []) addPickerEntry(list, r, true);
   }
 
@@ -179,6 +184,10 @@ const Wizard = (() => {
     $('pick-path').textContent = data.path;
     $('pick-up').disabled = !data.parent;
     $('pick-up').dataset.parent = data.parent || '';
+    // The folder now open is itself a choice, and the obvious one: this is
+    // where somebody who has navigated into what they want expects to press.
+    $('pick-here').hidden = false;
+    $('pick-here').dataset.path = data.path;
     $('pick-truncated').hidden = !data.truncated;
     const list = $('pick-list');
     list.replaceChildren();
@@ -188,13 +197,21 @@ const Wizard = (() => {
     for (const e of data.entries || []) addPickerEntry(list, e, false);
   }
 
+  // Two buttons on one row, doing different things to the same folder: the
+  // name OPENS it, "Protect this" CHOOSES it. They used to sit a few pixels
+  // apart with the name stretched across the whole row, so the dead space
+  // between them opened the folder and a near miss on one was a hit on the
+  // other. The name is now only as wide as its text, with a real gap after it
+  // that does nothing at all when clicked.
   function addPickerEntry(list, entry, isRoot) {
     const li = mk('li');
-    const openBtn = mk('button', 'link', (isRoot ? '' : '📁 ') + entry.name);
+    const openBtn = mk('button', 'link pick-open', (isRoot ? '' : '📁 ') + entry.name);
+    openBtn.title = 'Open ' + entry.name;
     openBtn.onclick = () => loadDir(entry.path);
-    const useBtn = mk('button', null, 'Protect this');
+    const useBtn = mk('button', 'pick-use', 'Protect this');
+    useBtn.title = 'Back up ' + entry.path;
     useBtn.onclick = () => chooseFolder(entry.path);
-    li.append(openBtn, useBtn);
+    li.append(openBtn, mk('span', 'pick-gap'), useBtn);
     list.appendChild(li);
   }
 
@@ -353,13 +370,18 @@ const Wizard = (() => {
     return wrap;
   }
 
+  // Same two-buttons-one-row problem as the source picker, same treatment: the
+  // name is only as wide as itself and the gap between open and select is
+  // inert.
   function pickRow(entry, show) {
     const li = mk('li');
-    const open = mk('button', 'link', '📁 ' + entry.name);
+    const open = mk('button', 'link pick-open', '📁 ' + entry.name);
+    open.title = 'Open ' + entry.name;
     open.onclick = () => show(entry.path);
-    const use = mk('button', null, 'Use');
+    const use = mk('button', 'pick-use', 'Use');
+    use.title = 'Back up into ' + entry.path;
     use.onclick = () => addLocalDestination(entry.path);
-    li.append(open, use);
+    li.append(open, mk('span', 'pick-gap'), use);
     return li;
   }
 
@@ -794,6 +816,10 @@ const Wizard = (() => {
     $('pick-up').onclick = (e) => {
       const parent = e.target.dataset.parent;
       if (parent) loadDir(parent); else loadRoots();
+    };
+    $('pick-here').onclick = (e) => {
+      const path = e.target.dataset.path;
+      if (path) chooseFolder(path);
     };
     $('pick-manual-go').onclick = () => {
       const v = $('pick-manual').value.trim();
