@@ -195,7 +195,11 @@ function renderFolders(st) {
   if (editingIgnoresFor !== null) return;
   const sec = document.getElementById('folders-section');
   const list = document.getElementById('folder-list');
-  const folders = st.folders || [];
+  // Only the folders that actually have a live mirror. A snapshot-only folder
+  // belongs under "Snapshots on a schedule", where its schedule and password
+  // are — listing it here alongside folders copied within seconds of a save
+  // claimed a protection it does not have.
+  const folders = (st.folders || []).filter((f) => f.continuous !== false);
   sec.hidden = folders.length === 0;
   list.replaceChildren();
   for (const f of folders) {
@@ -559,21 +563,31 @@ function renderArchives(st) {
   body.replaceChildren();
   for (const a of st.archives) {
     const tr = el('tr');
-    const cells = [a.name, a.target, a.every, a.state, humanTime(a.last_run)];
-    cells.forEach((c, i) => {
-      const td = el('td', undefined, c);
-      if (i === 3) {
-        td.className = a.state === 'ok' ? 'ok' : (a.state === 'never run' || a.needs_password ? 'busy' : 'bad');
-        // A snapshot with no stored password never runs; offer to set it here
-        // rather than sending the user to the command line.
-        if (a.needs_password && !readOnly) {
-          const btn = el('button', 'small-btn', 'enter password…');
-          btn.onclick = () => enterArchivePassword(a);
-          td.appendChild(btn);
-        }
-      }
-      tr.appendChild(td);
-    });
+    // WHAT is snapshotted, first. A job's name is whatever somebody typed in
+    // an optional box — it can say anything, and on a real machine it said
+    // something that read like the right folder while the job covered a
+    // different one. The folder is the fact worth checking.
+    const covers = a.covers_everything
+      ? 'every folder'
+      : (a.folders && a.folders.length ? a.folders.join(', ') : 'nothing — its folder is stopped');
+    // Built by name rather than by index. The state cell used to be found by
+    // counting to 3, so adding this Folder column silently moved the colouring
+    // and the "enter password…" button onto the schedule instead — a column
+    // added a year from now would do it again.
+    for (const text of [covers, a.name, a.target, a.every]) {
+      tr.appendChild(el('td', undefined, text));
+    }
+    const state = el('td', undefined, a.state);
+    state.className = a.state === 'ok' ? 'ok' : (a.state === 'never run' || a.needs_password ? 'busy' : 'bad');
+    // A snapshot with no stored password never runs; offer to set it here
+    // rather than sending the user to the command line.
+    if (a.needs_password && !readOnly) {
+      const btn = el('button', 'small-btn', 'enter password…');
+      btn.onclick = () => enterArchivePassword(a);
+      state.appendChild(btn);
+    }
+    tr.appendChild(state);
+    tr.appendChild(el('td', undefined, humanTime(a.last_run)));
     if (a.detail) tr.title = a.detail;
     body.appendChild(tr);
   }

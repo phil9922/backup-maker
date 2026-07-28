@@ -172,10 +172,23 @@ func TestCreateBackupLeavesAllFoldersTargetAlone(t *testing.T) {
 	}
 }
 
-func TestRemoveFolderStripsDanglingReferences(t *testing.T) {
+// THIS TEST USED TO ASSERT THE OPPOSITE, and the expectation was the bug.
+//
+// It required RemoveFolder to strip the folder's id out of every target and
+// archive job, which sounds like tidiness and is not: an empty Folders list
+// means EVERY folder, so stripping the only id emptied the list and silently
+// widened a job from "this folder" to "all of them". On a real machine that
+// handed a daily snapshot schedule — created for one directory, with a
+// password chosen for it — to a completely different folder, and it ran.
+//
+// Stopping a folder now LEAVES the id, so the job stays scoped and simply
+// resolves to nothing while the folder is stopped. The reference is only
+// dropped once the folder is gone for good; see TestForgettingAStoppedFolder.
+func TestStoppingAFolderLeavesItsJobsScopedToIt(t *testing.T) {
 	isolate(t)
 	base := t.TempDir()
 	src := mustDir(t, base, "src")
+	other := mustDir(t, base, "other")
 	dest := mustDir(t, base, "dest")
 
 	folder, targets, err := CreateBackup(BackupRequest{
@@ -187,27 +200,81 @@ func TestRemoveFolderStripsDanglingReferences(t *testing.T) {
 	if err := AddArchive("snap", []string{folder.ID}, "weekly", targets[0].Name, 3, "pw"); err != nil {
 		t.Fatal(err)
 	}
+	// A second folder, which the job must never start covering by itself.
+	if _, _, err := CreateBackup(BackupRequest{
+		Path: other, Destinations: []Destination{{ExistingTarget: targets[0].Name}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := RemoveFolder(folder.ID); err != nil {
 		t.Fatal(err)
 	}
+
 	cfg := load(t)
-	if len(cfg.Folders) != 0 {
-		t.Errorf("folder still present: %+v", cfg.Folders)
+	if len(cfg.Archives) != 1 {
+		t.Fatalf("expected the snapshot job to survive, got %+v", cfg.Archives)
+	}
+	if len(cfg.Archives[0].Folders) == 0 {
+		t.Fatal("the job's folder list was emptied, which means EVERY folder — it would now snapshot the folder that is still protected")
+	}
+	if covered := cfg.FoldersForArchive(cfg.Archives[0]); len(covered) != 0 {
+		var labels []string
+		for _, f := range covered {
+			labels = append(labels, f.Label)
+		}
+		t.Errorf("a job whose only folder was stopped now covers %v", labels)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("a config naming a stopped folder must still validate: %v", err)
+	}
+}
+
+// Once the folder is gone for good the reference goes with it — and a job left
+// with nothing to snapshot is deleted rather than emptied, because an empty
+// list would bring it back to life covering everything.
+func TestForgettingAStoppedFolderDropsAJobThatOnlyCoveredIt(t *testing.T) {
+	isolate(t)
+	base := t.TempDir()
+	src := mustDir(t, base, "src")
+	other := mustDir(t, base, "other")
+	dest := mustDir(t, base, "dest")
+
+	folder, targets, err := CreateBackup(BackupRequest{
+		Path: src, Destinations: []Destination{{Path: dest}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AddArchive("snap", []string{folder.ID}, "weekly", targets[0].Name, 3, "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := CreateBackup(BackupRequest{
+		Path: other, Destinations: []Destination{{ExistingTarget: targets[0].Name}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveFolder(folder.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ForgetRetired(folder.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := load(t)
+	if len(cfg.Archives) != 0 {
+		t.Errorf("a job with nothing left to snapshot survived: %+v — an empty folder list means every folder", cfg.Archives)
 	}
 	for _, tg := range cfg.Targets {
 		for _, id := range tg.Folders {
 			if id == folder.ID {
-				t.Errorf("target %q still references the removed folder", tg.Name)
+				t.Errorf("target %q still references the forgotten folder", tg.Name)
 			}
 		}
 	}
-	for _, a := range cfg.Archives {
-		for _, id := range a.Folders {
-			if id == folder.ID {
-				t.Errorf("archive %q still references the removed folder", a.Name)
-			}
-		}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("config does not validate after forgetting: %v", err)
 	}
 }
 

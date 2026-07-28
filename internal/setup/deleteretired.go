@@ -106,6 +106,10 @@ func DeleteRetiredBackups(id, confirm string, open TargetOpener) (DeleteResult, 
 			}
 		}
 	} else {
+		// Gone for good now, so the id may finally leave the jobs that named
+		// it — and a job scoped to this folder alone goes with it rather than
+		// reverting to "every folder". See dropFolderRefs.
+		dropFolderRefs(cfg, id)
 		cfg.Retired = withoutRetired(cfg.Retired, id)
 	}
 	if err := cfg.Save(); err != nil {

@@ -41,12 +41,26 @@ func RemoveFolder(id string) error {
 	rec := RetireRecord(cfg, cfg.Folders[idx], time.Now())
 
 	cfg.Folders = append(cfg.Folders[:idx], cfg.Folders[idx+1:]...)
-	for ti := range cfg.Targets {
-		cfg.Targets[ti].Folders = withoutString(cfg.Targets[ti].Folders, id)
-	}
-	for ai := range cfg.Archives {
-		cfg.Archives[ai].Folders = withoutString(cfg.Archives[ai].Folders, id)
-	}
+	// THE ID IS DELIBERATELY LEFT IN PLACE on targets and archive jobs, and
+	// this is the opposite of what it used to do.
+	//
+	// An empty Folders list means EVERY folder. So stripping the id out of a
+	// job that named exactly one folder emptied the list and silently widened
+	// the job from "this folder" to "all of them" — a snapshot schedule
+	// created for one directory quietly started sealing up whatever else
+	// happened to be configured, on its own timetable, with a password chosen
+	// for something else. That is exactly what happened on a real machine:
+	// stopping one folder handed its daily snapshot job to another.
+	//
+	// Left in, the list stays non-empty and therefore stays SCOPED.
+	// FoldersForArchive and FoldersForTarget resolve ids against the live
+	// folders, so a stopped folder's id simply resolves to nothing: the job
+	// covers nothing and does not run, which is what "the folder it backs up
+	// is stopped" should mean. Turning the folder back on makes it work again
+	// with no bookkeeping at all.
+	//
+	// The id is only cleaned up once the folder is gone for good — when its
+	// retired record is forgotten or its backups deleted. See dropFolderRefs.
 	// One record per folder id. Stopping a folder that was already stopped and
 	// turned back on replaces the old record rather than accumulating two that
 	// describe the same copy.

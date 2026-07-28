@@ -205,13 +205,25 @@ func (t Totals) Partial() bool { return t.DeviceTargets > 0 }
 
 // ArchiveRow is one scheduled-archive job's health line.
 type ArchiveRow struct {
-	Name    string    `json:"name"`
-	Target  string    `json:"target"`
-	Every   string    `json:"every"`
-	LastRun time.Time `json:"last_run,omitzero"`
-	NextDue time.Time `json:"next_due,omitzero"`
-	State   string    `json:"state"` // ok | due | failed | never run | needs password
-	Detail  string    `json:"detail,omitempty"`
+	Name string `json:"name"`
+	// Folders names what this job actually snapshots, resolved the same way
+	// the snapshot writer resolves it.
+	//
+	// THE DASHBOARD NEVER SAID THIS, and somebody set up a snapshot of the
+	// wrong directory and had no way to find out: the job's folder appeared
+	// only on the wizard's review step, mid-flow, and never again. A schedule
+	// that seals up a copy of your files every day should say which files.
+	Folders []string `json:"folders,omitempty"`
+	// CoversEverything marks a job with no folder list, which means every
+	// folder — including any added later. Said out loud rather than rendered
+	// as a list that silently grows.
+	CoversEverything bool      `json:"covers_everything,omitempty"`
+	Target           string    `json:"target"`
+	Every            string    `json:"every"`
+	LastRun          time.Time `json:"last_run,omitzero"`
+	NextDue          time.Time `json:"next_due,omitzero"`
+	State            string    `json:"state"` // ok | due | failed | never run | needs password
+	Detail           string    `json:"detail,omitempty"`
 	// NeedsPassword marks a job with no stored zip password — it cannot run
 	// until one is entered (an adoption may leave jobs in this state).
 	NeedsPassword bool `json:"needs_password,omitempty"`
@@ -227,6 +239,19 @@ type FolderInfo struct {
 	// skips. Published so the dashboard's exclude editor can send the flag back
 	// unchanged instead of silently switching the standard exclusions on again.
 	NoDefaultIgnores bool `json:"no_default_ignores,omitempty"`
+	// Continuous is true when some destination keeps a live mirror of this
+	// folder, as opposed to only sealing it into scheduled snapshots.
+	//
+	// THE TWO ARE DIFFERENT PROMISES and the dashboard used to list them
+	// together: a folder that only gets a weekly zip appeared under "Folders
+	// being protected" beside one copied within seconds of every save, with
+	// nothing to tell them apart. A snapshot-only destination is ArchivesOnly,
+	// so it mirrors nothing — which is exactly the distinction this carries.
+	Continuous bool `json:"continuous"`
+	// Snapshotted is true when at least one schedule seals this folder into a
+	// zip. Both can be true; a folder can have a live mirror and a snapshot,
+	// and saying so is the point.
+	Snapshotted bool `json:"snapshotted"`
 }
 
 // TargetInfo is one configured destination.
@@ -618,10 +643,29 @@ func (col *Collector) Collect() Model {
 
 	// Folder and target panels: what the dashboard is actually configured to
 	// do, as opposed to the folder × target health matrix.
+	// Which kind of backup each folder actually has, resolved through the same
+	// choke points the engines and the snapshot writer use — so the panel a
+	// folder appears under and the thing that actually copies it cannot
+	// disagree. FoldersForTarget already returns nothing for an ArchivesOnly
+	// destination, which is what makes "continuous" mean a live mirror.
+	continuous := map[string]bool{}
+	for _, t := range cfg.Targets {
+		for _, f := range cfg.FoldersForTarget(t) {
+			continuous[f.ID] = true
+		}
+	}
+	snapshotted := map[string]bool{}
+	for _, a := range cfg.Archives {
+		for _, f := range cfg.FoldersForArchive(a) {
+			snapshotted[f.ID] = true
+		}
+	}
 	for _, f := range cfg.Folders {
 		m.Folders = append(m.Folders, FolderInfo{
 			ID: f.ID, Label: f.Label, Path: f.Path, Ignores: f.ExtraIgnore,
 			NoDefaultIgnores: f.NoDefaultIgnores,
+			Continuous:       continuous[f.ID],
+			Snapshotted:      snapshotted[f.ID],
 		})
 	}
 	// Stopped folders. Built straight from the config: every question this
@@ -736,6 +780,13 @@ func (col *Collector) Collect() Model {
 		}
 		for _, job := range cfg.Archives {
 			row := ArchiveRow{Name: job.Name, Target: job.Target, Every: job.Every}
+			// Resolved through the same choke point the snapshot writer uses,
+			// so what the panel says a job covers and what it actually seals
+			// up cannot drift apart.
+			row.CoversEverything = len(job.Folders) == 0
+			for _, f := range cfg.FoldersForArchive(job) {
+				row.Folders = append(row.Folders, f.Label)
+			}
 			every, _ := config.ParseEvery(job.Every)
 			row.LastRun = lastRuns[job.Name]
 			if !row.LastRun.IsZero() && every > 0 {

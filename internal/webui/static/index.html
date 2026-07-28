@@ -329,8 +329,17 @@
       </div>
     </section>
 
+    <!-- The two kinds of backup, kept apart.
+         They used to share one "Folders being protected" list, which said
+         nothing about WHICH kind a folder had — and the snapshot table never
+         named its folder at all, so a snapshot of the wrong directory was
+         invisible once the wizard closed. A continuous mirror and a sealed
+         weekly zip are different promises about your files, and the page now
+         makes you choose which one you are looking at. -->
     <section id="folders-section" hidden>
-      <h2>Folders being protected</h2>
+      <h2>Backed up continuously</h2>
+      <p class="muted">Copied within seconds of you saving, with about 30 days of
+        previous versions kept alongside.</p>
       <ul id="folder-list" class="cards"></ul>
     </section>
 
@@ -362,12 +371,17 @@
     </section>
 
     <section id="archives-section" hidden>
-      <h2>Scheduled snapshots</h2>
-      <p class="muted">Password-protected zip snapshots, frozen at a moment in time.</p>
+      <h2>Snapshots on a schedule</h2>
+      <p class="muted">A complete copy, frozen at one moment and sealed into a
+        password-protected zip. Nothing is copied in between runs.</p>
       <div class="table-wrap">
         <table id="archive-rows">
           <thead>
-            <tr><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th></tr>
+            <!-- WHAT is snapshotted comes first, before the job's own name.
+                 The name is whatever somebody typed; the folder is the thing
+                 they will want to check, and its absence is how a snapshot of
+                 the wrong directory went unnoticed. -->
+            <tr><th>Folder</th><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th></tr>
           </thead>
           <tbody></tbody>
         </table>

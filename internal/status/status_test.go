@@ -760,3 +760,89 @@ func TestASnapshotOnlyDestinationDoesNotClaimEveryFolder(t *testing.T) {
 		t.Errorf("FolderCount = %d, want 0 for a snapshot-only destination", m.Targets[0].FolderCount)
 	}
 }
+
+// A SNAPSHOT JOB MUST NAME WHAT IT SNAPSHOTS. The dashboard never did, so a
+// schedule created for the wrong directory was invisible the moment the wizard
+// closed — the folder appeared only on the review step, and the job's own name
+// is whatever somebody typed in an optional box.
+func TestASnapshotJobReportsTheFolderItCovers(t *testing.T) {
+	cfg := &config.Config{
+		General: config.General{MachineName: "my-laptop"},
+		Folders: []config.Folder{
+			{ID: "f1", Path: "/home/pk/Desktop", Label: "Desktop"},
+			{ID: "f2", Path: "/home/pk/Desktop/Development", Label: "Development"},
+		},
+		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
+	}
+
+	col := setupCollector(cfg, func() bool { return true })
+	col.Archives = func() ([]archive.Result, map[string]time.Time) { return nil, nil }
+	m := col.Collect()
+
+	if len(m.Archives) != 1 {
+		t.Fatalf("expected one snapshot job, got %d", len(m.Archives))
+	}
+	if got := m.Archives[0].Folders; len(got) != 1 || got[0] != "Desktop" {
+		t.Errorf("job reports folders %v, want [Desktop] — the folder is the fact worth checking", got)
+	}
+	if m.Archives[0].CoversEverything {
+		t.Error("a job scoped to one folder claimed to cover everything")
+	}
+}
+
+// An every-folder job says so, rather than rendering a list that silently
+// grows as folders are added.
+func TestAnEveryFolderSnapshotJobSaysSo(t *testing.T) {
+	cfg := &config.Config{
+		General:  config.General{MachineName: "my-laptop"},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/pk/a", Label: "a"}},
+		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+		Archives: []config.Archive{{Name: "all", Every: "daily", Target: "card"}},
+	}
+
+	col := setupCollector(cfg, func() bool { return true })
+	col.Archives = func() ([]archive.Result, map[string]time.Time) { return nil, nil }
+	m := col.Collect()
+
+	if !m.Archives[0].CoversEverything {
+		t.Error("a job with no folder list must report that it covers every folder")
+	}
+}
+
+// The two kinds of backup are different promises, and the model has to tell
+// them apart so the dashboard can put them in different sections: a folder
+// that only gets a weekly zip is not "backed up continuously".
+func TestASnapshotOnlyFolderIsNotReportedAsContinuous(t *testing.T) {
+	cfg := &config.Config{
+		General: config.General{MachineName: "my-laptop"},
+		Folders: []config.Folder{
+			{ID: "f1", Path: "/home/pk/mirrored", Label: "mirrored"},
+			{ID: "f2", Path: "/home/pk/sealed", Label: "sealed"},
+		},
+		Targets: []config.Target{
+			{Type: "drive", Name: "card", Path: "/media/card", Folders: []string{"f1"}},
+			{Type: "drive", Name: "cold", Path: "/media/cold", ArchivesOnly: true},
+		},
+		Archives: []config.Archive{{Name: "weekly", Folders: []string{"f2"}, Every: "weekly", Target: "cold"}},
+	}
+
+	m := setupCollector(cfg, func() bool { return true }).Collect()
+
+	by := map[string]FolderInfo{}
+	for _, f := range m.Folders {
+		by[f.Label] = f
+	}
+	if !by["mirrored"].Continuous {
+		t.Error("a folder with a live mirror was not reported as continuous")
+	}
+	if by["sealed"].Continuous {
+		t.Error("a snapshot-only folder was reported as continuously backed up; it would appear beside folders copied within seconds of a save")
+	}
+	if !by["sealed"].Snapshotted {
+		t.Error("a folder in a snapshot job was not reported as snapshotted")
+	}
+	if by["mirrored"].Snapshotted {
+		t.Error("a folder in no snapshot job was reported as snapshotted")
+	}
+}

@@ -118,8 +118,39 @@ func ForgetRetired(id string) error {
 	if _, ok := cfg.RetiredByID(id); !ok {
 		return fmt.Errorf("no stopped folder with id %q", id)
 	}
+	dropFolderRefs(cfg, id)
 	cfg.Retired = withoutRetired(cfg.Retired, id)
 	return cfg.Save()
+}
+
+// dropFolderRefs removes a folder id from every target and archive job, now
+// that the folder is gone for good rather than merely stopped.
+//
+// AN ARCHIVE JOB LEFT WITH NO FOLDERS IS DELETED RATHER THAN EMPTIED, because
+// an empty list means EVERY folder — so a job created for one directory would
+// come back to life covering all of them. It has nothing left to snapshot and
+// no way to say so, and a schedule that silently re-aims itself is the bug
+// this whole path exists to avoid. A target is left alone: it is a place, not
+// a job, and one that mirrors nothing is simply idle.
+func dropFolderRefs(cfg *config.Config, id string) {
+	for ti := range cfg.Targets {
+		if len(cfg.Targets[ti].Folders) > 0 {
+			cfg.Targets[ti].Folders = withoutString(cfg.Targets[ti].Folders, id)
+		}
+	}
+	var kept []config.Archive
+	for _, a := range cfg.Archives {
+		if len(a.Folders) == 0 {
+			kept = append(kept, a) // an every-folder job was never scoped to this one
+			continue
+		}
+		a.Folders = withoutString(a.Folders, id)
+		if len(a.Folders) == 0 {
+			continue // scoped to this folder alone; nothing left to do
+		}
+		kept = append(kept, a)
+	}
+	cfg.Archives = kept
 }
 
 func withoutRetired(list []config.Retired, id string) []config.Retired {

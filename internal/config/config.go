@@ -486,6 +486,10 @@ func (c *Config) Validate() error {
 			dest[d] = f.Label
 		}
 	}
+	stopped := map[string]bool{}
+	for _, r := range c.Retired {
+		stopped[r.ID] = true
+	}
 	for i, t := range c.Targets {
 		switch t.Type {
 		case "device":
@@ -534,11 +538,15 @@ func (c *Config) Validate() error {
 			}
 		}
 		for _, fid := range t.Folders {
-			if !seen[fid] {
+			if !seen[fid] && !stopped[fid] {
 				errs = append(errs, fmt.Errorf("target %q references unknown folder id %q", t.Name, fid))
 			}
 		}
 	}
+	// A STOPPED folder's id is still a known id. Targets and archive jobs keep
+	// naming it while its retired record exists, which is what stops an empty
+	// list from meaning "every folder" and silently re-aiming a snapshot
+	// schedule at whatever else is configured. See setup.RemoveFolder.
 	targetType := map[string]string{}
 	for _, t := range c.Targets {
 		targetType[t.Name] = t.Type
@@ -562,7 +570,7 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("archive %q references unknown target %q", a.Name, a.Target))
 		}
 		for _, fid := range a.Folders {
-			if !seen[fid] {
+			if !seen[fid] && !stopped[fid] {
 				errs = append(errs, fmt.Errorf("archive %q references unknown folder id %q", a.Name, fid))
 			}
 		}
