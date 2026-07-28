@@ -306,46 +306,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	// this machine is off.
 	go d.statusPageLoop(ctx, collector.Collect)
 
-	actions := webui.Actions{
-		Scan: func(ctx context.Context) (any, error) { return discover.Scan(ctx) },
-		AddShare: func(req webui.AddShareRequest) error {
-			// setup writes config.toml; the config watcher applies it.
-			return setup.AddShareTarget(req.URL, req.Username, req.Password, req.Name, req.Verify)
-		},
-		Wake:         d.WakeNow,
-		AcceptPair:   d.acceptPair,
-		DeviceID:     d.deviceID,
-		RevertFolder: d.revertFolder,
-		Machines:     d.listMachines,
-		Storage:      d.machineStorage,
-		CreateBackup: d.createBackup,
-		RemoveFolder: setup.RemoveFolder,
-		// The three actions on a stopped folder. Methods rather than bare
-		// setup functions because each one has to say what it did in a
-		// sentence, and the delete needs the daemon's own way of opening a
-		// destination.
-		ReenableFolder:       d.reenableFolder,
-		DeleteRetiredBackups: d.deleteRetiredBackups,
-		ForgetRetired:        d.forgetRetired,
-		RemoveTarget:         setup.RemoveTarget,
-		SetFolderIgnores:     setup.SetFolderIgnores,
-		AddArchive:           d.addArchive,
-		CompleteSetup:        d.completeSetup,
-		AdoptAllowed:         setup.AdoptAllowed,
-		AdoptScan:            d.adoptScan,
-		AdoptInspect:         d.adoptInspect,
-		AdoptTestShare:       d.adoptTestShare,
-		Adopt:                d.adopt,
-		SetArchivePassword:   d.setArchivePassword,
-		SetSettings:          d.setSettings,
-		TestAlert:            d.testAlert,
-		ApproveLANDevice:     d.approveLANDevice,
-		ForgetLANDevice:      d.forgetLANDevice,
-		LANGate: &webui.LANGate{
-			ApprovedOnly: d.lanViewApprovedOnly,
-			Seen:         d.lanDeviceSeen,
-		},
-	}
+	actions := buildActions(d)
 	srv, err := webui.New(cfg, state, log, func() any { return collector.Collect() }, actions)
 	if err != nil {
 		return err
@@ -1019,4 +980,57 @@ func (d *daemon) webhookURLDisplay() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return notify.RedactEndpoint(d.state.WebhookURL)
+}
+
+// buildActions is every callback the dashboard and CLI reach the daemon
+// through.
+//
+// A FUNCTION RATHER THAN A LITERAL INSIDE Run, so that a test can hold the
+// result and check that none of them is nil. A nil action is not a compile
+// error — it is a route that answers 503 the first time somebody presses the
+// button, which has now happened twice. See TestEveryActionIsWired.
+func buildActions(d *daemon) webui.Actions {
+	return webui.Actions{
+		Scan: func(ctx context.Context) (any, error) { return discover.Scan(ctx) },
+		AddShare: func(req webui.AddShareRequest) error {
+			// setup writes config.toml; the config watcher applies it.
+			return setup.AddShareTarget(req.URL, req.Username, req.Password, req.Name, req.Verify)
+		},
+		Wake:         d.WakeNow,
+		AcceptPair:   d.acceptPair,
+		DeviceID:     d.deviceID,
+		RevertFolder: d.revertFolder,
+		Machines:     d.listMachines,
+		Storage:      d.machineStorage,
+		CreateBackup: d.createBackup,
+		RemoveFolder: setup.RemoveFolder,
+		// The three actions on a stopped folder. Methods rather than bare
+		// setup functions because each one has to say what it did in a
+		// sentence, and the delete needs the daemon's own way of opening a
+		// destination.
+		ReenableFolder:       d.reenableFolder,
+		DeleteRetiredBackups: d.deleteRetiredBackups,
+		ForgetRetired:        d.forgetRetired,
+		RemoveTarget:         setup.RemoveTarget,
+		SetFolderIgnores:     setup.SetFolderIgnores,
+		AddArchive:           d.addArchive,
+		CompleteSetup:        d.completeSetup,
+		AdoptAllowed:         setup.AdoptAllowed,
+		AdoptScan:            d.adoptScan,
+		AdoptInspect:         d.adoptInspect,
+		AdoptTestShare:       d.adoptTestShare,
+		Adopt:                d.adopt,
+		SetArchivePassword:   d.setArchivePassword,
+		RemoveArchive:        setup.RemoveArchive,
+		SetArchivePaused:     setup.SetArchivePaused,
+		SetArchiveSchedule:   setup.SetArchiveSchedule,
+		SetSettings:          d.setSettings,
+		TestAlert:            d.testAlert,
+		ApproveLANDevice:     d.approveLANDevice,
+		ForgetLANDevice:      d.forgetLANDevice,
+		LANGate: &webui.LANGate{
+			ApprovedOnly: d.lanViewApprovedOnly,
+			Seen:         d.lanDeviceSeen,
+		},
+	}
 }
