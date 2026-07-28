@@ -1,0 +1,470 @@
+/* SPDX-License-Identifier: MIT */
+
+:root {
+  --bg: #10141a;
+  --fg: #e6e9ee;
+  --muted: #8a94a3;
+  --accent: #4fc3f7;
+  --ok: #66bb6a;
+  --busy: #ffca28;
+  --bad: #ef5350;
+  --line: #232a34;
+  --panel: #151b23;
+  --panel-2: #1a212b;
+  /* One spacing scale, used everywhere. The dashboard's ragged look came from
+     a dozen hand-picked values (0.6rem here, 0.35rem there) that never lined
+     up with each other. */
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  /* The gutter every section shares, so the table, the cards and the panels
+     all start on the same vertical line. */
+  --gutter: 0.9rem;
+  font-family: system-ui, sans-serif;
+}
+/* Figures that sit in columns — sizes, percentages, ages — must not jitter as
+   they change, or a table that updates every second reads as unstable. */
+.mono, td, .bar-label, .stat-value { font-variant-numeric: tabular-nums; }
+* { box-sizing: border-box; margin: 0; }
+/* An author `display` rule beats the UA stylesheet's [hidden]{display:none},
+   so `main { display: grid }` would leave hidden panels on screen. */
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); min-height: 100vh; }
+header {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 1rem 1.5rem; border-bottom: 1px solid #232a34;
+}
+h1 { font-size: 1.2rem; font-weight: 600; }
+.badge {
+  background: #1c2430; color: var(--accent);
+  border-radius: 999px; padding: 0.15rem 0.7rem; font-size: 0.85rem;
+}
+.badge.ok { color: var(--ok); }
+.badge.bad { color: var(--bad); }
+main { padding: var(--s5); max-width: 60rem; margin: 0 auto; display: grid; gap: var(--s5); }
+/* Grid items default to min-width:auto, which lets a wide table push the page
+   sideways instead of scrolling inside .table-wrap. */
+main > section { min-width: 0; }
+footer {
+  max-width: 60rem; margin: 0 auto; padding: 1.25rem 1.5rem 2rem;
+  border-top: 1px solid #232a34; font-size: 0.85rem;
+}
+footer a { color: var(--accent); }
+#status-line, .muted { color: var(--muted); }
+.notice {
+  background: #2b2417; border: 1px solid #6d5a1f; border-radius: 8px;
+  padding: 0.75rem 1rem; white-space: pre-line;
+}
+/* pre-line above makes the source's line breaks the layout, which suits the
+   short blobs written straight into a notice. A paragraph nested in one is
+   prose and has to wrap to the reader's width instead — on a phone especially,
+   where hand-placed breaks leave a ragged column. */
+.notice p { white-space: normal; margin: var(--s2) 0 0; }
+/* A <p> that IS the notice is prose, not a hand-laid-out blob: pre-line turns
+   the newline after the opening tag into a leading blank line, and hand-wrapped
+   sentences into a ragged column. Both were visible in the network-view
+   warning. */
+p.notice { white-space: normal; }
+/* Room between a warning and whatever it is warning about. Without it the red
+   box reads as attached to the line above rather than as a remark on it. */
+.picker .notice { margin-top: var(--s4); }
+/* One machine waiting to be approved, with its Approve button. A device ID is
+   71 unbroken characters, so the row has to be free to wrap. */
+.pending-source { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.pending-source + .pending-source { margin-top: 0.6rem; }
+.pending-source .mono { font-size: 0.85rem; overflow-wrap: anywhere; }
+.table-wrap { overflow-x: auto; margin-top: 0.75rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 0.5rem 0.9rem; white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: 0.85rem; border-bottom: 1px solid #232a34; }
+tr + tr td { border-top: 1px solid #1a212b; }
+td.ok { color: var(--ok); }
+td.busy { color: var(--busy); }
+td.bad { color: var(--bad); }
+code { background: #1c2430; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85rem; }
+h2 {
+  font-size: 0.8rem; font-weight: 600; margin-bottom: var(--s3);
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+  padding-left: var(--gutter);
+}
+/* Table cells and card contents share this inset, which is the whole reason
+   the sections now line up with each other rather than each starting wherever
+   its own padding happened to land. */
+th:first-child, td:first-child { padding-left: var(--gutter); }
+th:last-child, td:last-child { padding-right: var(--gutter); }
+.row { display: flex; align-items: center; gap: 0.75rem; margin: 0.6rem 0; }
+button {
+  background: #1c2430; color: var(--accent); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.35rem 0.9rem; cursor: pointer; font-size: 0.9rem;
+}
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+#scan-results { list-style: none; display: grid; gap: 0.5rem; margin: 0.5rem 0; }
+#scan-results li { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.share-form { display: grid; gap: 0.5rem; max-width: 24rem; margin-top: 0.6rem; }
+.share-form input {
+  background: #151b23; color: var(--fg); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.4rem 0.6rem;
+}
+details summary { cursor: pointer; margin-top: 0.5rem; }
+
+/* Phones. The dashboard is often checked from a phone over an SSH tunnel or
+   on the machine itself, so the layout has to survive a ~390px viewport.
+   Tables keep their horizontal scroll (.table-wrap) — five columns of status
+   genuinely don't fit, and scrolling beats truncating. */
+@media (max-width: 40rem) {
+  header { flex-wrap: wrap; gap: 0.5rem; padding: 0.9rem 1rem; }
+  main { padding: 1rem; gap: 1rem; }
+  footer { padding: 1rem 1rem 1.5rem; }
+  th, td { padding: 0.45rem 0.6rem; }
+  /* 24rem exceeds the viewport once main's padding is counted. */
+  .share-form { max-width: 100%; }
+  /* A device ID is 71 unbroken characters. */
+  #identity code { overflow-wrap: anywhere; }
+  .row { flex-wrap: wrap; }
+}
+
+/* The pairing QR under the device ID. White plate and padding on purpose: the
+   code needs its quiet zone and real contrast to scan off a dark page. */
+#device-qr { margin-top: 0.6rem; display: grid; gap: 0.35rem; justify-items: start; }
+#device-qr img {
+  width: 160px; height: 160px; background: #fff;
+  padding: 0.4rem; border-radius: 6px; image-rendering: pixelated;
+}
+
+/* --- progress bars ---------------------------------------------------- */
+/* The label used to sit UNDER the bar, which made every row two lines tall and
+   left the percentages ragged down the column. Beside it, in a fixed column,
+   they read as a column. */
+.progress-cell { min-width: 13rem; }
+.progress-cell .progress-wrap { display: flex; align-items: center; gap: var(--s3); }
+.progress-cell .bar { flex: 1 1 auto; }
+.bar-label { flex: 0 0 5.5rem; text-align: right; }
+.bar {
+  background: #1a212b; border-radius: 999px; height: 6px;
+  overflow: hidden; min-width: 6rem;
+}
+.bar-fill {
+  height: 100%; width: 0; border-radius: 999px; background: var(--accent);
+  /* Rows are updated in place, so the bar can ease between polls instead of
+     jumping. A full DOM rebuild would discard this. */
+  transition: width 0.6s linear;
+}
+.bar-fill.ok { background: var(--ok); }
+.bar-fill.busy { background: var(--busy); }
+.bar-fill.bad { background: var(--bad); }
+.bar-fill.indeterminate {
+  width: 100%;
+  background: repeating-linear-gradient(90deg, #2b3542 0 10px, #1a212b 10px 20px);
+  animation: slide 1s linear infinite;
+}
+@keyframes slide { to { background-position: 20px 0; } }
+.bar-label { font-size: 0.8rem; color: var(--muted); flex: 0 0 5.5rem; text-align: right; }
+
+/* --- cards (folders / destinations) ----------------------------------- */
+.cards { list-style: none; display: grid; gap: var(--s2); margin: 0; padding: 0; }
+/* A GRID, NOT A FLEX ROW — this is the alignment fix.
+   As a flex row with `margin-left:auto` on the buttons, every card laid itself
+   out according to how long its own path happened to be, so the name, the
+   metadata and the buttons landed at a different x in every row. Four explicit
+   columns mean a column is a column: names line up, paths start together, and
+   the actions sit on one right-hand axis whatever is to their left. */
+.card {
+  display: grid;
+  grid-template-columns: 1rem minmax(5rem, 9rem) minmax(0, 1fr) auto;
+  align-items: start; column-gap: var(--s3); row-gap: var(--s2);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: var(--s3) var(--gutter);
+}
+/* The metadata cluster: everything between the name and the buttons. It wraps
+   inside its own column rather than pushing the buttons around. */
+.card-meta {
+  display: flex; align-items: center; gap: var(--s3);
+  flex-wrap: wrap; min-width: 0;
+}
+.card-meta .mono { overflow-wrap: anywhere; }
+.card-actions { display: flex; align-items: center; gap: var(--s2); justify-self: end; }
+.card .mono { font-size: 0.85rem; }
+/* Anything that needs the full width of the card — the storage bar, the
+   exclude editor — says so once, here. */
+.card-wide { grid-column: 2 / -1; }
+/* The destination's free-space readout: its own full-width line under the
+   metadata row, so a fixed-width bar sits beside "N free of M". */
+.card .storage {
+  display: flex; align-items: center; gap: var(--s3);
+}
+.card .storage .bar { flex: 0 0 8rem; }
+/* The inline exclude editor: also its own full-width line, so a long pattern
+   list has room to type in and the metadata row above it stays intact. */
+.card .ignore-editor {
+  display: flex; align-items: center;
+  gap: var(--s3); flex-wrap: wrap; margin-top: var(--s1);
+}
+.card .ignore-editor input {
+  flex: 1 1 16rem; min-width: 0;
+  background: #10141a; color: var(--fg); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.35rem 0.6rem;
+}
+/* Beats `.card button { margin-left: auto }`, which would fling Save and Cancel
+   to the far edge, away from the box they act on. */
+.card .ignore-editor button { margin-left: 0; }
+.card .ignore-editor .hint { flex-basis: 100%; font-size: 0.85rem; line-height: 1.45; }
+button.danger { color: var(--bad); border-color: #3a2a2e; }
+button.danger:hover { border-color: var(--bad); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.row.spread { justify-content: space-between; }
+
+/* --- wizard ----------------------------------------------------------- */
+#wizard, #adopt { padding: 1.5rem; max-width: 46rem; margin: 0 auto; display: grid; gap: 1.25rem; }
+#wizard > section, #adopt > section { min-width: 0; }
+.wiz-head h2 { font-size: 1.3rem; }
+.wiz-progress {
+  list-style: none; display: flex; flex-wrap: wrap; gap: 0.4rem;
+  margin: 0.75rem 0 0; padding: 0; font-size: 0.85rem;
+}
+.wiz-progress li {
+  color: var(--muted); background: #151b23; border: 1px solid #232a34;
+  border-radius: 999px; padding: 0.2rem 0.75rem;
+}
+.wiz-progress li.current { color: var(--accent); border-color: var(--accent); }
+.wiz-progress li.done { color: var(--ok); border-color: #2b4030; }
+.wiz-panel h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+.wiz-nav { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.wiz-nav .skip { margin-left: auto; font-size: 0.85rem; }
+#wiz-finish, #adopt-finish { color: var(--ok); border-color: #2b4030; }
+.chosen { color: var(--ok); margin-top: 0.6rem; font-size: 0.9rem; }
+/* Inline result of a per-share connection test / small validation text. */
+.field-error { color: var(--bad); font-size: 0.9rem; }
+.field-ok { color: var(--ok); font-size: 0.9rem; }
+/* A compact affordance sitting inside a table cell (e.g. "enter password…"). */
+.small-btn { margin-left: 0.6rem; padding: 0.1rem 0.5rem; font-size: 0.8rem; }
+.notice.warn { background: #2b1a1a; border-color: #6d2f2f; }
+.notice.subtle { background: #151b23; border-color: #232a34; color: var(--muted); margin-top: 0.75rem; }
+
+/* folder picker */
+.picker { border: 1px solid #232a34; border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
+.picker-list { list-style: none; margin: 0.4rem 0 0; padding: 0; max-height: 15rem; overflow-y: auto; }
+.picker-list li { display: flex; align-items: center; gap: 0.6rem; padding: 0.15rem 0; }
+button.link {
+  background: none; border: none; color: var(--fg); padding: 0.15rem 0;
+  text-align: left; flex: 1; cursor: pointer;
+}
+button.link:hover { color: var(--accent); }
+
+/* machine list */
+.machines { list-style: none; margin: 0.6rem 0; padding: 0; display: grid; gap: 0.5rem; }
+/* A grid still takes its margin with nothing in it, which would leave a gap
+   where no computer has been added by device ID. */
+.machines:empty { display: none; }
+.machine { background: #151b23; border: 1px solid #232a34; border-radius: 8px; padding: 0.6rem 0.9rem; }
+.machine-body { margin-top: 0.5rem; display: grid; gap: 0.35rem; }
+.storage {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.35rem 0.5rem; border-radius: 6px; cursor: pointer;
+}
+.storage:hover { background: #1c2430; }
+.review { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin-top: 0.5rem; }
+.review dt { color: var(--muted); }
+.review dd { margin: 0; white-space: pre-line; }
+select {
+  background: #151b23; color: var(--fg); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.4rem 0.6rem;
+}
+
+@media (max-width: 40rem) {
+  #wizard, #adopt { padding: 1rem; gap: 1rem; }
+  .card button { margin-left: 0; }
+  .review { grid-template-columns: 1fr; gap: 0.15rem 0; }
+  .review dd { margin-bottom: 0.5rem; }
+}
+
+/* backup-kind choice */
+.eyebrow { font-size: .8rem; letter-spacing: .04em; text-transform: uppercase; }
+.wiz-head h2 { margin-top: .15rem; }
+#wiz-lede, #adopt-lede { margin-top: .35rem; max-width: 46rem; line-height: 1.5; }
+.choices { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.choice {
+  display: flex; gap: .8rem; align-items: flex-start; cursor: pointer;
+  background: #151b23; border: 1px solid #232a34;
+  border-radius: 8px; padding: .9rem 1rem;
+}
+.choice:hover { border-color: #2b3542; }
+.choice:has(input:checked) { border-color: var(--accent); background: #161f29; }
+.choice input { margin-top: .25rem; }
+.choice-body { display: grid; gap: .3rem; }
+.choice-body strong { font-size: 1rem; }
+.choice-body .small, .small { font-size: .85rem; }
+
+/* The running build, in the footer. Quiet on purpose: worth being able to find
+   when checking whether a fix has landed, not worth competing with the backup
+   status for attention. */
+.version { opacity: 0.6; }
+
+/* Settings checkboxes. The label is a row so the text can wrap under itself
+   rather than under the box, and the hint sits on its own line beneath the
+   thing it explains. */
+.row-check { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.35rem 0; cursor: pointer; }
+.row-check input { margin-top: 0.25rem; flex: none; }
+.row-check span { display: block; }
+.row-check .small { display: block; margin-top: 0.1rem; }
+/* The per-category list is subordinate to the master switch above it, and says
+   so by indentation rather than by a second heading. */
+.sub-checks { border: 0; margin: 0.2rem 0 0; padding: 0; }
+.sub-checks legend { padding: 0; margin-bottom: 0.2rem; }
+/* Switched off wholesale when the master switch is off: still readable, plainly
+   not in force. */
+.sub-checks[disabled] { opacity: 0.45; }
+
+/* A settings save that failed. Plain text, not a panel: it is a one-line
+   correction to something the user just clicked. */
+.small.bad { color: var(--bad); }
+/* A save that just landed. Green and momentary — the line reverts to its
+   ordinary muted description a few seconds later, because "saved" stops being
+   news and the address it names does not. */
+.small.ok { color: var(--ok); }
+
+/* One delivery method: its switch on the left, its Test on the right. The test
+   is the only way to answer "would I actually hear about it?" on a setup whose
+   healthy state is silence. */
+.delivery { display: flex; align-items: flex-start; gap: 0.75rem; }
+.delivery .row-check { flex: 1; }
+.delivery button { flex: none; margin-top: 0.2rem; }
+
+/* The address a delivery method needs (webhook URL, ntfy topic, ntfy token),
+   on the line beneath its switch.
+ *
+ * FULL WIDTH, so its Save button lands directly under the Test button above it
+ * and the panel reads as one column instead of three ragged ones. A bare input
+ * is about 20 characters wide by default, which left these boxes stopping in
+ * the middle of the panel with the URL scrolling out of sight inside them —
+ * and these are the fields where seeing the whole value matters most, because
+ * none of them is ever echoed back once saved.
+ *
+ * min-width:0 is what actually lets it fill rather than overflow: a flex item's
+ * automatic minimum size is its intrinsic content width, so without this a long
+ * placeholder or a pasted URL keeps the box wider than its share and shoves
+ * Save off the right-hand edge. */
+#settings-section .sub-checks .row { align-items: center; }
+#settings-section .sub-checks .row input {
+  flex: 1; min-width: 0;
+  background: #151b23; color: var(--fg); border: 1px solid #2b3542;
+  border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.9rem;
+}
+#settings-section .sub-checks .row button { flex: none; }
+/* A collapsed settings group. These are set once and then left for months, so
+   shut is the right default; the summary has to say enough that nobody has to
+   open one to find out whether it is the group they wanted. */
+.settings-group { margin: 0 0 var(--s2); }
+.settings-group > summary {
+  display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  cursor: pointer; padding: 0.55rem var(--gutter);
+  border: 1px solid var(--line); border-radius: 8px; background: #141a22;
+  list-style: none;
+}
+.settings-group > summary::-webkit-details-marker { display: none; }
+/* The twisty, drawn rather than relying on the browser's own marker — which is
+   what `list-style: none` above removes, so that the flex layout works at all. */
+.settings-group > summary::before {
+  content: '▸'; color: var(--muted); font-size: 0.8em;
+  transition: transform 0.12s ease; display: inline-block;
+}
+.settings-group[open] > summary::before { transform: rotate(90deg); }
+.settings-group > summary:hover { border-color: var(--accent); }
+.settings-group > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-group .group-title { font-weight: 600; color: var(--fg); }
+/* Pushed to the right so a fault is the last thing on the line and reads as a
+   status rather than part of the group's name. */
+.settings-group .group-warn { margin-left: auto; }
+.settings-group > .picker:first-of-type { margin-top: var(--s2); }
+
+#settings-section h3 { font-weight: 600; margin-bottom: 0.3rem; color: var(--fg); }
+
+
+/* --- the verdict ------------------------------------------------------- */
+/* The one thing this page exists to say. Large enough to read without
+   focusing, with the state carried by a dot rather than by colour alone. */
+.verdict {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: var(--s4);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: var(--s4) var(--s5);
+}
+.verdict-dot {
+  width: 0.85rem; height: 0.85rem; border-radius: 50%;
+  background: var(--muted); flex: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 18%, transparent);
+}
+.verdict.ok .verdict-dot { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent); }
+.verdict.busy .verdict-dot { background: var(--busy); box-shadow: 0 0 0 4px color-mix(in srgb, var(--busy) 18%, transparent); }
+.verdict.bad .verdict-dot { background: var(--bad); box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 18%, transparent); }
+.verdict-text { min-width: 0; }
+.verdict-line { font-size: 1.15rem; font-weight: 600; line-height: 1.3; }
+.verdict-line + p { margin-top: var(--s1); }
+
+/* --- state dots -------------------------------------------------------- */
+/* "More graphic" where it earns its place: a state is legible at a glance as a
+   shape, not only as a colour — which also stops the table relying on colour
+   alone to say something important. */
+.dot::before {
+  content: ''; display: inline-block; width: 0.5rem; height: 0.5rem;
+  border-radius: 50%; margin-right: var(--s2); vertical-align: 0.05em;
+  background: currentColor;
+}
+
+/* --- type icons -------------------------------------------------------- */
+.type-icon { width: 1rem; height: 1rem; flex: none; color: var(--muted); }
+.card .type-icon { margin-top: 0.15rem; }
+.card > strong { line-height: 1.4; }
+.card-meta { line-height: 1.4; }
+
+/* Standalone lines share the gutter every panel and table uses, so nothing on
+   the page starts at an edge of its own. */
+#totals, #identity { padding-left: var(--gutter); }
+
+/* Phones. The four-column card is right on a laptop and impossible at 390px:
+   the metadata column is squeezed to a few pixels and a long path wraps to one
+   character per line. Below this width the card stacks instead — icon and name
+   on one row, then the metadata, then the actions — which keeps the same
+   reading order without pretending there is room for columns. */
+@media (max-width: 40rem) {
+  .card { grid-template-columns: 1rem minmax(0, 1fr); }
+  .card > strong,
+  .card-meta,
+  .card-actions,
+  .card-wide { grid-column: 2; }
+  .card-actions { justify-self: start; flex-wrap: wrap; }
+  .card-meta .mono { overflow-wrap: anywhere; }
+  /* The verdict's button drops under its sentence rather than squeezing it. */
+  .verdict { grid-template-columns: auto minmax(0, 1fr); }
+  .verdict > button { grid-column: 2; justify-self: start; }
+  .progress-cell { min-width: 10rem; }
+  .bar-label { flex-basis: 4rem; }
+}
+
+/* The network-view sub-controls each get room to read as their own decision,
+   rather than as more lines of the paragraph above them. */
+#lan-access, #lan-devices { margin-top: var(--s4); }
+#lan-devices-title { margin-bottom: var(--s2); }
+#lan-view-url { margin-top: var(--s2); }
+
+/* The footer's two jobs sit at opposite ends: the credit reads as a sentence,
+   the build reads as data. Trailing the version onto the end of that sentence
+   made it invisible in practice — it was reported missing three times while it
+   was rendering the whole time. */
+.footer-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--s4); flex-wrap: wrap;
+}
+.version {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 0.1rem 0.6rem; white-space: nowrap;
+}
+
+/* The per-method delivery state sits tight under its own row, indented to the
+   checkbox's text so it reads as a remark on that method rather than a new one. */
+.delivery-state { margin: 0 0 var(--s2) 1.6rem; }
