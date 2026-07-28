@@ -178,6 +178,23 @@ func Adopt(m *Manifest, d AdoptDecisions) (*AdoptResult, error) {
 		return nil, fmt.Errorf("adopted configuration is invalid: %w", err)
 	}
 
+	// Continuing as the old machine means taking on its identity, and the
+	// claims it left in its <machine> directory on every destination are part of
+	// that. Inheriting its install id is what lets those destinations be
+	// recognised as ours when they are next plugged in — including the ones that
+	// were not present during adoption, which is the case a claim rewritten here
+	// and now could not cover.
+	//
+	// Only when continuing: a machine starting fresh gets its own directory
+	// under its own name, and must not be able to take over a claim the original
+	// still holds.
+	if d.ContinueAsMachine && m.InstallID != "" && !state.Owns(m.InstallID) {
+		state.InheritedInstallIDs = append(state.InheritedInstallIDs, m.InstallID)
+	}
+	if state.InstallID == "" {
+		state.InstallID = config.NewToken()[:16]
+	}
+
 	state.SetupComplete = true
 	if err := cfg.Save(); err != nil {
 		return nil, err

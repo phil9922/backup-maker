@@ -37,12 +37,18 @@ backup-maker adopt /media/you/SDCARD        # a drive, card, or USB stick
 backup-maker adopt //NAS/backups            # or a network share
 ```
 
-Every destination carries a small non-secret manifest
-(`.backup-maker-manifest.json`) listing your folders, excludes, **all** your
-destinations and schedules, and the machine name — so adopting *one* reachable
-destination recovers the *whole* setup, including the destinations that aren't
-plugged in right now. Passwords are the one thing never written to a
+Every computer that uses a destination leaves a small non-secret manifest
+(`<machine>/.backup-maker-manifest.json`) listing your folders, excludes, **all**
+your destinations and schedules, and the machine name — so adopting *one*
+reachable destination recovers the *whole* setup, including the destinations
+that aren't plugged in right now. Passwords are the one thing never written to a
 destination; adopt asks you for the ones you already hold.
+
+If the destination holds backups from more than one computer, adopt asks which
+one you are restoring before anything else — restoring the wrong machine's
+configuration onto this one is not something to guess at. A destination written
+by an older backup-maker keeps its manifest at the top level instead, and is
+adopted exactly as it always was.
 
 Adopt walks you through:
 

@@ -201,6 +201,10 @@ type AdoptSourceRequest struct {
 	URL      string `json:"url,omitempty"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+	// Machine picks whose backups to adopt when a destination is shared by
+	// several computers. Empty means the most recent, which is what a
+	// destination holding one always resolves to.
+	Machine string `json:"machine,omitempty"`
 }
 
 type TestShareRequest struct {
@@ -277,6 +281,13 @@ type Destination struct {
 	DeviceID       string `json:"device_id,omitempty"`
 	MAC            string `json:"mac,omitempty"`
 	NoVerify       bool   `json:"no_verify,omitempty"`
+	// CreateDir asks for the last component of Path to be made if it is not
+	// there yet — "put backups in a folder on this drive". The ordinary picker
+	// never sets it, so a typo in a typed path stays an error.
+	CreateDir bool `json:"create_dir,omitempty"`
+	// TakeOver confirms a folder at the destination that already holds backups
+	// under this computer's name, after the conflict has been shown.
+	TakeOver bool `json:"take_over,omitempty"`
 }
 
 type ArchiveRequest struct {

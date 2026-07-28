@@ -488,11 +488,13 @@ smbclient //<pi-address>/backups -U <user> -c 'put /etc/hostname test.txt'
 
 ## Step 6 — Serve the status page over HTTP (optional)
 
-backup-maker writes a small `backup-maker-status.html` to each destination,
-so you can check your backups' health from a phone even while your computer
-is off. Serving it needs care: **never point a web server at the backup
-root** — it would hand out the backups themselves. Give it a directory
-containing nothing but a link to the page:
+backup-maker writes a small `backup-maker-status.html` to each destination, so
+you can check your backups' health from a phone even while your computer is off.
+Each computer writes its own inside its own folder; the one at the destination
+root lists them all and links to each, which is the one to serve. Serving it
+needs care: **never point a web server at the backup root** — it would hand out
+the backups themselves. Give it a directory containing nothing but a link to the
+page:
 
 ```sh
 sudo apt install -y nginx

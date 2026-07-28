@@ -24,7 +24,7 @@ func writeSampleDest(t *testing.T, folderExists bool) string {
 		cfg.Folders[0].Path = filepath.Join(string(os.PathSeparator), "no", "such", "dir")
 	}
 	b := localmirror.NewLocalFS(dest)
-	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}); err != nil {
+	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, "install-oldbox"); err != nil {
 		t.Fatal(err)
 	}
 	if err := localmirror.WriteMarker(b, "uuid-usb", "oldbox"); err != nil {
@@ -96,7 +96,7 @@ func TestAdoptFromSourceStoresPointedShareCredentials(t *testing.T) {
 	// target is matched by URL instead — but a local path carries no URL, so
 	// exercise pointedTargetName's URL branch directly plus the storage path
 	// via AdoptFromSource on a marker-matched local dir.
-	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}); err != nil {
+	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, "install-oldbox"); err != nil {
 		t.Fatal(err)
 	}
 	m, err := ReadManifest(b)

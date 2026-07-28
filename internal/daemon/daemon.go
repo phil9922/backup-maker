@@ -90,6 +90,11 @@ type daemon struct {
 	// same question while holding d.mu.
 	foreignMu sync.Mutex
 	foreign   map[string]bool
+	// clashing names the destinations where another computer holds the machine
+	// directory this one wants. Reported on the transition for the same reason
+	// as foreign, and under the same lock, because a destination can only be in
+	// one of the two states and the messages must not interleave.
+	clashing map[string]bool
 
 	// delivery remembers how each alert delivery method last performed.
 	delivery *deliveryLog
@@ -212,6 +217,12 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	}
 	if state.IPCToken == "" {
 		state.IPCToken = config.NewToken()
+	}
+	if state.InstallID == "" {
+		// Minted here as well as in EnsureInstallID so an install that has only
+		// ever been driven from the browser has one before the first destination
+		// is written to. Same never-rotate rule as the token above.
+		state.InstallID = config.NewToken()[:16]
 	}
 	state.DashboardPort = cfg.General.DashboardPort
 	if err := state.Save(); err != nil {
@@ -394,6 +405,13 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 		// on its own timer and would otherwise be racing this swap.
 		d.mu.Lock()
 		fresh.IPCToken = d.state.IPCToken // never rotate a live token
+		if fresh.InstallID == "" {
+			// Belt and braces: the id is on disk, so a state file written by a
+			// setup command carries it. But if one ever did not, adopting the
+			// empty value would make this machine a stranger to every claim it
+			// holds — and it would then stop backing up to its own drives.
+			fresh.InstallID = d.state.InstallID
+		}
 		if d.tally != nil {
 			fresh.BytesCopiedTotal, fresh.FilesCopiedTotal, fresh.CountingSince = bytes, files, since
 		}
@@ -459,6 +477,19 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 		d.tally.touch()
 	}
 
+	// This installation's identity, snapshotted for the engines built below.
+	//
+	// A SNAPSHOT RATHER THAN A CLOSURE OVER d.state, which is swapped wholesale
+	// every couple of seconds. Reading the live state from an engine goroutine
+	// would mean taking d.mu on the sync path, and d.mu being takeable is the
+	// watchdog's entire definition of a live daemon. The values are safe to copy:
+	// the install id is minted once and never rotated, and the inherited list
+	// only changes during adoption, which refuses to run on a machine that has
+	// anything configured — so no engine exists at that moment anyway.
+	installID := d.state.InstallID
+	inherited := append([]string(nil), d.state.InheritedInstallIDs...)
+	owns := (&config.State{InstallID: installID, InheritedInstallIDs: inherited}).Owns
+
 	for _, p := range prepared {
 		t := p.target
 		// One reclaimer per DESTINATION, shared by every folder writing to it:
@@ -500,6 +531,10 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 				Synced:   d.syncRecorder(f.ID, t.Name),
 				Ignores:  ignores,
 				Log:      d.log,
+				// What tells this computer's folder on the destination from
+				// another computer's that happens to have the same name.
+				InstallID: installID,
+				Owns:      owns,
 			})
 			d.engines = append(d.engines, e)
 			go e.Run(engCtx)
@@ -579,10 +614,12 @@ func (d *daemon) prepareTargets(cfg *config.Config, uuids, creds map[string]stri
 // backs up to, and mayWrite is what keeps that off a drive we would refuse to
 // back up to.
 func (d *daemon) refreshManifest(t config.Target, b localmirror.Backend, cfg *config.Config, uuid string) {
-	if !d.mayWrite(t.Name, status.TargetLocation(t), b, uuid) {
+	// mayWriteAs, not mayWrite: the manifest lives inside this machine's own
+	// directory now, so "may we write here" includes "is that directory ours".
+	if !d.mayWriteAs(t.Name, status.TargetLocation(t), b, uuid, config.MachineDir(cfg.General.MachineName)) {
 		return
 	}
-	if err := setup.WriteManifest(b, cfg, d.state.DriveTargetUUIDs); err != nil {
+	if err := setup.WriteManifest(b, cfg, d.state.DriveTargetUUIDs, d.state.InstallID); err != nil {
 		d.log.Warn("could not write adoption manifest", "target", t.Name, "err", err)
 	}
 }

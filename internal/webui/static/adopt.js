@@ -168,7 +168,11 @@ const AdoptWizard = (() => {
       li.appendChild(mk("span", "muted", `${c.folders} folder(s) · updated ${humanTime(c.generated)}`));
       li.appendChild(mk("span", "muted mono", c.path));
       const btn = mk("button", null, "Restore from this");
-      btn.onclick = () => inspect({ path: c.path });
+      // The machine is named explicitly: one drive can hold several, and the
+      // row the user clicked says whose backups they mean. Without it the
+      // server would fall back to the most recent, which on a shared drive is
+      // somebody else's configuration restored onto this computer.
+      btn.onclick = () => inspect({ path: c.path, machine: c.machine_name });
       li.appendChild(btn);
       box.appendChild(li);
     }
@@ -213,6 +217,7 @@ const AdoptWizard = (() => {
   function buildIdentity() {
     const box = $("adopt-identity");
     box.replaceChildren();
+    buildMachineChoice(box);
     const ul = mk("ul", "choices");
 
     const cont = mk("input");
@@ -239,6 +244,29 @@ const AdoptWizard = (() => {
 
     cont.onchange = fresh.onchange = () => { continueAsMachine = cont.checked; };
     box.appendChild(ul);
+  }
+
+  // A destination can hold backups from more than one computer. Which one is
+  // being restored decides everything after this, so it is said out loud — and
+  // switching re-inspects rather than reinterpreting what is already loaded,
+  // because every later step was built from the manifest we picked.
+  function buildMachineChoice(box) {
+    const machines = inspection.machines || [];
+    if (machines.length < 2) return;
+    const wrap = mk("div", "notice");
+    wrap.appendChild(mk("strong", null,
+      `This storage holds backups from ${machines.length} computers.`));
+    wrap.appendChild(mk("p", "hint",
+      `Restoring “${inspection.machine_name}”. Choose a different one if that is not this computer.`));
+    const row = mk("div", "row");
+    for (const m of machines) {
+      if (m.machine_name === inspection.machine_name) continue;
+      const btn = mk("button", null, `Restore “${m.machine_name}” instead`);
+      btn.onclick = () => inspect(Object.assign({}, source, { machine: m.machine_name }));
+      row.appendChild(btn);
+    }
+    wrap.appendChild(row);
+    box.appendChild(wrap);
   }
 
   function choiceCard(input, title, copy) {

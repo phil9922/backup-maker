@@ -104,7 +104,7 @@ func TestConfigApplyLeavesTheCentralLockFreeWhileADestinationHangs(t *testing.T)
 
 	// And the work itself still happened — moving it off the lock must not
 	// quietly stop the manifest being refreshed.
-	if _, err := os.Stat(filepath.Join(root, setup.ManifestName)); err != nil {
+	if _, err := os.Stat(filepath.Join(root, setup.ManifestPathFor("workstation"))); err != nil {
 		t.Errorf("the adoption manifest was not refreshed during the apply: %v", err)
 	}
 }

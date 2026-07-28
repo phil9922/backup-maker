@@ -4,8 +4,11 @@ package daemon
 
 import (
 	"context"
+	"path"
 	"time"
 
+	"github.com/phil9922/backup-maker/internal/archive"
+	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
 	"github.com/phil9922/backup-maker/internal/status"
 	"github.com/phil9922/backup-maker/internal/statuspage"
@@ -54,27 +57,88 @@ func (d *daemon) cycle(collect func() status.Model) {
 	d.writeStatusPages(m)
 }
 
-// writeStatusPages renders once and writes the same page to every reachable
-// destination.
+// writeStatusPages renders this machine's page once and writes it into this
+// machine's directory on every reachable destination, then rebuilds the index
+// at each destination root.
 func (d *daemon) writeStatusPages(m status.Model) {
-	page, err := statuspage.Render(buildPage(m, time.Now()))
+	now := time.Now()
+	page, err := statuspage.Render(buildPage(m, now))
 	if err != nil {
 		d.log.Warn("could not render the destination status page", "err", err)
 		return
 	}
+	machine := m.MachineName
+	dir := config.MachineDir(machine)
 
 	for _, b := range d.statusBackends() {
 		// The page names this machine, its folders and its destinations, so it
-		// goes only where the backups themselves would go.
-		if !d.mayWrite(b.name, b.where, b.backend, b.uuid) {
+		// goes only where the backups themselves would go — and only into the
+		// directory that is actually ours.
+		if !d.mayWriteAs(b.name, b.where, b.backend, b.uuid, dir) {
 			continue
 		}
 		// A destination that is offline simply doesn't get an update; its page
 		// keeps the last thing this machine knew, which is exactly what it is
 		// for. Failures here must never disturb backing up.
-		if err := b.backend.WriteFile(statuspage.FileName, page); err != nil {
-			d.log.Debug("could not write the status page", "target", b.name, "err", err)
+		if err := b.backend.MkdirAll(dir); err != nil {
+			d.log.Debug("could not create this machine's directory for the status page", "target", b.name, "err", err)
+			continue
 		}
+		if err := b.backend.WriteFile(statuspage.PathFor(machine), page); err != nil {
+			d.log.Debug("could not write the status page", "target", b.name, "err", err)
+			continue
+		}
+		d.writeStatusIndex(b, now)
+	}
+}
+
+// writeStatusIndex rebuilds the destination-root page that lists every computer
+// keeping backups here.
+//
+// Gated on mayWrite — the marker alone, not the claim. The index republishes
+// only what the destination already holds, so a machine refused a name it does
+// not own may still keep the index honest; and if it could not, a destination
+// shared by two computers would show only whichever of them happened to own the
+// name. Unrecognised storage still gets nothing, which is the gate that matters.
+func (d *daemon) writeStatusIndex(b namedBackend, now time.Time) {
+	if !d.mayWrite(b.name, b.where, b.backend, b.uuid) {
+		return
+	}
+	dirs, err := localmirror.TopLevelDirs(b.backend)
+	if err != nil {
+		d.log.Debug("could not list the destination to build its status index", "target", b.name, "err", err)
+		return
+	}
+	var entries []statuspage.IndexEntry
+	for _, dir := range dirs {
+		if dir == config.VersionsDirName || dir == archive.DirName {
+			continue
+		}
+		// A destination can be a FOLDER on a drive, and that folder has an index
+		// page of its own. Without this, a drive holding both a machine's
+		// backups and a separate destination folder would list the folder as
+		// though it were a computer, linking to a page that is another index.
+		// The marker is what tells them apart: a machine directory never has one.
+		if _, err := b.backend.Stat(path.Join(dir, localmirror.MarkerName)); err == nil {
+			continue
+		}
+		fi, err := b.backend.Stat(path.Join(dir, statuspage.FileName))
+		if err != nil {
+			continue // not a machine directory, or one that has never reported
+		}
+		entries = append(entries, statuspage.IndexEntry{
+			Machine: dir,
+			Written: fi.ModTime(),
+			Stale:   now.Sub(fi.ModTime()) > statuspage.StaleAfter,
+		})
+	}
+	index, err := statuspage.RenderIndex(entries, now)
+	if err != nil {
+		d.log.Warn("could not render the destination status index", "err", err)
+		return
+	}
+	if err := b.backend.WriteFile(statuspage.FileName, index); err != nil {
+		d.log.Debug("could not write the status index", "target", b.name, "err", err)
 	}
 }
 
@@ -212,6 +276,88 @@ type namedBackend struct {
 // recordSample reports an unmeasurable one: this runs once a minute for ever. A
 // destination that comes good clears the flag, so a foreign drive appearing
 // again is reported again; a foreign drive merely unplugged does not re-arm it.
+// mayWriteAs is mayWrite plus the second question a shared destination forces:
+// not only "is this our storage" but "is this directory on it ours".
+//
+// Both are needed and neither implies the other. The marker says the drive is
+// the one this target was set up against — which it is, for every computer that
+// shares it. The claim says the <machine> directory belongs to this
+// installation, which is what stops two computers that happen to have the same
+// machine name from writing into one directory and versioning each other's
+// files away.
+func (d *daemon) mayWriteAs(name, where string, b localmirror.Backend, uuid, machineDir string) bool {
+	if !d.mayWrite(name, where, b, uuid) {
+		return false
+	}
+	return d.mayWriteIntoMachineDir(name, where, b, machineDir)
+}
+
+// mayWriteIntoMachineDir is the claim half of mayWriteAs.
+//
+// AN UNCLAIMED DIRECTORY IS TAKEN, NOT REFUSED, and the asymmetry with setup is
+// deliberate. Every destination in service before this existed has no claim
+// file on it. If the daemon refused those, replacing the binary would stop
+// every working backup on the machine — a silent, total failure caused by an
+// upgrade. Setup asks the user about the same situation because a human is
+// there to answer; the daemon has nobody to ask and the safe default is the
+// opposite one.
+func (d *daemon) mayWriteIntoMachineDir(name, where string, b localmirror.Backend, machineDir string) bool {
+	d.mu.Lock()
+	state := d.state
+	d.mu.Unlock()
+
+	if state.InstallID == "" {
+		// No identity to judge with. A running daemon always has one (it is
+		// minted at startup beside the IPC token), so this is only reachable by
+		// a caller that built a daemon by hand. Behaving as we did before claims
+		// existed is the right answer: being unable to identify ourselves is not
+		// a reason to stop backing up.
+		return true
+	}
+
+	st, holder := localmirror.CheckClaim(b, machineDir, state.Owns)
+	if st == localmirror.ClaimUnclaimed {
+		var err error
+		st, err = localmirror.ClaimIfUnclaimed(b, machineDir, state.InstallID, machineDir, state.Owns)
+		if err != nil {
+			d.log.Debug("could not claim this machine's directory", "target", name, "err", err)
+			return false
+		}
+		if st != localmirror.ClaimOurs {
+			_, holder = localmirror.CheckClaim(b, machineDir, state.Owns)
+		}
+	}
+
+	d.foreignMu.Lock()
+	defer d.foreignMu.Unlock()
+	if st == localmirror.ClaimOurs {
+		if d.clashing[name] {
+			delete(d.clashing, name)
+			d.log.Info("this destination's folder for this computer is ours again; writing has resumed",
+				"target", name, "location", where)
+			d.alerts.nameClashResolved(name, where)
+		}
+		return true
+	}
+	if d.clashing == nil {
+		d.clashing = map[string]bool{}
+	}
+	if !d.clashing[name] {
+		d.clashing[name] = true
+		other := "another computer"
+		if holder != nil && holder.MachineName != "" {
+			other = holder.MachineName
+		}
+		d.log.Error("another computer is already backing up to this destination under the same name; nothing is being written there, because both computers would delete each other's files",
+			"target", name, "location", where, "folder", machineDir, "claimed_by", other)
+		// The health model shows this as a per-folder state, but a destination
+		// with no folders assigned would show nothing at all — and this is data
+		// loss averted, not a detail.
+		d.alerts.nameClash(name, where, machineDir)
+	}
+	return false
+}
+
 func (d *daemon) mayWrite(name, where string, b localmirror.Backend, uuid string) bool {
 	r := localmirror.Recognize(b, uuid)
 	d.foreignMu.Lock()

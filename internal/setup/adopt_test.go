@@ -39,14 +39,14 @@ func sampleConfig() *config.Config {
 }
 
 func sampleManifest() *Manifest {
-	m := BuildManifest(sampleConfig(), map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, time.Now())
+	m := BuildManifest(sampleConfig(), map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, "install-oldbox", time.Now())
 	return &m
 }
 
 func TestManifestRoundTrip(t *testing.T) {
 	b := localmirror.NewLocalFS(t.TempDir())
 	uuids := map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}
-	if err := WriteManifest(b, sampleConfig(), uuids); err != nil {
+	if err := WriteManifest(b, sampleConfig(), uuids, "install-oldbox"); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 	m, err := ReadManifest(b)
@@ -206,7 +206,7 @@ func TestAdoptPreservesGeneralSettings(t *testing.T) {
 func TestAdoptReportsMissingUUIDsAndPasswords(t *testing.T) {
 	isolateNoConfig(t)
 	// Manifest whose share target has no recorded UUID and gets no password.
-	m := BuildManifest(sampleConfig(), map[string]string{"usb": "uuid-usb"}, time.Now())
+	m := BuildManifest(sampleConfig(), map[string]string{"usb": "uuid-usb"}, "install-oldbox", time.Now())
 	res, err := Adopt(&m, AdoptDecisions{ContinueAsMachine: true})
 	if err != nil {
 		t.Fatalf("Adopt: %v", err)

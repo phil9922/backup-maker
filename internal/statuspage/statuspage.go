@@ -19,13 +19,32 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"path"
 	"time"
+
+	"github.com/phil9922/backup-maker/internal/config"
 )
 
-// FileName is where the page lands at the destination root — beside the
-// backups, not inside any machine's folder, so one file serves the whole
-// destination.
+// FileName is what one machine's page is called. It lands INSIDE that machine's
+// directory (see PathFor), because a destination can be shared by several
+// computers and at the root there is only room for one of them — so the last
+// machine to write simply erased the others, and a page reporting one machine's
+// health while silently omitting another's is the false reassurance the rule
+// below exists to prevent.
+//
+// The same name is reused for the index at the destination root (see
+// RenderIndex): every bookmark, symlink and web-server config that already
+// points at backup-maker-status.html keeps working, and now lands on something
+// that lists every machine rather than whichever wrote last.
 const FileName = "backup-maker-status.html"
+
+// PathFor is where one machine's page lives on a destination.
+func PathFor(machineName string) string { return path.Join(dirFor(machineName), FileName) }
+
+// dirFor names a machine's directory. It goes through config.MachineDir so the
+// page lands in the same directory the mirror writes to, on every filesystem
+// that needs a character replaced.
+func dirFor(machineName string) string { return config.MachineDir(machineName) }
 
 // StaleAfter is when the page stops trusting itself. The daemon rewrites every
 // minute or so; an hour of silence means the source machine is off, asleep, or

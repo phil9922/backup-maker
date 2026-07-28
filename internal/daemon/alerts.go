@@ -306,6 +306,43 @@ func (a *alerter) storageRecognized(name, where string) {
 	})
 }
 
+// nameClash announces a destination where another computer already holds the
+// folder this one wants — two machines with the same name, which on a shared
+// drive means each would version the other's files away.
+//
+// Under the unrecognised-storage category rather than a new one: it is the same
+// family of fault ("storage we are refusing to write to, for a reason the
+// health model cannot show"), and every additional tri-state alert key is a
+// piece of configuration surface that has to be kept for ever.
+//
+// The remedy is named in the alert because it is not obvious and it is easy:
+// give this computer its own folder on that drive. Renaming the computer is not
+// suggested — it would orphan everything already backed up under the old name.
+func (a *alerter) nameClash(name, where, machineDir string) {
+	if !a.wants(config.AlertKinds.UnrecognisedStorageOn) {
+		return
+	}
+	a.send(alert{
+		urgency: notify.Critical,
+		title:   "Another computer is already using the name " + machineDir,
+		body: "Nothing is being written to " + where +
+			", because another computer backs up there under the same name and the two would delete each other's files. Set this destination up again in a folder of its own on that storage.",
+	})
+}
+
+// nameClashResolved is the all-clear for nameClash, for the same reason
+// storageRecognized is the all-clear for foreignStorage.
+func (a *alerter) nameClashResolved(name, where string) {
+	if !a.wants(config.AlertKinds.UnrecognisedStorageOn) {
+		return
+	}
+	a.send(alert{
+		urgency: notify.Normal,
+		title:   name + " is usable again",
+		body:    "This computer's folder at " + where + " is its own again. Backups to it have resumed.",
+	})
+}
+
 // send delivers one notification on a goroutine of its own.
 //
 // THE STATUS LOOP MUST NOT WAIT FOR A DESKTOP. notify-send on a box with a

@@ -17,7 +17,7 @@ import (
 // command runs — so the two flows can never drift apart.
 
 func toAdoptSource(r webui.AdoptSourceRequest) setup.AdoptSource {
-	return setup.AdoptSource{Path: r.Path, URL: r.URL, Username: r.Username, Password: r.Password}
+	return setup.AdoptSource{Path: r.Path, URL: r.URL, Username: r.Username, Password: r.Password, Machine: r.Machine}
 }
 
 // adoptScan lists attached drives carrying an adoption manifest.

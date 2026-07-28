@@ -8,12 +8,13 @@ package localmirror
 
 import (
 	"context"
-	"github.com/phil9922/backup-maker/internal/config"
 	"log/slog"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/phil9922/backup-maker/internal/config"
 )
 
 // Engine mirrors one source folder onto one target backend.
@@ -25,21 +26,30 @@ type Engine struct {
 	sourcePath string
 	backend    Backend
 	destRoot   string // slash path inside the backend: <machine>/<label>
-	uuid       string
-	maxAge     time.Duration
-	verify     bool
-	pollEvery  time.Duration
-	minFree    uint64
-	reclaimer  *Reclaimer
-	ignore     *Matcher
-	counted    func(bytes int64)
-	synced     func(at time.Time)
-	log        *slog.Logger
+	// machineDir is destRoot's first segment on its own — the directory this
+	// machine owns on the destination, which is what the claim is about. Kept
+	// separately rather than sliced off destRoot at the point of use, because a
+	// claim checked against a differently-derived path is a claim on a different
+	// directory from the one being written to.
+	machineDir  string
+	machineName string
+	installID   string
+	owns        func(string) bool
+	uuid        string
+	maxAge      time.Duration
+	verify      bool
+	pollEvery   time.Duration
+	minFree     uint64
+	reclaimer   *Reclaimer
+	ignore      *Matcher
+	counted     func(bytes int64)
+	synced      func(at time.Time)
+	log         *slog.Logger
 
 	kick chan struct{} // watcher → sync loop nudges
 
 	mu           sync.Mutex
-	state        string // scanning | in sync | syncing | offline | wrong-drive
+	state        string // scanning | in sync | syncing | offline | wrong-drive | name-clash
 	lastSync     time.Time
 	fileErrors   map[string]string
 	symlinkCount int
@@ -126,6 +136,17 @@ type Options struct {
 	Synced  func(at time.Time)
 	Ignores []string
 	Log     *slog.Logger
+	// InstallID identifies this installation, and Owns reports whether a claim
+	// found on a destination belongs to it (counting ids inherited by adopting
+	// a machine — see config.State.Owns). Together they are what tells this
+	// computer's <machine> directory from another computer's that happens to
+	// have the same name.
+	//
+	// Both empty means no claim checking at all, which is what an older caller
+	// and most tests want: the engine then behaves exactly as it did before
+	// claims existed.
+	InstallID string
+	Owns      func(installID string) bool
 }
 
 // engineIgnores are always excluded: syncthing's folder bookkeeping (it never
@@ -141,21 +162,25 @@ func New(o Options) *Engine {
 		o.OfflinePoll = 5 * time.Second
 	}
 	return &Engine{
-		FolderID:   o.FolderID,
-		TargetName: o.TargetName,
-		TargetType: o.TargetType,
-		sourcePath: o.SourcePath,
-		backend:    o.Backend,
-		destRoot:   config.DestRoot(o.MachineName, o.Label),
-		uuid:       o.UUID,
-		maxAge:     time.Duration(o.MaxAgeDays) * 24 * time.Hour,
-		verify:     o.Verify,
-		pollEvery:  o.OfflinePoll,
-		minFree:    o.MinFreeBytes,
-		reclaimer:  o.Reclaimer,
-		ignore:     NewMatcherFor(o.SourcePath, o.Ignores),
-		counted:    o.Counted,
-		synced:     o.Synced,
+		FolderID:    o.FolderID,
+		TargetName:  o.TargetName,
+		TargetType:  o.TargetType,
+		sourcePath:  o.SourcePath,
+		backend:     o.Backend,
+		destRoot:    config.DestRoot(o.MachineName, o.Label),
+		machineDir:  config.MachineDir(o.MachineName),
+		machineName: o.MachineName,
+		installID:   o.InstallID,
+		owns:        o.Owns,
+		uuid:        o.UUID,
+		maxAge:      time.Duration(o.MaxAgeDays) * 24 * time.Hour,
+		verify:      o.Verify,
+		pollEvery:   o.OfflinePoll,
+		minFree:     o.MinFreeBytes,
+		reclaimer:   o.Reclaimer,
+		ignore:      NewMatcherFor(o.SourcePath, o.Ignores),
+		counted:     o.Counted,
+		synced:      o.Synced,
 		log: o.Log.With("sub", "localmirror", "folder", o.FolderID,
 			"target", o.TargetName, "type", o.TargetType),
 		kick:         make(chan struct{}, 1),
@@ -217,6 +242,15 @@ func (e *Engine) sync() {
 		return
 	}
 
+	// The second question, and the storage being right does not answer it: this
+	// destination may be shared with other computers, and one of them may have
+	// the same machine name. Writing into a directory that is theirs means both
+	// machines reconcile the same tree against different sources, and each
+	// versions the other's files away on every pass.
+	if !e.claimMachineDir() {
+		return
+	}
+
 	if !e.calibrated {
 		e.calibrateMtime()
 		e.calibrated = true
@@ -254,10 +288,42 @@ func (e *Engine) sync() {
 	e.noteSynced(now)
 }
 
+// claimMachineDir makes sure this machine's directory on the destination is
+// ours before anything is written into it, and reports whether the sync may go
+// ahead.
+//
+// AN UNCLAIMED DIRECTORY IS TAKEN, NOT REFUSED. Every destination that was in
+// service before claims existed has no claim file, and refusing those would
+// mean that replacing the binary stopped every working backup on the machine.
+// Setup asks the user about the same situation, because there a human is
+// present to answer; here there is nobody, and the safe default is the other
+// one. The gate that still holds is the marker checked just above: this only
+// ever claims a directory on storage already recognised as this target's.
+func (e *Engine) claimMachineDir() bool {
+	if e.owns == nil || e.installID == "" {
+		// No identity to claim with — an engine built by an older caller, or by
+		// a test that does not exercise this. Behave exactly as before.
+		return true
+	}
+	st, err := ClaimIfUnclaimed(e.backend, e.machineDir, e.installID, e.machineName, e.owns)
+	if err != nil {
+		e.setState("offline")
+		e.log.Warn("could not claim this computer's folder on the destination", "err", err)
+		return false
+	}
+	if st != ClaimOurs {
+		e.setState("name-clash")
+		e.log.Error("another computer already backs up to this destination under the same name; refusing to write, because both computers would delete each other's files",
+			"folder", e.machineDir)
+		return false
+	}
+	return true
+}
+
 func (e *Engine) online() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.state != "offline" && e.state != "wrong-drive"
+	return e.state != "offline" && e.state != "wrong-drive" && e.state != "name-clash"
 }
 
 func (e *Engine) setState(s string) {

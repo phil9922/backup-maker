@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -65,6 +66,32 @@ func runAdopt(dest string) error {
 	insp, err := setup.InspectSource(src)
 	if err != nil {
 		return err
+	}
+
+	// A destination can hold backups from several computers. Which one is being
+	// restored decides every question below it, so it is asked first rather than
+	// assumed — silently picking the most recent would restore somebody else's
+	// configuration onto this machine.
+	if len(insp.Machines) > 1 {
+		fmt.Println()
+		fmt.Printf("This destination holds backups from %d computers:\n", len(insp.Machines))
+		for i, m := range insp.Machines {
+			fmt.Printf("  [%d] %s — %d folder(s), updated %s\n",
+				i+1, m.MachineName, m.Folders, m.Generated.Format("2 Jan 2006, 15:04"))
+		}
+		choice := readLine(fmt.Sprintf("Which one is this computer? [1-%d, Enter for 1]: ", len(insp.Machines)))
+		n := 1
+		if choice != "" {
+			if v, err := strconv.Atoi(choice); err != nil || v < 1 || v > len(insp.Machines) {
+				return fmt.Errorf("not one of the listed computers: %q", choice)
+			} else {
+				n = v
+			}
+		}
+		src.Machine = insp.Machines[n-1].MachineName
+		if insp, err = setup.InspectSource(src); err != nil {
+			return err
+		}
 	}
 
 	fmt.Println()

@@ -45,6 +45,34 @@ not 600GB. Work out `size × snapshots kept` rather than guessing.
 building. A drive you occasionally carry elsewhere is what survives a fire or a
 burglary — see [hardware.md](../setup/hardware.md).
 
+## Sharing one drive between two computers
+
+You can. Backups are filed under the name of the computer that made them —
+`<machine>/<folder>/` — so a `Documents` folder from the desktop and a
+`Documents` folder from the laptop are separate directories and never overwrite
+each other. Each computer also keeps its own manifest and its own status page in
+its own folder, and the page at the top of the drive lists them all.
+
+**The one thing that would go wrong is caught for you.** The machine name
+defaults to the computer's hostname, and two fresh installs of the same system
+really can both be called `ubuntu`. Two computers sharing a name would file
+their backups in one directory, and each would then treat the other's files as
+files that no longer exist and version them away. So the first computer to use a
+name on a destination claims it, and a second one is refused — at setup, with
+the remedy on screen, rather than silently later.
+
+If that happens, give the second computer **a folder of its own on the drive**.
+In the wizard that is *"Or put backups in a folder on this drive"* beside the
+drive you picked; from the terminal:
+
+```sh
+backup-maker add-target drive /media/you/CARD/laptop --create
+```
+
+The rest of the drive is left alone, so this also works for a drive you use for
+other things. Only take a name over (`--take-over`) when the computer that
+claimed it really is this one — reinstalled, or restored from a backup.
+
 ## See also
 
 - [hardware.md](../setup/hardware.md) — what to buy, in

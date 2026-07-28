@@ -65,6 +65,16 @@ const Wizard = (() => {
 
   function isOpen() { return !$("wizard").hidden; }
 
+  // goToStep jumps back to a named step. Used when a commit is refused for a
+  // reason the user fixes further back: leaving them on the review step with an
+  // error and no way to act on it is the failure this avoids.
+  function goToStep(id) {
+    const at = order.indexOf(id);
+    if (at < 0) return;
+    index = at;
+    render();
+  }
+
   function open(st, opts) {
     model = st || null;
     firstRun = !!(opts && opts.firstRun);
@@ -410,9 +420,75 @@ const Wizard = (() => {
       li.appendChild(mk('span', 'muted', `${fmtBytes(s.free)} free of ${fmtBytes(s.total)}`));
     }
     if (s.existing_target) {
-      li.appendChild(mk('span', 'muted', `already set up as "${s.existing_target}"`));
+      li.appendChild(mk('span', 'muted', s.existing_folder
+        ? `already set up as "${s.existing_target}" (in folder ${s.existing_folder})`
+        : `already set up as "${s.existing_target}"`));
     }
-    return li;
+    // A drive can hold backups in a folder of its own rather than at its root.
+    // Offered here, beside the drive it applies to, rather than only through the
+    // "any folder on this computer" picker further down: that one requires the
+    // directory to already exist, which is not what somebody wants when the
+    // whole point is to make one.
+    if (!s.path || s.existing_target) return li;
+    const wrap = mk('div', 'storage-choice');
+    wrap.append(li, subfolderPicker(m, s, key));
+    return wrap;
+  }
+
+  // The same rules as setup.ValidateFolderName, which is authoritative. Kept in
+  // step so the box can say what is wrong as it is typed; anything that slips
+  // through is still refused by the server.
+  function folderNameError(name) {
+    if (!name) return 'Give the folder a name.';
+    if (name === '.' || name === '..') return `"${name}" is not a folder name.`;
+    if (/[/\\]/.test(name)) return 'A folder name cannot contain a slash — this makes one folder, not a path.';
+    if (name.startsWith('.')) return 'A name starting with a dot would be hidden on most systems.';
+    if (/[<>:"|?*]/.test(name)) return 'Drives and network shares refuse < > : " | ? * in a name.';
+    if (name.trim() !== name) return 'A folder name cannot start or end with a space.';
+    return '';
+  }
+
+  function subfolderPicker(m, s, driveKey) {
+    const wrap = mk('details', 'local-pick');
+    wrap.appendChild(mk('summary', 'muted', 'Or put backups in a folder on this drive'));
+    const row = mk('div', 'row');
+    const box = mk('input');
+    box.placeholder = 'backups';
+    box.autocomplete = 'off';
+    const use = mk('button', null, 'Use this folder');
+    const note = mk('p', 'hint');
+    const preview = () => {
+      const name = box.value.trim();
+      const problem = folderNameError(name);
+      note.textContent = !name
+        ? 'The rest of the drive is left untouched.'
+        : problem || `Backups will go to ${s.path.replace(/\/$/, '')}/${name} — the rest of the drive is untouched.`;
+      note.classList.toggle('bad', Boolean(name && problem));
+    };
+    box.oninput = preview;
+    use.onclick = () => {
+      const name = box.value.trim();
+      const problem = folderNameError(name);
+      if (problem) { preview(); return; }
+      const full = s.path.replace(/\/$/, '') + '/' + name;
+      // Keyed on the full path, so choosing a folder and choosing the whole
+      // drive are two different destinations rather than one overwriting the
+      // other in the map.
+      chosen.delete(driveKey);
+      chosen.set(full, {
+        path: full,
+        create_dir: true,
+        name: `${s.label}-${name}`,
+        _label: `${m.name} → ${s.label} / ${name}`,
+      });
+      updateCount();
+      note.textContent = `Chosen: ${full}`;
+      note.classList.remove('bad');
+    };
+    row.append(box, use);
+    wrap.append(row, note);
+    preview();
+    return wrap;
   }
 
   // --- step 2b: another backup-maker machine ----------------------------
@@ -531,6 +607,13 @@ const Wizard = (() => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      // A destination whose folder for this computer belongs to another one is
+      // refused with a choice, not a failure: the remedy is easy and not
+      // guessable, and a paragraph of prose would leave somebody stuck.
+      if (resp.status === 409) {
+        showClaimConflict(await resp.json());
+        return;
+      }
       if (!resp.ok) throw new Error(await resp.text());
       const out = await resp.json();
       // A backup to another computer is not running yet: nothing copies until
@@ -555,6 +638,42 @@ const Wizard = (() => {
     } finally {
       btn.disabled = false;
     }
+  }
+
+  // --- another computer already uses this name ---------------------------
+
+  // showClaimConflict turns the refusal into the two things that actually
+  // resolve it. Renaming this computer is deliberately not offered: it would
+  // orphan everything already backed up under the old name and copy the lot
+  // again, which is not a button to put in front of somebody mid-wizard.
+  function showClaimConflict(detail) {
+    const p = $("wiz-error");
+    p.hidden = false;
+    p.replaceChildren();
+    p.appendChild(mk('strong', null, detail.error));
+    const row = mk('div', 'row');
+
+    const useFolder = mk('button', null, 'Put them in a folder on this drive');
+    useFolder.onclick = () => {
+      // Back to the destinations step with the folder control open: this is the
+      // right answer nearly every time, and it is one the user has already been
+      // shown how to give.
+      p.hidden = true;
+      goToStep('dest');
+      document.querySelectorAll('.storage-choice details').forEach((d) => { d.open = true; });
+    };
+    row.appendChild(useFolder);
+
+    const takeOver = mk('button', detail.legacy ? null : 'danger',
+      detail.legacy ? 'Yes, those are this computer’s' : 'This is that computer — take the name over');
+    takeOver.onclick = () => {
+      for (const d of chosen.values()) d.take_over = true;
+      p.hidden = true;
+      finish();
+    };
+    row.appendChild(takeOver);
+
+    p.appendChild(row);
   }
 
   // --- waiting for the other machine to approve --------------------------

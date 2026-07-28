@@ -15,6 +15,7 @@ package machines
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/phil9922/backup-maker/internal/browse"
@@ -61,6 +62,11 @@ type Storage struct {
 	// ExistingTarget names the already-configured target using this storage,
 	// so the UI can offer it instead of creating a duplicate.
 	ExistingTarget string `json:"existing_target,omitempty"`
+	// ExistingFolder is set when that target is a FOLDER on this drive rather
+	// than the drive itself. Without it a drive already in use through a
+	// subfolder renders as unconfigured, and the obvious next click sets the
+	// same drive up a second time at its root.
+	ExistingFolder string `json:"existing_folder,omitempty"`
 }
 
 // List returns the computers worth showing, this one first. scan may be nil to
@@ -190,23 +196,44 @@ func shareUsage(url, user, pass string) (free, total uint64) {
 }
 
 func localStorage(cfg *config.Config, drives func() []browse.Drive) []Storage {
-	byPath := map[string]string{}
-	for _, t := range cfg.Targets {
-		if t.Type == "drive" {
-			byPath[t.Path] = t.Name
-		}
-	}
 	found := drives()
 	out := make([]Storage, 0, len(found))
 	for _, d := range found {
-		out = append(out, Storage{
-			Kind:           "drive",
-			Label:          d.Label,
-			Path:           d.Path,
-			Free:           d.Free,
-			Total:          d.Total,
-			ExistingTarget: byPath[d.Path],
-		})
+		s := Storage{
+			Kind:  "drive",
+			Label: d.Label,
+			Path:  d.Path,
+			Free:  d.Free,
+			Total: d.Total,
+		}
+		s.ExistingTarget, s.ExistingFolder = targetOn(cfg, d.Path)
+		out = append(out, s)
 	}
 	return out
+}
+
+// targetOn finds the configured drive target using this drive — either the
+// drive itself, or a folder on it — and returns the target name plus that
+// folder's name when it is one.
+//
+// A PREFIX MATCH, WITH THE SEPARATOR CHECKED. A bare strings.HasPrefix would
+// match "/media/pk/CARD" against a drive at "/media/pk/CARD-OLD" and report a
+// completely different drive as already set up. The exact match is preferred
+// over any subfolder, so a drive used both ways still names its root target.
+func targetOn(cfg *config.Config, drive string) (target, folder string) {
+	for _, t := range cfg.Targets {
+		if t.Type == "drive" && config.SameDest(t.Path, drive) {
+			return t.Name, ""
+		}
+	}
+	prefix := strings.TrimSuffix(drive, string(filepath.Separator)) + string(filepath.Separator)
+	for _, t := range cfg.Targets {
+		if t.Type != "drive" || len(t.Path) <= len(prefix) {
+			continue
+		}
+		if config.SameDest(t.Path[:len(prefix)], prefix) {
+			return t.Name, filepath.Base(t.Path)
+		}
+	}
+	return "", ""
 }

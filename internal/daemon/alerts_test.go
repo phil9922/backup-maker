@@ -360,7 +360,7 @@ func TestAWedgedNotifierNeverBlocksOrDelaysTheStatusPage(t *testing.T) {
 		t.Fatal("the status loop waited for the desktop")
 	}
 
-	if !exists(t, root, statuspage.FileName) {
+	if !exists(t, root, statuspage.PathFor("workstation")) {
 		t.Error("a wedged notifier cost the destination its status page")
 	}
 	if blocked.count() != 0 {

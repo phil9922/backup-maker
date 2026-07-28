@@ -43,6 +43,8 @@ func (d *daemon) createBackup(req webui.BackupRequest) (any, error) {
 			DeviceID:       x.DeviceID,
 			MAC:            x.MAC,
 			NoVerify:       x.NoVerify,
+			CreateDir:      x.CreateDir,
+			TakeOver:       x.TakeOver,
 		})
 	}
 	var spec *setup.ArchiveSpec

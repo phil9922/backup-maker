@@ -25,12 +25,24 @@ function stateClass(state) {
   // A machine that has never paired is waiting on a person, not broken; red
   // would send someone hunting a fault that doesn't exist.
   if (state === 'awaiting-pair') return 'busy';
-  return 'bad'; // offline, stale, full, wrong-drive, error
+  return 'bad'; // offline, stale, full, wrong-drive, name-clash, error
 }
 
-// The one state whose internal name isn't what you'd say out loud.
+// The states whose internal names aren't what you'd say out loud.
 function stateLabel(state) {
-  return state === 'awaiting-pair' ? 'waiting to pair' : state;
+  if (state === 'awaiting-pair') return 'waiting to pair';
+  if (state === 'name-clash') return 'name already in use';
+  return state;
+}
+
+// What a state means, where the name alone doesn't say. Only name-clash needs
+// this: it is the one state a person cannot act on without being told what the
+// remedy is, and the remedy is not guessable.
+function stateHelp(state) {
+  if (state !== 'name-clash') return '';
+  return 'Another computer already backs up to this destination under the same ' +
+    'name. Nothing is being written, because the two would delete each ' +
+    "other's files. Set this destination up again in a folder of its own on that storage.";
 }
 
 function el(tag, cls, text) {
@@ -121,6 +133,9 @@ function updateRow(tr, r) {
   setText(c.target, r.target_name);
   setText(c.state, stateLabel(r.state) + (r.stale ? ' ⚠' : ''));
   c.state.className = stateClass(r.state) + ' dot';
+  // A state whose name doesn't tell you what to do about it gets the
+  // explanation on hover rather than a row that just reads red.
+  c.state.title = stateHelp(r.state);
 
   const active = r.state === 'syncing' || r.state === 'scanning';
   const pct = Math.max(0, Math.min(100, r.completion || 0));
@@ -509,7 +524,9 @@ function renderTargets(st) {
     // leave it out rather than showing an empty placeholder.
     if (t.location) meta.appendChild(el('span', 'muted mono', t.location));
     meta.appendChild(el('span', 'muted', kind[t.type] || t.type));
-    meta.appendChild(el('span', stateClass(t.state) + ' dot', stateLabel(t.state)));
+    const dstate = el('span', stateClass(t.state) + ' dot', stateLabel(t.state));
+    dstate.title = stateHelp(t.state);
+    meta.appendChild(dstate);
     // Said once, in words. "0 folder(s)" repeated what the state beside it
     // already says, and the "(s)" was there because the count was rendered
     // without ever looking at it.
@@ -523,6 +540,12 @@ function renderTargets(st) {
     // Deleting a user's backup history is never silent.
     if (t.reclaim_note) meta.appendChild(el('span', 'busy', t.reclaim_note));
     li.appendChild(meta);
+    // A name clash is data loss averted, not a detail: it gets a sentence under
+    // the destination rather than only a tooltip, because the remedy is not
+    // guessable and a red dot alone sends somebody hunting the wrong fault.
+    if (t.state === 'name-clash') {
+      li.appendChild(el('p', 'hint bad', stateHelp(t.state)));
+    }
     const actions = el('div', 'card-actions');
     if (!readOnly) {
       const btn = el('button', 'danger', 'Remove');

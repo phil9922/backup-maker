@@ -51,8 +51,20 @@ func sanitize(name string) string {
 // version each other's files away, which is why anything restoring a folder has
 // to check for that collision first.
 func DestRoot(machineName, label string) string {
-	return path.Join(sanitize(machineName), sanitize(label))
+	return path.Join(MachineDir(machineName), sanitize(label))
 }
+
+// MachineDir is the single directory at a destination root that belongs to one
+// machine: every live mirror it keeps there, its manifest, its status page and
+// its claim all sit under this one name.
+//
+// SPLIT OUT OF DestRoot FOR THE SAME REASON DestRoot WAS SPLIT OUT OF New():
+// three things now need to name that directory without naming a folder inside
+// it — the claim that decides whether the directory is ours at all, the
+// manifest, and the status page. A second spelling of sanitize(machineName)
+// elsewhere is how one of them ends up looking at a different directory from
+// the one the mirror is writing to, and the claim is the one that must not.
+func MachineDir(machineName string) string { return sanitize(machineName) }
 
 // VersionRoot is where that same folder's displaced versions accumulate.
 //

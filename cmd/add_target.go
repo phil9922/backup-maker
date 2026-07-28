@@ -40,7 +40,9 @@ var addTargetDriveCmd = &cobra.Command{
 			return errNotInitialized
 		}
 		name, _ := cmd.Flags().GetString("name")
-		t, err := setup.AddDriveTarget(args[0], name)
+		create, _ := cmd.Flags().GetBool("create")
+		takeOver, _ := cmd.Flags().GetBool("take-over")
+		t, err := setup.AddDriveTargetIn(args[0], name, create, takeOver)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return errNotInitialized
@@ -87,7 +89,8 @@ default (disable with --no-verify).`,
 
 		fmt.Println("Testing connection…")
 		noVerify, _ := cmd.Flags().GetBool("no-verify")
-		if err := setup.AddShareTarget(url, user, pass, name, !noVerify); err != nil {
+		takeOver, _ := cmd.Flags().GetBool("take-over")
+		if err := setup.AddShareTargetAs(url, user, pass, name, !noVerify, takeOver); err != nil {
 			if user == "" {
 				return fmt.Errorf("%w\n(if the share is locked, retry with --user <name>)", err)
 			}
@@ -216,6 +219,11 @@ func shortDeviceID(id string) string {
 
 func init() {
 	addTargetDriveCmd.Flags().String("name", "", "target name (default: mount point basename)")
+	addTargetDriveCmd.Flags().Bool("create", false, "create the last folder in the path if it does not exist (one level only)")
+	addTargetDriveCmd.Flags().Bool("take-over", false,
+		"use a folder there that already holds backups under this computer's name — only when it really is this computer")
+	addTargetShareCmd.Flags().Bool("take-over", false,
+		"use a folder there that already holds backups under this computer's name — only when it really is this computer")
 	addTargetShareCmd.Flags().String("name", "", "target name (default: share name)")
 	addTargetShareCmd.Flags().String("user", "", "username for the share (omit to try guest access)")
 	addTargetShareCmd.Flags().Bool("no-verify", false, "skip read-back checksum verification of written files")

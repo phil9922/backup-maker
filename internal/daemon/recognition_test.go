@@ -88,6 +88,15 @@ func exists(t *testing.T, root, name string) bool {
 	return err == nil
 }
 
+// The manifest and the status page live inside the writing machine's own
+// directory now, so a shared destination keeps one of each per computer rather
+// than whichever wrote last. These name them for the machine these tests use.
+var (
+	ourManifest = setup.ManifestPathFor("workstation")
+	ourStatus   = statuspage.PathFor("workstation")
+	statusIndex = statuspage.FileName // the derived root page listing machines
+)
+
 // THE BUG: the mirror correctly refused to back up to a card whose identity
 // marker no longer matched — and the daemon then wrote the manifest and the
 // status page to it anyway. The manifest names this machine, its source folder
@@ -106,11 +115,11 @@ func TestForeignStorageReceivesNothingAndIsReportedOnce(t *testing.T) {
 	if got := entries(t, root); len(got) != 1 || got[0] != localmirror.MarkerName {
 		t.Errorf("files landed on a stranger's drive: %v", got)
 	}
-	if exists(t, root, setup.ManifestName) {
+	if exists(t, root, ourManifest) {
 		t.Error("the manifest — machine name, source paths, every destination — was disclosed to unrecognised storage")
 	}
-	if exists(t, root, statuspage.FileName) {
-		t.Error("the status page was written to unrecognised storage")
+	if exists(t, root, ourStatus) || exists(t, root, statusIndex) {
+		t.Error("a status page was written to unrecognised storage")
 	}
 	if n := w.refusals(); n != 1 {
 		t.Errorf("two passes logged %d refusals, want exactly 1\n%s", n, w.logs.String())
@@ -122,7 +131,7 @@ func TestForeignStorageReceivesNothingAndIsReportedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.pass()
-	if !exists(t, root, setup.ManifestName) || !exists(t, root, statuspage.FileName) {
+	if !exists(t, root, ourManifest) || !exists(t, root, ourStatus) {
 		t.Fatalf("the recognised card was not written to: %v", entries(t, root))
 	}
 	if err := localmirror.WriteMarkerAt(root, "somebody-elses-uuid", "their-laptop"); err != nil {
@@ -194,11 +203,14 @@ func TestFirstRunDestinationIsMarkedAndWritten(t *testing.T) {
 	if !exists(t, root, localmirror.MarkerName) {
 		t.Error("the marker was not established on the new drive")
 	}
-	if !exists(t, root, setup.ManifestName) {
+	if !exists(t, root, ourManifest) {
 		t.Fatal("a newly set-up drive got no manifest; adoption from that drive would be impossible")
 	}
-	if !exists(t, root, statuspage.FileName) {
+	if !exists(t, root, ourStatus) {
 		t.Error("a newly set-up drive got no status page")
+	}
+	if !exists(t, root, statusIndex) {
+		t.Error("a newly set-up drive got no status index at its root; every bookmark and symlink pointing there would 404")
 	}
 	m, err := setup.ReadManifestAt(root)
 	if err != nil {
@@ -224,7 +236,7 @@ func TestRecognizedDestinationKeepsGettingBothFiles(t *testing.T) {
 	w.pass()
 	w.pass()
 
-	for _, name := range []string{localmirror.MarkerName, setup.ManifestName, statuspage.FileName} {
+	for _, name := range []string{localmirror.MarkerName, ourManifest, ourStatus, statusIndex} {
 		if !exists(t, root, name) {
 			t.Errorf("%s missing from a recognised destination: %v", name, entries(t, root))
 		}

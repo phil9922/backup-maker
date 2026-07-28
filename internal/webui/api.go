@@ -4,6 +4,7 @@ package webui
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -245,10 +246,39 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 	out, err := s.actions.CreateBackup(req)
 	if err != nil {
 		// Nothing was saved: the whole request is validated before any write.
+		if writeDetailed(w, err) {
+			return
+		}
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 	writeJSON(w, out)
+}
+
+// Detailed is an error that carries its own status and a body worth parsing.
+//
+// AN INTERFACE, NOT AN IMPORT: this package deliberately does not depend on
+// internal/setup, and adding one so a single error could be type-asserted would
+// invert the layering for the sake of one branch. The one error that needs this
+// is a destination-name conflict, where the user has a choice to make and the
+// wizard has to render it as buttons — a plain error string would leave them
+// reading a paragraph and looking for the button that is not there.
+type Detailed interface {
+	Detail() (status int, body any)
+}
+
+// writeDetailed answers with an error's own status and body if it has one, and
+// reports whether it did.
+func writeDetailed(w http.ResponseWriter, err error) bool {
+	var d Detailed
+	if !errors.As(err, &d) {
+		return false
+	}
+	status, body := d.Detail()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+	return true
 }
 
 func (s *Server) handleRemoveFolder(w http.ResponseWriter, r *http.Request) {

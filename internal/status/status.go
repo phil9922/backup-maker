@@ -320,7 +320,7 @@ type Row struct {
 	FolderPath  string    `json:"folder_path"`
 	TargetName  string    `json:"target_name"`
 	TargetType  string    `json:"target_type"`
-	State       string    `json:"state"` // in sync | syncing | offline | stale | awaiting-pair | wrong-drive | error
+	State       string    `json:"state"` // in sync | syncing | offline | stale | awaiting-pair | wrong-drive | name-clash | error
 	Completion  float64   `json:"completion"`
 	NeedItems   int       `json:"need_items"`
 	NeedBytes   int64     `json:"need_bytes"`
@@ -924,7 +924,7 @@ func TargetLocation(t config.Target) string { return config.TargetLocation(t) }
 func rollUp(rows []Row, target string) (string, time.Time) {
 	rank := map[string]int{
 		"in sync": 0, "syncing": 1, "scanning": 1,
-		"offline": 2, "awaiting-pair": 2, "stale": 3, "full": 4, "wrong-drive": 5, "error": 6,
+		"offline": 2, "awaiting-pair": 2, "stale": 3, "full": 4, "wrong-drive": 5, "name-clash": 5, "error": 6,
 	}
 	state := ""
 	var last time.Time

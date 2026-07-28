@@ -24,6 +24,16 @@ type Destination struct {
 	DeviceID       string `json:"device_id,omitempty"`
 	MAC            string `json:"mac,omitempty"`
 	NoVerify       bool   `json:"no_verify,omitempty"`
+	// CreateDir makes the last component of Path if it is not there yet, for
+	// "put backups in a folder on this drive". Only ever set by a control that
+	// asked for a folder by name: the ordinary picker still requires the
+	// directory to exist, so a typed path with a typo in it stays an error
+	// rather than becoming a new empty directory on the wrong disk.
+	CreateDir bool `json:"create_dir,omitempty"`
+	// TakeOver confirms using a folder at the destination that already holds
+	// backups filed under this machine's name. A decision made in front of the
+	// conflict message and never inferred — see ClaimConflictError.
+	TakeOver bool `json:"take_over,omitempty"`
 }
 
 // Backup styles.
@@ -250,7 +260,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 
 	switch {
 	case d.Path != "":
-		t, err := AppendDriveTarget(cfg, d.Path, d.Name)
+		t, err := AppendDriveTargetIn(cfg, d.Path, d.Name, d.CreateDir, d.TakeOver)
 		if err != nil {
 			return config.Target{}, "", err
 		}
@@ -278,7 +288,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 			return config.Target{}, "", err
 		}
 		defer backend.Close()
-		if err := EnsureTargetMarker(backend, d.Name, cfg.General.MachineName); err != nil {
+		if err := EnsureTargetMarkerAs(backend, d.Name, cfg.General.MachineName, d.TakeOver); err != nil {
 			return config.Target{}, "", err
 		}
 		t := config.Target{

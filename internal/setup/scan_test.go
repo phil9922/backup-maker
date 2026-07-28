@@ -14,7 +14,7 @@ func TestScanRootsFindsManifests(t *testing.T) {
 	missing := withManifest + "-does-not-exist"
 
 	if err := WriteManifest(localmirror.NewLocalFS(withManifest), sampleConfig(),
-		map[string]string{"usb": "uuid-usb"}); err != nil {
+		map[string]string{"usb": "uuid-usb"}, "install-oldbox"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -326,15 +326,26 @@ beside the backups:
 
 ```
 /mnt/backups/
-  ├─ backup-maker-status.html   ← open this from any device
-  ├─ workstation/code/…
+  ├─ backup-maker-status.html          ← open this from any device
+  ├─ workstation/
+  │    ├─ backup-maker-status.html     ← that computer's own report
+  │    └─ code/…
+  ├─ laptop/
+  │    ├─ backup-maker-status.html
+  │    └─ documents/…
   └─ backup-maker-archives/…
 ```
 
-It's a single self-contained file — no web server needed. Browse the share from
-a phone or another PC and open it. If that destination is a Pi or NAS with a web
-server, point it at that folder and the page is a URL anyone on your network can
-visit, whether or not your computer is running.
+Each computer writes its own page inside its own folder, and the one at the top
+lists them all — so a destination shared by two computers reports on both
+instead of showing whichever wrote last. **Open the top one**; it links to the
+rest, and it is built from what is actually on the storage rather than from what
+any one computer believes.
+
+They're single self-contained files — no web server needed. Browse the share
+from a phone or another PC and open it. If that destination is a Pi or NAS with
+a web server, point it at that folder and the page is a URL anyone on your
+network can visit, whether or not your computer is running.
 
 **It refuses to pretend it's current.** The page leads with *"last reported 4
 minutes ago"*, recomputed in your browser each time you open it. Past an hour it

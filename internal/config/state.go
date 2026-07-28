@@ -13,6 +13,24 @@ import (
 type State struct {
 	// IPCToken authenticates CLI/dashboard requests to the daemon API.
 	IPCToken string `json:"ipc_token"`
+	// InstallID identifies this INSTALLATION, minted once and never rotated. It
+	// answers the one question no other identifier can: two computers can share
+	// a machine_name (it defaults to the hostname, and two fresh installs of one
+	// distro image really are both "ubuntu"), and they would then share a
+	// <machine>/ directory on a destination and version each other's files away.
+	// The claim files that prevent it are keyed on this.
+	//
+	// NOT A SECRET — it is written to every destination — which is exactly why
+	// it is not the IPC token or the syncthing API key. It is not the syncthing
+	// DeviceID either: that exists only while the sync engine is running, and a
+	// machine backing up to a drive alone never starts it.
+	//
+	// InheritedInstallIDs are ids this machine took over by adopting a
+	// destination and continuing as the machine that wrote it. A claim held by
+	// one of them reads as ours, which is what lets a rebuilt computer pick up
+	// destinations that were not plugged in at adoption time.
+	InstallID           string   `json:"install_id,omitempty"`
+	InheritedInstallIDs []string `json:"inherited_install_ids,omitempty"`
 	// DashboardPort is the port the daemon actually bound (normally the
 	// configured one).
 	DashboardPort int `json:"dashboard_port,omitempty"`
@@ -132,6 +150,49 @@ func LoadState() (*State, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// Owns reports whether a claim recorded under id belongs to this installation,
+// counting the ids inherited by adoption as well as our own.
+//
+// A method on State rather than a comparison at each call site because "is this
+// ours" is asked on the write path of every destination, and the inherited case
+// is precisely the one a hand-rolled `id == s.InstallID` would miss — turning a
+// correctly adopted machine into a refusal to back up.
+func (s *State) Owns(id string) bool {
+	if id == "" || s == nil {
+		return false
+	}
+	if id == s.InstallID {
+		return true
+	}
+	for _, inherited := range s.InheritedInstallIDs {
+		if id == inherited {
+			return true
+		}
+	}
+	return false
+}
+
+// EnsureInstallID returns this installation's id, minting and saving one on
+// first use.
+//
+// Callable with no daemon running, because the CLI's add-target commands need
+// an id before anything else exists: they are the first thing that writes a
+// claim to a destination.
+func EnsureInstallID() (string, error) {
+	s, err := LoadState()
+	if err != nil {
+		return "", err
+	}
+	if s.InstallID != "" {
+		return s.InstallID, nil
+	}
+	s.InstallID = NewToken()[:16]
+	if err := s.Save(); err != nil {
+		return "", err
+	}
+	return s.InstallID, nil
 }
 
 func (s *State) Save() error {
