@@ -60,8 +60,21 @@ func AppendFolder(cfg *config.Config, path, label string, extraIgnore []string, 
 	if err != nil {
 		return config.Folder{}, err
 	}
+	// THE LABEL DECIDES THE DIRECTORY ON EVERY DESTINATION, so two folders
+	// sharing one is two backups writing to one place — and each mirror pass
+	// versions away whatever is under its root that its own source does not
+	// have. That was reachable from two ordinary add-folder calls, because the
+	// default label is the last element of the path: ~/work/src and
+	// ~/personal/src both defaulted to "src".
+	//
+	// A DEFAULTED label is disambiguated, because the user did not choose it
+	// and being refused over a name they never typed is a puzzle. A label they
+	// TYPED is refused instead, because silently backing their work up
+	// somewhere other than the name they asked for is worse than an error.
 	if label == "" {
-		label = filepath.Base(abs)
+		label = uniqueLabel(cfg, filepath.Base(abs), abs)
+	} else if why := cfg.DestRootInUse(label, abs, ""); why != "" {
+		return config.Folder{}, fmt.Errorf("the label %q is already in use: %s", label, why)
 	}
 	f := config.Folder{
 		ID:               config.NewFolderID(),
@@ -72,6 +85,26 @@ func AppendFolder(cfg *config.Config, path, label string, extraIgnore []string, 
 	}
 	cfg.Folders = append(cfg.Folders, f)
 	return f, nil
+}
+
+// uniqueLabel makes a defaulted label distinct from every destination directory
+// already spoken for.
+//
+// Numbered rather than lengthened with part of the path: "src-2" is something a
+// person can rename to whatever they meant, whereas a generated
+// "personal-src-backup" reads like a decision somebody made. The cap is a
+// backstop against a pathological config, not a real limit.
+func uniqueLabel(cfg *config.Config, base, srcPath string) string {
+	if cfg.DestRootInUse(base, srcPath, "") == "" {
+		return base
+	}
+	for n := 2; n < 1000; n++ {
+		candidate := fmt.Sprintf("%s-%d", base, n)
+		if cfg.DestRootInUse(candidate, srcPath, "") == "" {
+			return candidate
+		}
+	}
+	return base
 }
 
 // SetFolderIgnores replaces a folder's exclude patterns wholesale — the same

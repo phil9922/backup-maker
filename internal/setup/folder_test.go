@@ -4,6 +4,7 @@ package setup
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -119,5 +120,122 @@ func TestSetFolderIgnoresRejectsUnknownFolder(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no-such-id") {
 		t.Errorf("error %q should name the folder that wasn't found", err)
+	}
+}
+
+// THE COLLISION THIS CLOSES, and it needed no ill intent to reach: a folder's
+// default label is the last element of its path, so two directories with the
+// same basename in different parents both defaulted to it — and then mirrored
+// into one destination directory, each pass versioning away whatever the other
+// had just written.
+func TestTwoFoldersWithTheSameBasenameDoNotShareADestination(t *testing.T) {
+	isolate(t)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.General.MachineName = "my-laptop"
+	work := t.TempDir()
+	personal := t.TempDir()
+	mustDir(t, work, "src")
+	mustDir(t, personal, "src")
+
+	a, err := AppendFolder(cfg, filepath.Join(work, "src"), "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := AppendFolder(cfg, filepath.Join(personal, "src"), "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if a.Label == b.Label {
+		t.Fatalf("both folders took the label %q; they would back up into one directory and delete each other's files", a.Label)
+	}
+	if da, db := config.DestRoot("my-laptop", a.Label), config.DestRoot("my-laptop", b.Label); da == db {
+		t.Errorf("different labels still resolve to the same destination %q", da)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("the config the setup path produced does not validate: %v", err)
+	}
+}
+
+// A label somebody TYPED is refused rather than quietly altered: backing their
+// work up under a name they did not ask for is worse than an error.
+func TestATypedLabelThatIsAlreadyInUseIsRefused(t *testing.T) {
+	isolate(t)
+	cfg, _ := config.Load()
+	cfg.General.MachineName = "my-laptop"
+	work := t.TempDir()
+	personal := t.TempDir()
+	mustDir(t, work, "src")
+	mustDir(t, personal, "src")
+
+	if _, err := AppendFolder(cfg, filepath.Join(work, "src"), "code", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	_, err := AppendFolder(cfg, filepath.Join(personal, "src"), "code", nil, false)
+	if err == nil {
+		t.Fatal("a duplicate typed label was accepted")
+	}
+	if len(cfg.Folders) != 1 {
+		t.Errorf("the refused folder was added anyway: %d folders", len(cfg.Folders))
+	}
+}
+
+// Different labels that SANITIZE to the same directory are the same collision
+// wearing a disguise, so the check compares destinations rather than labels.
+func TestLabelsThatSanitizeToTheSameDirectoryCollide(t *testing.T) {
+	isolate(t)
+	cfg, _ := config.Load()
+	cfg.General.MachineName = "my-laptop"
+	work := t.TempDir()
+	personal := t.TempDir()
+	mustDir(t, work, "src")
+	mustDir(t, personal, "src")
+
+	if _, err := AppendFolder(cfg, filepath.Join(work, "src"), "a/b", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AppendFolder(cfg, filepath.Join(personal, "src"), "a_b", nil, false); err == nil {
+		t.Error(`"a/b" and "a_b" are different labels that land in the same directory, and both were accepted`)
+	}
+}
+
+// A new folder must not be given a stopped folder's destination: the mirror
+// would adopt that copy and version away everything the new source does not
+// have — deleting a backup somebody has not decided about yet.
+func TestANewFolderDoesNotTakeAStoppedFoldersDestination(t *testing.T) {
+	isolate(t)
+	cfg, _ := config.Load()
+	cfg.General.MachineName = "my-laptop"
+	cfg.Retired = []config.Retired{{
+		ID: "old", Path: "/home/pk/Development", Label: "development",
+	}}
+	elsewhere := t.TempDir()
+	mustDir(t, elsewhere, "development")
+
+	if _, err := AppendFolder(cfg, filepath.Join(elsewhere, "development"), "development", nil, false); err == nil {
+		t.Error("a new folder was allowed to take a stopped backup's destination")
+	}
+}
+
+// But adding back the SAME directory is not a collision — that is a re-add,
+// and the mirror reconciles against the copy already there.
+func TestAddingBackTheSameDirectoryIsAllowed(t *testing.T) {
+	isolate(t)
+	cfg, _ := config.Load()
+	cfg.General.MachineName = "my-laptop"
+	dir := t.TempDir()
+	src := filepath.Join(dir, "development")
+	mustDir(t, dir, "development")
+	cfg.Retired = []config.Retired{{ID: "old", Path: src, Label: "development"}}
+
+	f, err := AppendFolder(cfg, src, "development", nil, false)
+	if err != nil {
+		t.Fatalf("adding back the folder that was stopped was refused: %v", err)
+	}
+	if f.Label != "development" {
+		t.Errorf("label was changed to %q; it must match so the existing copy is reconciled rather than re-copied", f.Label)
 	}
 }

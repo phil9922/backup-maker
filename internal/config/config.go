@@ -455,6 +455,16 @@ func (c *Config) Validate() error {
 		}
 	}
 	seen := map[string]bool{}
+	// THE LABEL IS THE DIRECTORY, so two folders sharing one is two mirrors
+	// writing to one place, each versioning away what the other just wrote.
+	// Compared on the sanitized destination rather than the label itself:
+	// "a/b" and "a_b" are different labels that land in exactly the same
+	// directory, and comparing the raw strings would wave that pair through.
+	//
+	// Checked here as well as in setup.AppendFolder because config.toml is a
+	// file people edit, and this is the reading that a hand-written collision
+	// has to get past.
+	dest := map[string]string{}
 	for i, f := range c.Folders {
 		if f.ID == "" {
 			errs = append(errs, fmt.Errorf("folder[%d] (%s) missing id", i, f.Path))
@@ -464,6 +474,15 @@ func (c *Config) Validate() error {
 		seen[f.ID] = true
 		if !filepath.IsAbs(f.Path) {
 			errs = append(errs, fmt.Errorf("folder %q path must be absolute: %s", f.ID, f.Path))
+		}
+		if f.Label != "" {
+			d := DestRoot(c.General.MachineName, f.Label)
+			if other, clash := dest[d]; clash {
+				errs = append(errs, fmt.Errorf(
+					"folders %q and %q both back up into %q — they would delete each other's files; give one of them a different label",
+					other, f.Label, d))
+			}
+			dest[d] = f.Label
 		}
 	}
 	for i, t := range c.Targets {
