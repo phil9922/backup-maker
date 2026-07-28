@@ -337,9 +337,12 @@
          weekly zip are different promises about your files, and the page now
          makes you choose which one you are looking at. -->
     <section id="folders-section" hidden>
-      <h2>Backed up continuously</h2>
-      <p class="muted">Copied within seconds of you saving, with about 30 days of
-        previous versions kept alongside.</p>
+      <!-- Named with the wizard's own word. The wizard offers "Incremental"
+           and "Timed"; calling the same thing "backed up continuously" here
+           left nothing connecting the section to the choice that made it. -->
+      <h2>Incremental backups</h2>
+      <p class="section-lede">Copied within seconds of you saving, with about 30 days
+        of previous versions kept alongside. This is what the table above is showing.</p>
       <ul id="folder-list" class="cards"></ul>
     </section>
 
@@ -364,15 +367,15 @@
          is. -->
     <section id="retired-section" hidden>
       <h2>No longer protected</h2>
-      <p class="muted">These folders are not being backed up any more, but the copies
+      <p class="section-lede">These folders are not being backed up any more, but the copies
         already made are still on your destinations. Turn one back on to carry on where
         it left off, or delete its backups for good.</p>
       <ul id="retired-list" class="cards"></ul>
     </section>
 
     <section id="archives-section" hidden>
-      <h2>Snapshots on a schedule</h2>
-      <p class="muted">A complete copy, frozen at one moment and sealed into a
+      <h2>Timed snapshots</h2>
+      <p class="section-lede">A complete copy, frozen at one moment and sealed into a
         password-protected zip. Nothing is copied in between runs.</p>
       <div class="table-wrap">
         <table id="archive-rows">
@@ -381,7 +384,7 @@
                  The name is whatever somebody typed; the folder is the thing
                  they will want to check, and its absence is how a snapshot of
                  the wrong directory went unnoticed. -->
-            <tr><th>Folder</th><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th></tr>
+            <tr><th>Folder</th><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th><th></th></tr>
           </thead>
           <tbody></tbody>
         </table>

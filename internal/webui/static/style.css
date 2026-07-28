@@ -60,7 +60,10 @@ h1 { font-size: 1.2rem; font-weight: 600; }
 }
 .badge.ok { color: var(--ok); }
 .badge.bad { color: var(--bad); }
-main { padding: var(--s5); max-width: 60rem; margin: 0 auto; display: grid; gap: var(--s5); }
+/* The gap between sections is what stops the page reading as one long column.
+   It was the same 1.5rem that separates things WITHIN a section, so nothing
+   said where one subject ended and the next began. */
+main { padding: var(--s5); max-width: 60rem; margin: 0 auto; display: grid; gap: var(--s6); }
 /* Grid items default to min-width:auto, which lets a wide table push the page
    sideways instead of scrolling inside .table-wrap. */
 main > section { min-width: 0; }
@@ -126,6 +129,42 @@ h2 {
  * Scoped rather than reset a third time, so the next thing built outside the
  * dashboard inherits nothing it has to remember to cancel. */
 #dashboard h2 { padding-left: var(--gutter); }
+
+/* SECTIONS HAVE TO READ AS SECTIONS.
+ *
+ * The page grew from three panels to six, all separated by the same gap and
+ * headed by the same quiet grey caption, and it ran together into one column
+ * where nothing announced that a new subject had started — most damagingly
+ * between the two kinds of backup, which are different promises about
+ * somebody's files and were reading as one list.
+ *
+ * The heading carries the weight rather than a rule between sections: a border
+ * cannot be drawn only above the first VISIBLE section, and most of these are
+ * hidden most of the time, so a rule would land at the top of the page on any
+ * machine that has no snapshots. */
+#dashboard > section > h2 {
+  font-size: 0.95rem;
+  color: var(--fg);
+  margin-bottom: var(--s2);
+}
+/* A rule above every section EXCEPT the first one on screen.
+ *
+ * "First one on screen" is the hard part: most of these sections are hidden
+ * most of the time, so :first-child would draw a rule at the top of the page
+ * on any machine without, say, snapshots. The general-sibling combinator
+ * solves it exactly — this matches a visible section that has some visible
+ * section before it, which is the definition of "not the first". */
+#dashboard > section:not([hidden]) ~ section:not([hidden]) {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s6);
+}
+/* The sentence under a heading that says what the section is FOR. Muted, but
+   at hint size and readable — this is where the difference between "copied
+   within seconds" and "sealed weekly into a zip" is actually spelled out. */
+.section-lede {
+  color: var(--hint); font-size: var(--fs-hint); line-height: 1.55;
+  margin-bottom: var(--s3); padding-left: var(--gutter); max-width: 46rem;
+}
 /* Table cells and card contents share this inset, which is the whole reason
    the sections now line up with each other rather than each starting wherever
    its own padding happened to land. */
@@ -739,3 +778,12 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
   #settings-section .delivery + .sub-checks { margin-left: 0; }
   .delivery-state { margin-left: 0; }
 }
+
+/* The per-schedule actions column. Buttons on one line, hard right, so the
+   table still reads as columns of facts with the controls out of the way. */
+#archive-rows .row-actions { white-space: nowrap; text-align: right; }
+#archive-rows .row-actions button + button { margin-left: var(--s2); }
+/* A paused schedule is neither working nor broken, so it gets neither colour.
+   Muted says "deliberately not running" where green would imply it is about to
+   and red would imply something went wrong. */
+#archive-rows td.paused { color: var(--muted); }

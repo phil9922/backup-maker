@@ -73,6 +73,16 @@ type Actions struct {
 	// the target is never deleted.
 	RemoveFolder func(id string) error
 	RemoveTarget func(name string) error
+	// RemoveArchive stops a snapshot schedule from running again. Config only:
+	// the zips it already wrote stay where they are, like every other removal
+	// on this API.
+	RemoveArchive func(name string) error
+	// SetArchivePaused stops or resumes a schedule, keeping everything about
+	// it — including the password, which cannot be recovered if thrown away.
+	SetArchivePaused func(name string, paused bool) error
+	// SetArchiveSchedule changes how often a snapshot runs and how many are
+	// kept.
+	SetArchiveSchedule func(name, every string, keep int) error
 	// ReenableFolder puts a stopped folder back into service. It never copies
 	// anything: the destination layout is keyed by label, so the mirror
 	// reconciles against the copy already there.
@@ -161,6 +171,18 @@ type SettingsRequest struct {
 	// UpdateCheck asks github.com once a day whether a newer release exists.
 	// Off by default; the only setting on this route that reaches the internet.
 	UpdateCheck *bool `json:"update_check,omitempty"`
+}
+
+// ArchiveScheduleRequest changes how often a snapshot runs and how many are
+// kept. Both fields are optional; an omitted one is left alone.
+type ArchiveScheduleRequest struct {
+	Every string `json:"every,omitempty"`
+	Keep  int    `json:"keep,omitempty"`
+}
+
+// ArchivePausedRequest stops or resumes a schedule.
+type ArchivePausedRequest struct {
+	Paused bool `json:"paused"`
 }
 
 // RetiredDeleteRequest confirms a permanent deletion of backed-up files.
@@ -359,6 +381,11 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("POST /api/adopt/test-share", s.requireToken(s.handleAdoptTestShare))
 	mux.HandleFunc("POST /api/adopt", s.requireToken(s.handleAdopt))
 	mux.HandleFunc("POST /api/archives/{name}/password", s.requireToken(s.handleArchivePassword))
+	mux.HandleFunc("POST /api/archives/{name}/schedule", s.requireToken(s.handleSetArchiveSchedule))
+	mux.HandleFunc("POST /api/archives/{name}/paused", s.requireToken(s.handleSetArchivePaused))
+	// Config only — the snapshots already written are left alone, which is
+	// what every DELETE on this API means.
+	mux.HandleFunc("DELETE /api/archives/{name}", s.requireToken(s.handleRemoveArchive))
 	mux.HandleFunc("POST /api/settings", s.requireToken(s.handleSetSettings))
 	mux.HandleFunc("POST /api/alerts/test", s.requireToken(s.handleTestAlert))
 	mux.HandleFunc("POST /api/lan-devices/{code}/approve", s.requireToken(s.handleApproveLANDevice))

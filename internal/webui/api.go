@@ -582,3 +582,59 @@ func (s *Server) handleForgetLANDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]bool{"ok": true})
 }
+
+// handleSetArchiveSchedule changes how often a snapshot runs and how many are
+// kept. Only the config is written; the daemon's watcher picks it up.
+func (s *Server) handleSetArchiveSchedule(w http.ResponseWriter, r *http.Request) {
+	if s.actions.SetArchiveSchedule == nil {
+		unavailable(w, "changing a snapshot schedule")
+		return
+	}
+	var req ArchiveScheduleRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.actions.SetArchiveSchedule(r.PathValue("name"), req.Every, req.Keep); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "message": "schedule updated"})
+}
+
+// handleSetArchivePaused stops or resumes a schedule.
+func (s *Server) handleSetArchivePaused(w http.ResponseWriter, r *http.Request) {
+	if s.actions.SetArchivePaused == nil {
+		unavailable(w, "pausing a snapshot schedule")
+		return
+	}
+	var req ArchivePausedRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.actions.SetArchivePaused(r.PathValue("name"), req.Paused); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	msg := "resumed — it will run at its next due time"
+	if req.Paused {
+		msg = "paused; nothing about it is lost, and the snapshots already written stay where they are"
+	}
+	writeJSON(w, map[string]any{"ok": true, "message": msg})
+}
+
+// handleRemoveArchive stops a schedule for good. The zips it wrote survive.
+func (s *Server) handleRemoveArchive(w http.ResponseWriter, r *http.Request) {
+	if s.actions.RemoveArchive == nil {
+		unavailable(w, "removing a snapshot schedule")
+		return
+	}
+	if err := s.actions.RemoveArchive(r.PathValue("name")); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok": true,
+		"message": "this schedule will not run again; the snapshots it already wrote are left " +
+			"exactly where they are, and still open with the password that made them",
+	})
+}

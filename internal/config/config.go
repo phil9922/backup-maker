@@ -363,6 +363,15 @@ type Archive struct {
 	// ExtraIgnore adds patterns for this snapshot only, on top of whatever
 	// the folder already excludes.
 	ExtraIgnore []string `toml:"extra_ignore,omitempty"`
+	// Paused stops the schedule running without throwing it away — the
+	// password, the retention count and the folder it covers all survive.
+	//
+	// A SEPARATE THING FROM DELETING IT, because the two answer different
+	// questions. "Stop this for now" is reversible and keeps what you set up;
+	// "I do not want this job" is not. Without a pause, the only way to stop a
+	// schedule was to delete it and build it again from scratch — including
+	// retyping a password that by design cannot be recovered.
+	Paused bool `toml:"paused,omitempty"`
 }
 
 type Receive struct {

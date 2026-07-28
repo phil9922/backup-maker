@@ -29,6 +29,12 @@ func (d *daemon) archiveLoop(ctx context.Context) {
 func (d *daemon) runDueArchives() {
 	cfg := d.currentCfg()
 	for _, job := range cfg.Archives {
+		// A paused schedule does not run, and that is the whole of it: the
+		// password, the retention count and the folder it covers are all still
+		// there, waiting to be resumed.
+		if job.Paused {
+			continue
+		}
 		every, err := config.ParseEvery(job.Every)
 		if err != nil {
 			continue // validation rejects this; belt and braces

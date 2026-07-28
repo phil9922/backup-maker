@@ -578,7 +578,9 @@ function renderArchives(st) {
       tr.appendChild(el('td', undefined, text));
     }
     const state = el('td', undefined, a.state);
-    state.className = a.state === 'ok' ? 'ok' : (a.state === 'never run' || a.needs_password ? 'busy' : 'bad');
+    state.className = a.paused ? 'paused'
+      : a.state === 'ok' ? 'ok'
+      : (a.state === 'never run' || a.needs_password ? 'busy' : 'bad');
     // A snapshot with no stored password never runs; offer to set it here
     // rather than sending the user to the command line.
     if (a.needs_password && !readOnly) {
@@ -588,6 +590,25 @@ function renderArchives(st) {
     }
     tr.appendChild(state);
     tr.appendChild(el('td', undefined, humanTime(a.last_run)));
+
+    // Pause, edit, stop. Without these the only way to change a schedule was
+    // to delete it and build it again — including retyping a password that by
+    // design cannot be recovered — and there was no way to stop one at all.
+    const actions = el('td', 'row-actions');
+    if (!readOnly) {
+      const pause = el('button', 'small-btn', a.paused ? 'Resume' : 'Pause');
+      pause.onclick = () => setArchivePaused(a, !a.paused);
+      actions.appendChild(pause);
+
+      const edit = el('button', 'small-btn', 'Change…');
+      edit.onclick = () => editArchiveSchedule(a);
+      actions.appendChild(edit);
+
+      const stop = el('button', 'danger small-btn', 'Stop');
+      stop.onclick = () => removeArchive(a);
+      actions.appendChild(stop);
+    }
+    tr.appendChild(actions);
     if (a.detail) tr.title = a.detail;
     body.appendChild(tr);
   }
@@ -1607,4 +1628,56 @@ function renderDeliveryState(st) {
       el.className = 'delivery-state small bad';
     }
   }
+}
+
+// --- scheduled snapshots: pause, change, stop --------------------------
+
+async function setArchivePaused(a, paused) {
+  const resp = await mutate('/api/archives/' + encodeURIComponent(a.name) + '/paused', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paused }),
+  });
+  if (!resp.ok) alert(await resp.text()); else refresh();
+}
+
+// Changing how often it runs and how many are kept. Deliberately does NOT
+// touch the password or the folder: the password cannot be shown back (it is
+// never sent to the browser), and re-pointing a schedule at a different folder
+// is how somebody ends up with a snapshot of the wrong thing — that is a new
+// schedule, made deliberately.
+async function editArchiveSchedule(a) {
+  const every = prompt(
+    `How often should "${a.name}" run?\n\n` +
+    `hourly, 12h, daily, or weekly.`, a.every);
+  if (every === null) return;
+  const keepRaw = prompt(
+    `How many snapshots should be kept?\n\n` +
+    `Older ones are deleted when a new one is written — not now.`,
+    String(a.keep || 5));
+  if (keepRaw === null) return;
+  const keep = parseInt(keepRaw, 10);
+  if (!Number.isFinite(keep) || keep < 1) { alert('Keep must be a whole number, 1 or more.'); return; }
+
+  const resp = await mutate('/api/archives/' + encodeURIComponent(a.name) + '/schedule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ every: every.trim(), keep }),
+  });
+  if (!resp.ok) alert(await resp.text()); else refresh();
+}
+
+// "Stop" rather than "Delete": it stops the schedule running, and the
+// snapshots it already wrote are left where they are. Saying "delete" would
+// promise a file removal this does not do — and the zips stay openable with
+// the password that made them.
+async function removeArchive(a) {
+  if (!confirm(
+    `Stop the schedule "${a.name}"?\n\n` +
+    `It will not run again.\n\n` +
+    `The snapshots it has already written are left exactly where they are, and still ` +
+    `open with the password that made them. Its stored password is forgotten, so ` +
+    `keep your own copy of it if you may need those snapshots.`)) return;
+  const resp = await mutate('/api/archives/' + encodeURIComponent(a.name), { method: 'DELETE' });
+  await reportAndRefresh(resp);
 }

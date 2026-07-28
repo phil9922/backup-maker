@@ -79,3 +79,96 @@ func AddArchive(name string, folderIDs []string, every, target string, keep int,
 	state.ArchivePasswords[name] = password
 	return state.Save()
 }
+
+// RemoveArchive stops a snapshot schedule from ever running again.
+//
+// THE ZIPS IT ALREADY WROTE ARE LEFT EXACTLY WHERE THEY ARE. Same promise as
+// removing a folder or a destination: this is a change of intent, not a
+// deletion of backups. Those snapshots stay readable with the password that
+// made them — which is why the password is only forgotten once the job is,
+// and not a moment before.
+func RemoveArchive(name string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	var kept []config.Archive
+	found := false
+	for _, a := range cfg.Archives {
+		if a.Name == name {
+			found = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if !found {
+		return fmt.Errorf("no snapshot schedule named %q", name)
+	}
+	cfg.Archives = kept
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	// Only after the config change is durable, so a failed save never leaves a
+	// live job separated from the password it cannot run without.
+	state, err := config.LoadState()
+	if err != nil {
+		return err
+	}
+	delete(state.ArchivePasswords, name)
+	delete(state.ArchiveLastRun, name)
+	return state.Save()
+}
+
+// SetArchivePaused stops or resumes a schedule without touching anything else.
+func SetArchivePaused(name string, paused bool) error {
+	return editArchive(name, func(a *config.Archive) error {
+		a.Paused = paused
+		return nil
+	})
+}
+
+// SetArchiveSchedule changes how often a snapshot runs and how many are kept.
+//
+// Reducing Keep does not delete anything here: the prune happens on the next
+// run, by the same code that has always done it, so a number typed by mistake
+// is a number you can correct before it costs you a snapshot.
+func SetArchiveSchedule(name, every string, keep int) error {
+	return editArchive(name, func(a *config.Archive) error {
+		if every != "" {
+			if _, err := config.ParseEvery(every); err != nil {
+				return err
+			}
+			a.Every = every
+		}
+		if keep > 0 {
+			a.Keep = keep
+		}
+		return nil
+	})
+}
+
+// editArchive applies a change to one schedule and saves, validating the whole
+// config afterwards so a bad edit is refused rather than written.
+func editArchive(name string, apply func(*config.Archive) error) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	idx := -1
+	for i := range cfg.Archives {
+		if cfg.Archives[i].Name == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("no snapshot schedule named %q", name)
+	}
+	if err := apply(&cfg.Archives[idx]); err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return cfg.Save()
+}
