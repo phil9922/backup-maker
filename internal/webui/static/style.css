@@ -234,6 +234,40 @@ button.danger:hover { border-color: var(--bad); }
 .row.spread { justify-content: space-between; }
 
 /* --- wizard ----------------------------------------------------------- */
+
+/* Cards in the wizard and the adopt flow are CHOICES, not status rows, and
+   they get a layout that reflects that.
+ *
+ * THE BUG THIS FIXES. .card is a four-column grid — icon, name, metadata,
+ * actions — so that a list of folders or destinations lines up down the page,
+ * which is worth a lot in a status panel. Every card built by wizard.js and
+ * adopt.js instead appends a flat run of children, so they landed in whichever
+ * column they happened to be the nth child of: the name went into the 1rem
+ * icon column and overlapped the path beside it, and the button went into the
+ * 1fr column and stretched across the card. All seven of those call sites were
+ * wrong in the same way.
+ *
+ * Fixed here rather than in the seven builders because there is nothing to
+ * line up in these lists: each card is a single choice being offered once, and
+ * a row that wraps says that better than a grid whose columns nothing shares.
+ * It also means the JS keeps saying what a card CONTAINS and not where each
+ * piece goes. */
+#wizard .card, #adopt .card {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+/* The action sits at the far end of the row, however long the text before it
+   is — and only a card's OWN button, never one inside a form it contains. */
+#wizard .card > button, #adopt .card > button { margin-left: auto; }
+/* A path is one unbroken string and must be allowed to give way, or it holds
+   the row wider than the card and pushes the button off the edge. */
+#wizard .card .mono, #adopt .card .mono { overflow-wrap: anywhere; min-width: 0; }
+/* Anything that is a block of its own — a password form, the "chosen" note —
+   takes a full line rather than being squeezed into the row. */
+#wizard .card .share-form, #adopt .card .share-form,
+#wizard .card .chosen, #adopt .card .chosen { flex-basis: 100%; margin-left: 0; }
 #wizard, #adopt { padding: 1.5rem; max-width: 46rem; margin: 0 auto; display: grid; gap: 1.25rem; }
 #wizard > section, #adopt > section { min-width: 0; }
 .wiz-head h2 { font-size: 1.3rem; }

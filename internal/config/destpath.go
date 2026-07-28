@@ -101,6 +101,22 @@ func SafeRelPath(p string, minSegments int) bool {
 	return len(strings.Split(p, "/")) >= minSegments
 }
 
+// SameDest reports whether two destination paths land in the same place.
+//
+// CASE-INSENSITIVE, BECAUSE THE FILESYSTEMS BACKUPS LAND ON MOSTLY ARE. An SD
+// card or USB stick is almost always exFAT or FAT, a Windows share is NTFS,
+// and all of them treat "Development" and "development" as one directory —
+// while ext4 underneath a Linux drive target treats them as two. Comparing the
+// strings exactly would let a pair of labels differing only in case through the
+// collision check, and on the commonest destination of all they would then
+// share a directory and version each other's files away.
+//
+// Refusing a case-only difference costs somebody a slightly different label.
+// Allowing it costs them a backup. The comparison is deliberately the stricter
+// of the two readings, on every platform, so the answer does not depend on
+// which destination happens to be plugged in.
+func SameDest(a, b string) bool { return strings.EqualFold(a, b) }
+
 // VersionsPathLooksRight reports whether p lives inside the version store.
 //
 // Checked separately from SafeRelPath because "relative and tidy" is not

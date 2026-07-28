@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 )
 
 // RetiredByID finds a stopped folder's record.
@@ -36,19 +37,20 @@ func (c *Config) RetiredByID(id string) (Retired, bool) {
 // (Validate rejects duplicates) and each run writes its own timestamped zip, so
 // nothing there is ever written twice to one path. A live mirror cannot borrow
 // that trick — it IS the current copy, at a stable location, updated in place.
+//
 // srcPath is the directory being backed up, and exceptID the folder being
-// checked so it never collides with itself.
+// checked so that it never collides with itself.
 func (c *Config) DestRootInUse(label, srcPath, exceptID string) string {
 	want := DestRoot(c.General.MachineName, label)
 	// Two LIVE folders may never share a destination whatever their sources
 	// are: each pass deletes what the other just wrote.
 	for _, f := range c.Folders {
-		if f.ID != exceptID && DestRoot(c.General.MachineName, f.Label) == want {
+		if f.ID != exceptID && SameDest(DestRoot(c.General.MachineName, f.Label), want) {
 			return fmt.Sprintf("%q (%s) already backs up there", f.Label, f.Path)
 		}
 	}
 	for _, r := range c.Retired {
-		if r.ID == exceptID || DestRoot(c.General.MachineName, r.Label) != want {
+		if r.ID == exceptID || !SameDest(DestRoot(c.General.MachineName, r.Label), want) {
 			continue
 		}
 		// The SAME directory coming back is not a collision — that is somebody
@@ -84,7 +86,7 @@ func (c *Config) ReenableBlockedReason(r Retired) string {
 	// other's files into version history for as long as both existed.
 	want := DestRoot(c.General.MachineName, r.Label)
 	for _, f := range c.Folders {
-		if DestRoot(c.General.MachineName, f.Label) == want {
+		if SameDest(DestRoot(c.General.MachineName, f.Label), want) {
 			return fmt.Sprintf("this would back up into the same place as %q (%s), and the two would delete each other's files — rename one of them first",
 				f.Label, f.Path)
 		}
@@ -100,15 +102,18 @@ func (c *Config) ReenableBlockedReason(r Retired) string {
 // then deleting "the retired folder's backups" would delete a working backup
 // that something is actively maintaining.
 func (c *Config) DeleteBlockedReason(r Retired) string {
+	// Case-folded, like every other destination comparison here: an SD card is
+	// usually exFAT, where a live "Development" and a stopped "development"
+	// are one directory — and deleting the second would delete the first.
 	live := map[string]Folder{}
 	for _, f := range c.Folders {
-		live[DestRoot(c.General.MachineName, f.Label)] = f
+		live[strings.ToLower(DestRoot(c.General.MachineName, f.Label))] = f
 	}
 	for _, cp := range r.Copies {
 		if cp.DestPath == "" {
 			continue
 		}
-		if f, ok := live[cp.DestPath]; ok {
+		if f, ok := live[strings.ToLower(cp.DestPath)]; ok {
 			return fmt.Sprintf("%q (%s) is being backed up into that same place right now — deleting would remove a backup that is still in use",
 				f.Label, f.Path)
 		}
@@ -123,7 +128,7 @@ func (c *Config) DeleteBlockedReason(r Retired) string {
 		}
 		for _, a := range r.Copies {
 			for _, b := range other.Copies {
-				if a.Target == b.Target && a.DestPath != "" && a.DestPath == b.DestPath {
+				if a.Target == b.Target && a.DestPath != "" && SameDest(a.DestPath, b.DestPath) {
 					return fmt.Sprintf("%q was stopped from the same place on %s — the two share one copy, so delete that one first",
 						other.Label, a.Target)
 				}

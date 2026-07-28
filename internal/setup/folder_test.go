@@ -239,3 +239,53 @@ func TestAddingBackTheSameDirectoryIsAllowed(t *testing.T) {
 		t.Errorf("label was changed to %q; it must match so the existing copy is reconciled rather than re-copied", f.Label)
 	}
 }
+
+// THE HOLE THE FIRST FIX LEFT, found by running the real thing against a real
+// SD card. Backup destinations are mostly exFAT (cards, sticks), NTFS (Windows
+// shares) or SMB, and all of them treat "Development" and "development" as one
+// directory — so a case-only difference passed a case-sensitive check and the
+// two folders then shared a directory on exactly the storage people back up to
+// most.
+func TestLabelsDifferingOnlyInCaseCollide(t *testing.T) {
+	isolate(t)
+	cfg, _ := config.Load()
+	cfg.General.MachineName = "my-laptop"
+	work := t.TempDir()
+	personal := t.TempDir()
+	mustDir(t, work, "src")
+	mustDir(t, personal, "src")
+
+	if _, err := AppendFolder(cfg, filepath.Join(work, "src"), "Development", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AppendFolder(cfg, filepath.Join(personal, "src"), "development", nil, false); err == nil {
+		t.Error(`"Development" and "development" are one directory on exFAT, NTFS and SMB, and both were accepted`)
+	}
+}
+
+// And the defaulted label disambiguates past a case-only clash too, rather than
+// handing back a name that only looks distinct.
+func TestADefaultedLabelSkipsPastACaseOnlyClash(t *testing.T) {
+	isolate(t)
+	cfg, _ := config.Load()
+	cfg.General.MachineName = "my-laptop"
+	work := t.TempDir()
+	mustDir(t, work, "Src")
+	personal := t.TempDir()
+	mustDir(t, personal, "src")
+
+	a, err := AppendFolder(cfg, filepath.Join(work, "Src"), "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := AppendFolder(cfg, filepath.Join(personal, "src"), "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.SameDest(config.DestRoot("my-laptop", a.Label), config.DestRoot("my-laptop", b.Label)) {
+		t.Errorf("labels %q and %q still land in the same directory on a case-insensitive filesystem", a.Label, b.Label)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("the config the setup path produced does not validate: %v", err)
+	}
+}

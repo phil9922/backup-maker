@@ -476,7 +476,8 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("folder %q path must be absolute: %s", f.ID, f.Path))
 		}
 		if f.Label != "" {
-			d := DestRoot(c.General.MachineName, f.Label)
+			// Keyed case-folded: the destination filesystem usually is.
+			d := strings.ToLower(DestRoot(c.General.MachineName, f.Label))
 			if other, clash := dest[d]; clash {
 				errs = append(errs, fmt.Errorf(
 					"folders %q and %q both back up into %q — they would delete each other's files; give one of them a different label",
