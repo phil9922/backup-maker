@@ -96,6 +96,11 @@ type daemon struct {
 	spaceMu sync.Mutex
 	space   map[string]spaceSample
 
+	// written remembers what was last put on each destination, so a page whose
+	// content has not changed is not rewritten just because a minute has passed.
+	// Only ever touched from the status-page goroutine.
+	written map[string]lastWritten
+
 	// foreign names the destinations whose storage we do not recognize, so the
 	// refusal to write there is reported on the transition rather than once a
 	// minute for ever. It has its own lock because the status writer asks the

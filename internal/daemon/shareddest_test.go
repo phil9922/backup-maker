@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
@@ -52,7 +53,7 @@ func newMachineWriter(t *testing.T, root, machine, installID, uuid string) *mach
 func (w *machineWriter) pass() {
 	uuid := w.d.state.DriveTargetUUIDs["card"]
 	w.d.refreshManifest(w.cfg.Targets[0], localmirror.NewLocalFS(w.root), w.cfg, uuid)
-	w.d.writeStatusPages(status.Model{MachineName: w.cfg.General.MachineName})
+	w.d.writeStatusPages(status.Model{MachineName: w.cfg.General.MachineName}, time.Now())
 }
 
 // THE BUG: the status page and the manifest were written at fixed names at the

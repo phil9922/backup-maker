@@ -4,6 +4,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"path"
 	"time"
 
@@ -14,10 +17,36 @@ import (
 	"github.com/phil9922/backup-maker/internal/statuspage"
 )
 
-// statusWriteEvery is how often the page on each destination is refreshed.
-// Frequent enough that "last reported" reads as live while this machine is up;
-// infrequent enough to be nothing on an SSD and gentle over SMB.
+// statusWriteEvery is how often the page on each destination is RECONSIDERED.
+// Frequent enough that a change of state reaches the page while it still
+// matters; a tick that finds nothing changed now costs a render and no write.
 const statusWriteEvery = time.Minute
+
+// statusHeartbeat is the longest the page may go unwritten while nothing
+// changes. It exists because the page's own freshness is judged by its mtime —
+// both by the index beside it and by the banner the page draws in the reader's
+// browser — so silence has to be bounded well inside statuspage.StaleAfter or
+// skipping a write would turn a healthy machine stale by arithmetic.
+//
+// Four times inside the hour: three consecutive failed writes still leave the
+// page trusted, and it is the fifteenfold reduction that was the point.
+const statusHeartbeat = 15 * time.Minute
+
+// lastWritten is what a destination already holds, so an unchanged page is left
+// alone. Fingerprints rather than the content: this is compared once a minute
+// per destination for as long as the daemon runs.
+type lastWritten struct {
+	page    string
+	pageAt  time.Time
+	index   string
+	indexAt time.Time
+}
+
+// due reports whether something whose content now fingerprints as fp needs
+// writing: because it says something different, or because the heartbeat is up.
+func due(fp, was string, at, now time.Time) bool {
+	return fp != was || now.Sub(at) >= statusHeartbeat
+}
 
 // statusPageLoop keeps a readable status page on every drive/share destination.
 //
@@ -53,28 +82,51 @@ func (d *daemon) statusPageLoop(ctx context.Context, collect func() status.Model
 // goroutine, so a desktop that never answers cannot delay the page.
 func (d *daemon) cycle(collect func() status.Model) {
 	m := collect()
-	d.alerts.check(m, time.Now())
-	d.writeStatusPages(m)
+	// One clock for both, for the same reason there is one collection: the alert
+	// and the page are the same report, and they should not be able to disagree
+	// about when it was made.
+	now := time.Now()
+	d.alerts.check(m, now)
+	d.writeStatusPages(m, now)
 }
 
 // writeStatusPages renders this machine's page once and writes it into this
 // machine's directory on every reachable destination, then rebuilds the index
 // at each destination root.
-func (d *daemon) writeStatusPages(m status.Model) {
-	now := time.Now()
-	page, err := statuspage.Render(buildPage(m, now))
+func (d *daemon) writeStatusPages(m status.Model, now time.Time) {
+	built, fp := buildPage(m, now)
+	page, err := statuspage.Render(built)
 	if err != nil {
 		d.log.Warn("could not render the destination status page", "err", err)
 		return
 	}
 	machine := m.MachineName
 	dir := config.MachineDir(machine)
+	if d.written == nil {
+		d.written = map[string]lastWritten{}
+	}
 
 	for _, b := range d.statusBackends() {
 		// The page names this machine, its folders and its destinations, so it
 		// goes only where the backups themselves would go — and only into the
 		// directory that is actually ours.
 		if !d.mayWriteAs(b.name, b.where, b.backend, b.uuid, dir) {
+			continue
+		}
+		was := d.written[b.name]
+		// Nothing to say that this destination is not already saying. Skipped
+		// before MkdirAll and the write, which are the two round trips.
+		//
+		// THE WRITE THIS AVOIDS IS THE COMMON CASE, not a rare one: a machine
+		// whose backups are all healthy and idle produced a byte-different page
+		// every minute for ever, because the page carried "4 minutes ago" text
+		// that aged on its own. On a destination that is an SD card — a Pi's boot
+		// card, say — that was thousands of rewrites a day of a file nobody had
+		// asked a new question of.
+		if !due(fp, was.page, was.pageAt, now) {
+			// Still reconsider the index: another machine's page can have gone
+			// quiet, and noticing that is not conditional on ours changing.
+			d.writeStatusIndex(b, now)
 			continue
 		}
 		// A destination that is offline simply doesn't get an update; its page
@@ -88,6 +140,10 @@ func (d *daemon) writeStatusPages(m status.Model) {
 			d.log.Debug("could not write the status page", "target", b.name, "err", err)
 			continue
 		}
+		// Recorded only on success, so a destination that refused the write is
+		// tried again next tick rather than being treated as up to date.
+		was.page, was.pageAt = fp, now
+		d.written[b.name] = was
 		d.writeStatusIndex(b, now)
 	}
 }
@@ -136,6 +192,17 @@ func (d *daemon) writeStatusIndex(b namedBackend, now time.Time) {
 			Stale:   now.Sub(fi.ModTime()) > statuspage.StaleAfter,
 		})
 	}
+	// STALE IS IN THE FINGERPRINT, and it is the reason this cannot simply skip
+	// whenever no page changed. A machine that goes quiet crosses into stale by
+	// the passage of time alone: nothing about it is written, no mtime moves, and
+	// the only thing that changes is the answer to "has it been an hour". Leave
+	// that out and the index would go on saying a machine that stopped reporting
+	// two days ago is fine, which is the one lie this program must never tell.
+	fp := indexFingerprint(entries, nested)
+	was := d.written[b.name]
+	if !due(fp, was.index, was.indexAt, now) {
+		return
+	}
 	index, err := statuspage.RenderIndex(entries, nested, now)
 	if err != nil {
 		d.log.Warn("could not render the destination status index", "err", err)
@@ -143,26 +210,75 @@ func (d *daemon) writeStatusIndex(b namedBackend, now time.Time) {
 	}
 	if err := b.backend.WriteFile(statuspage.FileName, index); err != nil {
 		d.log.Debug("could not write the status index", "target", b.name, "err", err)
+		return
 	}
+	was.index, was.indexAt = fp, now
+	if d.written == nil {
+		d.written = map[string]lastWritten{}
+	}
+	d.written[b.name] = was
+}
+
+// indexFingerprint is what the index says: which machines report here, when each
+// last did, whether that is too long ago, and which nested destinations are
+// named. Every one of those is a fact about the destination rather than about
+// the clock, so an index that fingerprints the same is one nobody would read
+// differently.
+func indexFingerprint(entries []statuspage.IndexEntry, nested []string) string {
+	h := sha256.New()
+	for _, e := range entries {
+		fmt.Fprintf(h, "machine\x00%s\x00%d\x00%t\x00", e.Machine, e.Written.UnixNano(), e.Stale)
+	}
+	for _, n := range nested {
+		fmt.Fprintf(h, "nested\x00%s\x00", n)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // buildPage converts the status model into the redacted shape the page shows.
 //
 // Folder LABELS and destination NAMES only: the file lives on shared storage,
 // so it carries health rather than a description of this machine's filesystem.
-func buildPage(m status.Model, now time.Time) statuspage.Page {
+// It returns the page and a fingerprint of everything on it EXCEPT the values
+// that age by themselves — the "4 minutes ago" text, and the written-at stamp.
+// Two pages with the same fingerprint tell a reader the same thing, so there is
+// no reason to spend a write replacing one with the other.
+//
+// The fingerprint is computed here, beside the fields going onto the page,
+// rather than in a function of its own that reads the finished struct. A field
+// added to the page and forgotten by the fingerprint would be a field that never
+// reaches the destination once it settles — a silent staleness, and the worst
+// kind. Next to each other, the omission is visible while it is being made.
+//
+// What ticking values cost by being left out: a page can be up to
+// statusHeartbeat behind on how-long-ago text. It cannot be behind on a STATE —
+// any state, storage figure or snapshot result that differs lands within
+// statusWriteEvery, as before.
+func buildPage(m status.Model, now time.Time) (statuspage.Page, string) {
 	p := statuspage.Page{Machine: m.MachineName, Written: now}
+	h := sha256.New()
+	add := func(parts ...any) {
+		for _, v := range parts {
+			fmt.Fprintf(h, "%v\x00", v)
+		}
+	}
+	add("machine", m.MachineName)
 	for _, r := range m.Rows {
 		label := r.FolderLabel
 		if label == "" {
 			label = r.FolderID
 		}
+		detail, ticking := rowDetail(r, now)
 		p.Rows = append(p.Rows, statuspage.Row{
 			Folder:      label,
 			Destination: r.TargetName,
 			State:       r.State,
-			Detail:      rowDetail(r, now),
+			Detail:      detail,
 		})
+		add("row", label, r.TargetName, r.State)
+		if !ticking {
+			add(detail)
+		}
 	}
 	for _, t := range m.Targets {
 		// A destination that cannot be measured says so. Omitting the row would
@@ -172,39 +288,57 @@ func buildPage(m status.Model, now time.Time) statuspage.Page {
 			p.Storage = append(p.Storage, statuspage.StorageLine{
 				Destination: t.Name, Unavailable: true,
 			})
+			add("storage", t.Name, "unavailable")
 			continue
 		}
 		if t.TotalBytes == 0 {
 			continue
 		}
 		used := t.TotalBytes - t.FreeBytes
-		p.Storage = append(p.Storage, statuspage.StorageLine{
+		line := statuspage.StorageLine{
 			Destination: t.Name,
 			Free:        humanBytes(int64(t.FreeBytes)),
 			Total:       humanBytes(int64(t.TotalBytes)),
 			UsedPct:     int(used * 100 / t.TotalBytes),
-		})
+		}
+		p.Storage = append(p.Storage, line)
+		// The DISPLAYED figures, not the raw byte counts. Free space moves
+		// constantly on a destination being written to, and hashing the exact
+		// number would put the page back to a write a minute while saying "95GB
+		// free" every time. Rounded to what the reader sees, it changes when the
+		// answer changes.
+		add("storage", line.Destination, line.Free, line.Total, line.UsedPct)
 	}
 	for _, a := range m.Archives {
-		last := "never"
+		last, ticking := "never", false
 		if !a.LastRun.IsZero() {
-			last = humanAgo(now.Sub(a.LastRun))
+			last, ticking = humanAgo(now.Sub(a.LastRun)), true
 		}
 		p.Snapshots = append(p.Snapshots, statuspage.Row{
 			Folder: a.Name, Destination: a.Target, State: a.State, Detail: last,
 		})
+		add("snapshot", a.Name, a.Target, a.State)
+		if !ticking {
+			add(last) // "never" is a fact about the schedule, not about the clock
+		}
 	}
-	return p
+	return p, hex.EncodeToString(h.Sum(nil))
 }
 
-func rowDetail(r status.Row, now time.Time) string {
+// rowDetail is what a row says beyond its state, and whether that text is a
+// clock that will read differently in a minute's time through nothing having
+// happened. The caller needs the two apart to know whether a rewrite would tell
+// anybody anything.
+func rowDetail(r status.Row, now time.Time) (text string, ticking bool) {
 	if r.State == "syncing" && r.TotalBytes > 0 {
-		return humanBytes(r.TransferredBytes) + " of " + humanBytes(r.TotalBytes)
+		// Mid-transfer progress. Not ticking: it moves because bytes are moving,
+		// and a page being read during a transfer should follow it.
+		return humanBytes(r.TransferredBytes) + " of " + humanBytes(r.TotalBytes), false
 	}
 	if r.LastSeen.IsZero() {
-		return ""
+		return "", false
 	}
-	return humanAgo(now.Sub(r.LastSeen))
+	return humanAgo(now.Sub(r.LastSeen)), true
 }
 
 func humanAgo(d time.Duration) string {

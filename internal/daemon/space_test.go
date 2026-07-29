@@ -209,7 +209,7 @@ func TestUnknownSpaceReachesTheModelButNeverAPairedMachine(t *testing.T) {
 // destination that cannot be measured gets a line saying so, not no line.
 func TestBuildPageShowsUnmeasurableDestinations(t *testing.T) {
 	now := time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)
-	p := buildPage(status.Model{
+	p, _ := buildPage(status.Model{
 		MachineName: "workstation",
 		Targets: []status.TargetInfo{
 			{Name: "nas", Type: "share", SpaceUnknown: true},

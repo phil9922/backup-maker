@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
@@ -59,7 +60,7 @@ func newDestWriter(t *testing.T, root, recordedUUID string) *destWriter {
 func (w *destWriter) pass() {
 	uuid := w.d.state.DriveTargetUUIDs[w.target.Name]
 	w.d.refreshManifest(w.target, localmirror.NewLocalFS(w.root), w.cfg, uuid)
-	w.d.writeStatusPages(status.Model{MachineName: w.cfg.General.MachineName})
+	w.d.writeStatusPages(status.Model{MachineName: w.cfg.General.MachineName}, time.Now())
 }
 
 func (w *destWriter) refusals() int {
