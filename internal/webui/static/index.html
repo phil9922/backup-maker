@@ -17,6 +17,13 @@
     <h1>backup-maker</h1>
     <span id="machine" class="badge"></span>
     <span id="engine" class="badge"></span>
+    <!-- Where this page can be reached FROM ANOTHER DEVICE. Shown here because
+         the header is where you look for "what am I connected to", and the
+         address was previously buried in the Security panel — findable only by
+         somebody who already knew it existed. Present only while the network
+         view is actually listening: an address nothing answers on is worse than
+         none, and this one is a promise that a phone can open it. -->
+    <a id="lan-address" class="header-link" hidden></a>
     <!-- The manual, served from this binary. Deliberately reachable without an
          internet connection: the machines most likely to need instructions are
          the ones that cannot go and look them up. Hidden on the read-only

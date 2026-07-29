@@ -1270,6 +1270,7 @@ function applyStatus(st) {
   // If anything here ever reaches the internet by default, this line and the
   // matching promise in README.md both stop being true and must change with it.
   setText(line, 'Everything stays on your own network.');
+  renderLANAddress(st);
   renderVerdict(st);
   renderUnprotected(st);
   renderRows(st);
@@ -1419,6 +1420,32 @@ window.refreshDashboard = refresh;
 // the thing that can actually fail — a folder is only ever as backed up as the
 // places it reaches. Counted, never listed: the panels below are the list, and
 // a headline that tries to be both stops being readable at a glance.
+// The address another device can open this status page at.
+//
+// It lived only in the Security panel, three clicks down, described in a
+// sentence — so the answer to "what do I type into my phone" was somewhere you
+// had to already know to look. The header is where that belongs.
+//
+// SHOWN ONLY WHILE THE VIEW IS ACTUALLY LISTENING. This machine always has a
+// LAN address; what matters is whether anything is answering on it. Printing
+// one that nothing serves would be a promise the program cannot keep, and the
+// person holding the phone would be left wondering which of the two ends is
+// broken.
+function renderLANAddress(st) {
+  const el2 = document.getElementById('lan-address');
+  if (!el2) return;
+  const url = st.settings && st.settings.lan_view && st.settings.lan_view_url;
+  if (!url) { el2.hidden = true; return; }
+  el2.hidden = false;
+  el2.href = url;
+  el2.target = '_blank';
+  el2.rel = 'noopener';
+  // Host and port only: the scheme is noise on a chip this small, and it is
+  // what somebody types into a phone.
+  setText(el2, String(url).replace(/^https?:\/\//, ''));
+  el2.title = 'Open this page from another device on your network at ' + url;
+}
+
 function renderVerdict(st) {
   const box = document.getElementById('verdict');
   const dot = document.getElementById('verdict-dot');
