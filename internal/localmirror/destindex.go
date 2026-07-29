@@ -60,6 +60,33 @@ type destIndex struct {
 	folded    map[string]destEntry
 	ambiguous map[string]bool
 	built     bool
+
+	// dirs is every directory under the mirror root, and tempAt every abandoned
+	// .bmtmp with the time it was last written. Both are collected by the SAME
+	// walk that builds byRel.
+	//
+	// The pass used to walk this tree three times: once to index it, once to
+	// look for files deleted from the source, and once to clear the directories
+	// they left empty. Over SMB against 72,000 files that was three quarters of
+	// the pass — and the two later walks were asking questions this one already
+	// had the answers to.
+	//
+	// WHAT THIS DOES NOT CHANGE: which paths may be removed. Everything here was
+	// already proved to be under the mirror root by relTo, the version store and
+	// the marker are excluded before anything is recorded, and the rules applied
+	// to these lists are the rules the walks applied. A destination file that
+	// appeared AFTER this index was built is simply absent from it, so it is
+	// left alone this pass and reconsidered on the next — erring towards keeping
+	// a file rather than removing one.
+	dirs   []string
+	tempAt []tempFile
+}
+
+// tempFile is an abandoned .bmtmp and when it was last written. The age test
+// lives where the removing happens, not here: this index is read-only.
+type tempFile struct {
+	rel string
+	mod time.Time
 }
 
 // buildDestIndex lists the whole mirror root.
@@ -108,9 +135,20 @@ func (e *Engine) buildDestIndex() (*destIndex, error) {
 			if d.IsDir() {
 				return fs.SkipDir
 			}
+			// A temp file from an interrupted copy. Recorded, never removed
+			// here: building the index writes nothing.
+			if strings.HasSuffix(d.Name(), tmpSuffix) {
+				if info, ierr := d.Info(); ierr == nil {
+					idx.tempAt = append(idx.tempAt, tempFile{rel: rel, mod: info.ModTime()})
+				}
+			}
 			return nil
 		}
-		if d.IsDir() || !d.Type().IsRegular() {
+		if d.IsDir() {
+			idx.dirs = append(idx.dirs, rel)
+			return nil
+		}
+		if !d.Type().IsRegular() {
 			return nil
 		}
 		info, ierr := d.Info()
@@ -186,9 +224,15 @@ func (e *Engine) buildDestIndexParallel(dl DirLister, idx *destIndex, workers in
 						continue
 					}
 					if isEngineArtifact(rel, d.Name()) {
+						if !d.IsDir() && strings.HasSuffix(d.Name(), tmpSuffix) {
+							if info, ierr := d.Info(); ierr == nil {
+								idx.tempAt = append(idx.tempAt, tempFile{rel: rel, mod: info.ModTime()})
+							}
+						}
 						continue
 					}
 					if d.IsDir() {
+						idx.dirs = append(idx.dirs, rel)
 						next = append(next, p)
 						continue
 					}
@@ -216,6 +260,19 @@ func (e *Engine) buildDestIndexParallel(dl DirLister, idx *destIndex, workers in
 		level = next
 	}
 	return idx, nil
+}
+
+// staleBefore returns the temp files last written before cutoff — the ones a
+// crash or a dropped connection stranded, rather than one a copy is writing
+// right now.
+func (d *destIndex) staleBefore(cutoff time.Time) []string {
+	var out []string
+	for _, t := range d.tempAt {
+		if t.mod.Before(cutoff) {
+			out = append(out, t.rel)
+		}
+	}
+	return out
 }
 
 // lookup reports what the destination holds for rel.

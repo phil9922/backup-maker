@@ -143,68 +143,41 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 	// Anything mirrored that's gone from (or now ignored in) the source gets
 	// versioned away; stale temp files from interrupted copies are dropped.
 	//
-	// SAID OUT LOUD, because this is where the time goes. Measured against a
-	// Raspberry Pi: listing took 20 seconds and copying 40, then this walk and
-	// the empty-directory sweep below took nearly four minutes — during which
-	// the row read "syncing", pending 0, bar full and amber, with nothing
-	// changing. Indistinguishable from a stall, and reported as one. No
-	// Counted against what the destination held when this pass started, which
-	// this walk visits all of. It can be nudged past 100% by a file that
-	// appeared since; the display clamps, and a denominator that is right to
-	// within a handful of files beats none at all.
+	// READ FROM THE INDEX BUILT AT THE TOP OF THIS PASS, not from a fresh walk.
+	// The index already visited every file and every directory here, so walking
+	// again asked the destination questions it had just answered — over SMB that
+	// second walk, plus the directory sweep below, was most of the pass.
+	//
+	// EVERY GUARD STILL APPLIES, and none of them moved:
+	//   - relTo proved each of these paths is under destRoot when the index was
+	//     built; the full path is rebuilt from that same validated rel.
+	//   - the version store, the marker and in-flight temps are excluded from
+	//     byRel by isEngineArtifact before anything is recorded.
+	//   - a file is versioned away only when it is absent from sourceFiles,
+	//     which is the rule the walk used.
+	// The one behavioural difference is a file that appeared on the destination
+	// AFTER the index was built: it is not in the index, so it survives this
+	// pass and is reconsidered on the next. That errs towards keeping a file,
+	// which is the only direction this program is allowed to err in.
 	e.beginScanPhase("tidying", int64(len(idx.byRel)))
-	err = e.backend.WalkDir(e.destRoot, func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		rel, under := relTo(e.destRoot, p)
-		if !under {
-			// A path the walk should never have produced. Everything below
-			// this line either versions a file away or deletes it, and the
-			// guard that protects the version store and the marker works on
-			// rel — so a rel we could not derive honestly would aim those
-			// actions at the wrong file. Skipping is the only safe answer.
-			return nil
-		}
-		if rel == "" || rel == "." || p == e.destRoot {
-			return nil
-		}
-		if isEngineArtifact(rel, d.Name()) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			if strings.HasSuffix(d.Name(), tmpSuffix) {
-				if info, ierr := d.Info(); ierr == nil && now.Sub(info.ModTime()) > staleTempAge {
-					_ = e.backend.Remove(p)
-				}
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
+	for rel := range idx.byRel {
 		e.scanned.Add(1)
 		if _, ok := sourceFiles[rel]; ok {
-			return nil
+			continue
 		}
-		if err := keepVersion(e.backend, p, now); err != nil {
+		if err := keepVersion(e.backend, path.Join(e.destRoot, rel), now); err != nil {
 			e.addFileError(rel, err)
-			return nil
+			continue
 		}
 		removed++
-		return nil
-	})
-	if err != nil {
-		return copied, removed, err
+	}
+	// Temps older than an hour are the leftovers of a copy that died; a younger
+	// one may belong to a copy running right now.
+	for _, rel := range idx.staleBefore(now.Add(-staleTempAge)) {
+		_ = e.backend.Remove(path.Join(e.destRoot, rel))
 	}
 
-	// A THIRD walk, and it was the last silent stretch: the tidying counter
-	// reached its total and then sat there while this ran. Same phase name —
-	// from outside it is one activity, "clearing up after the copy", and
-	// splitting it into two words would describe the implementation rather than
-	// the wait. The counter is reset so it does not read as finished-and-stuck.
-	e.beginScanPhase("tidying", 0)
-	e.removeEmptyDestDirs()
+	e.removeEmptyDestDirs(idx)
 	e.prevScanStart = now // only read/written from the sync goroutine
 	// Past every failure return above: this pass reached the end, so what it
 	// learned is worth carrying across a restart. An interrupted pass gets here
@@ -298,26 +271,20 @@ func isEngineArtifact(rel, base string) bool {
 
 // removeEmptyDestDirs drops empty directories left behind by deletions,
 // while keeping the mirror root and version store.
-func (e *Engine) removeEmptyDestDirs() {
-	var dirs []string
-	_ = e.backend.WalkDir(e.destRoot, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() || p == e.destRoot || p == "." {
-			return nil
-		}
-		// Same rule as the reconcile walk: this list is handed straight to
-		// Remove, so anything that is not demonstrably inside the mirror root
-		// does not go on it.
-		if _, under := relTo(e.destRoot, p); !under {
-			return nil
-		}
-		if d.Name() == VersionsDirName {
-			return fs.SkipDir
-		}
-		e.scanned.Add(1)
-		dirs = append(dirs, p)
-		return nil
-	})
+func (e *Engine) removeEmptyDestDirs(idx *destIndex) {
+	// From the index rather than a third walk of the same tree. The directories
+	// are the ones it recorded on its way through, already proved to be under
+	// the mirror root by relTo and already excluding the version store.
+	//
+	// Deepest first, and Remove is expected to fail on anything that still has
+	// something in it — that is how a directory emptied by removing its only
+	// child gets taken too, and why the error is ignored. A directory created
+	// during this pass is absent from the index, but it holds the file that was
+	// just copied into it, so it is not empty and would not be removed anyway.
+	dirs := append([]string(nil), idx.dirs...)
+	sort.Strings(dirs)
 	for i := len(dirs) - 1; i >= 0; i-- { // deepest first
-		_ = e.backend.Remove(dirs[i])
+		e.scanned.Add(1)
+		_ = e.backend.Remove(path.Join(e.destRoot, dirs[i]))
 	}
 }

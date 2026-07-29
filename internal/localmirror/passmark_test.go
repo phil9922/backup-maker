@@ -41,7 +41,16 @@ func TestOnlyACompletedPassRecordsWhatItLearned(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	broken := &brokenLister{Backend: NewLocalFS(t.TempDir())}
+	// One good pass first, so the mirror root exists: the index build returns
+	// early on a destination that is not there yet, and a pass that never
+	// reaches the destination cannot be interrupted by it.
+	dst := t.TempDir()
+	warmup, _ := markedEngine(t, src, NewLocalFS(dst), nil, time.Time{})
+	if _, _, err := warmup.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+
+	broken := &brokenLister{Backend: NewLocalFS(dst)}
 	e, rec := markedEngine(t, src, broken, nil, time.Time{})
 
 	if _, _, err := e.reconcile(); err == nil {
