@@ -86,6 +86,17 @@ const Wizard = (() => {
     if (inc) inc.checked = true;
     rebuildOrder();
     $("wiz-error").hidden = true;
+    // Opened FOR a folder — from the "Set up a backup" button on a folder that
+    // nothing is copying. Carrying its id is the whole point: without it the
+    // wizard opens blank, the obvious next move is to pick that same folder out
+    // of the picker, and adding a path the config already holds is refused —
+    // after the destination, the schedule and the password, with the id of the
+    // record that already owns it. Opening blank from a button that names a
+    // folder was a trap.
+    if (opts && opts.folder && opts.folder.path) {
+      chosenFolder = opts.folder.path;
+      chosenFolderID = opts.folder.id || "";
+    }
     renderChosenFolder(); // clears the line left by a previous run
     $("dest-count").hidden = true;
     // A previous run may have ended on the waiting-to-pair panel, which
@@ -258,10 +269,30 @@ const Wizard = (() => {
     }
   }
 
+  // PICKING A PATH THE CONFIG ALREADY HOLDS MEANS THAT FOLDER, not a second
+  // one. Choosing it from the picker, or typing it, used to carry no id, so the
+  // save was refused as a duplicate — at the very end, naming the existing
+  // record by its internal id, on a page that had just said nothing was backing
+  // that folder up. The two statements could not both be acted on.
+  // Resolving the path to the folder that already owns it makes the refusal
+  // unreachable from here: the request becomes "add a kind of backup to this
+  // folder", which is what was meant.
   function chooseFolder(path, folderID) {
-    chosenFolderID = folderID || "";
+    chosenFolderID = folderID || folderIDForPath(path);
     chosenFolder = path;
     renderChosenFolder();
+  }
+
+  function folderIDForPath(path) {
+    const want = trimSlash(path);
+    for (const f of (model && model.folders) || []) {
+      if (f.path && trimSlash(f.path) === want) return f.id;
+    }
+    return "";
+  }
+
+  function trimSlash(p) {
+    return String(p || "").replace(/\/+$/, "");
   }
 
   // Picking a folder has to be undoable. Choosing one used to write a line of

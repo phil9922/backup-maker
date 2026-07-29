@@ -442,7 +442,7 @@ function renderUnprotected(st) {
     if (!readOnly) {
       const actions = el('div', 'card-actions');
       const setUp = el('button', 'small-btn primary', 'Set up a backup');
-      setUp.onclick = () => Wizard.open(st, { firstRun: false });
+      setUp.onclick = () => Wizard.open(st, { firstRun: false, folder: { id: f.id, path: f.path } });
       actions.appendChild(setUp);
       const drop = el('button', 'small-btn', 'Stop listing this folder');
       drop.onclick = () => removeFolder(f);
