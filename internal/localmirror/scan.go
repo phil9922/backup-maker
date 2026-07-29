@@ -177,6 +177,11 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 		_ = e.backend.Remove(path.Join(e.destRoot, rel))
 	}
 
+	// Timed on its own though it stays in the "tidying" phase on screen: it is
+	// the same activity to a reader and a separate cost to anyone asking where a
+	// slow pass went. It sweeps directories over the network one refusal at a
+	// time, so it is the first place to look.
+	e.beginStage("dirs")
 	e.removeEmptyDestDirs(idx)
 	e.prevScanStart = now // only read/written from the sync goroutine
 	// Past every failure return above: this pass reached the end, so what it

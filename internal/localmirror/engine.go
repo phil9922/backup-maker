@@ -108,6 +108,26 @@ type Engine struct {
 	calibrated    bool
 	mtimeTrusted  bool
 	prevScanStart time.Time
+
+	// Pass timing, for the log line at the end of a pass. Only ever touched
+	// from the sync goroutine, like prevScanStart above, so it takes no lock.
+	//
+	// SEPARATE FROM phase ON PURPOSE. phase is what the dashboard shows and is
+	// worded for someone reading it; a stage here is a stretch of work worth
+	// timing, which is not the same carving. The directory sweep is the case
+	// that forced the split: it runs with phase still "tidying" because from
+	// outside it is the same activity, but it is its own cost and had to be
+	// measurable on its own.
+	passStart  time.Time
+	stageName  string
+	stageStart time.Time
+	stages     []stageTime
+}
+
+// stageTime is how long one stretch of a pass took.
+type stageTime struct {
+	name string
+	took time.Duration
 }
 
 type Options struct {
@@ -327,6 +347,7 @@ func (e *Engine) sync() {
 	e.setState("scanning")
 	e.scanned.Store(0)
 	e.scanTotal.Store(0) // unknown until the source walk finishes
+	e.beginPass()
 	copied, removed, err := e.reconcile()
 	if err != nil {
 		if IsNoSpace(err) {
@@ -334,17 +355,21 @@ func (e *Engine) sync() {
 			// was nothing safe to delete. Say so plainly: a destination that
 			// can't be written must never look healthy.
 			e.setState("full")
-			e.log.Error("destination is full and could not be cleared", "err", err)
+			e.log.Error("destination is full and could not be cleared",
+				"took", time.Since(e.passStart).Round(time.Millisecond), "err", err)
 			return
 		}
 		// Mid-sync target loss lands here; the offline poll resumes us.
+		//
+		// With how long it lasted: a pass that dies after ten minutes and one that
+		// dies immediately want different investigations, and the message alone
+		// cannot tell them apart.
 		e.setState("offline")
-		e.log.Warn("sync interrupted", "err", err)
+		e.log.Warn("sync interrupted",
+			"took", time.Since(e.passStart).Round(time.Millisecond), "err", err)
 		return
 	}
-	if copied > 0 || removed > 0 {
-		e.log.Info("synced", "copied", copied, "versioned_away", removed)
-	}
+	e.logPass(copied, removed)
 	now := time.Now()
 	e.mu.Lock()
 	e.state = "in sync"
@@ -581,11 +606,62 @@ func (e *Engine) notePassCompleted(mk PassMark) {
 // pass has no prior count to compare against, and an invented one draws a bar
 // that jumps backwards when the real number arrives.
 func (e *Engine) beginScanPhase(name string, total int64) {
+	e.beginStage(name)
 	e.scanned.Store(0)
 	e.scanTotal.Store(total)
 	e.mu.Lock()
 	e.phase = name
 	e.mu.Unlock()
+}
+
+// beginPass starts the clock for a pass and drops the previous pass's stages.
+func (e *Engine) beginPass() {
+	now := time.Now()
+	e.passStart = now
+	e.stageName, e.stageStart = "", now
+	e.stages = e.stages[:0]
+}
+
+// beginStage closes the stage that is ending, recording what it cost, and opens
+// the next. Called for every scan phase, and separately for stretches that share
+// a phase with the one before them.
+func (e *Engine) beginStage(name string) {
+	now := time.Now()
+	if e.stageName != "" {
+		e.stages = append(e.stages, stageTime{e.stageName, now.Sub(e.stageStart)})
+	}
+	e.stageName, e.stageStart = name, now
+}
+
+// slowPass is when a pass is worth reporting on its own account, having neither
+// copied nor removed anything. Well above a healthy pass over a large folder on
+// a network share, so a quiet machine stays quiet in the log.
+const slowPass = 30 * time.Second
+
+// logPass says how long a pass took and where the time went.
+//
+// AT INFO EVEN WHEN NOTHING WAS COPIED, IF IT WAS SLOW. A pass that copied
+// nothing used to log nothing whatsoever, which is how a destination could spend
+// eleven and a half minutes deciding it had nothing to do and leave no trace of
+// it: from the log the time was simply missing, and from the dashboard it was a
+// phase name with a counter that had stopped moving. Those minutes are the
+// symptom people report as "it has stopped working", so they have to be
+// recoverable afterwards rather than only observable live.
+//
+// Quiet otherwise. This runs on every pass of every destination, and a line per
+// pass saying nothing happened quickly is how a log stops being read.
+func (e *Engine) logPass(copied, removed int) {
+	e.beginStage("") // close the last stage
+	took := time.Since(e.passStart)
+	args := []any{"took", took.Round(time.Millisecond), "copied", copied, "versioned_away", removed}
+	for _, s := range e.stages {
+		args = append(args, s.name, s.took.Round(time.Millisecond))
+	}
+	if copied > 0 || removed > 0 || took >= slowPass {
+		e.log.Info("synced", args...)
+		return
+	}
+	e.log.Debug("synced", args...)
 }
 
 // endTransfer clears progress once a pass finishes. Counters must not linger:
