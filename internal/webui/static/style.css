@@ -23,9 +23,14 @@
   --btn-ink: #eef3f8;
   --btn-lip: rgba(255, 255, 255, 0.07);
   --accent-hi: #78d3f9;
-  --danger-face: #3a222a;
-  --danger-edge: #8c3f49;
-  --danger-ink: #ff9b96;
+  /* Destructive controls are filled red with white on them. The red is a deep
+     one on purpose: white on the bright --bad (#ef5350) is about 2.6:1, which
+     fails the contrast floor for text and reads as washed out. #b3231d carries
+     white at 6.2:1 and still says red across the room. */
+  --danger-face: #b3231d;
+  --danger-face-hi: #d0342c;
+  --danger-edge: #d0342c;
+  --danger-ink: #ffffff;
   /* Explanatory text — the sentence under a switch, the note beside a group
      title. It is muted because it is subordinate, NOT because it is optional:
      it is where every consequence of a setting is actually spelled out, so at
@@ -304,24 +309,20 @@ button.primary {
 }
 button.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
 
-/* Destructive actions are the only controls that FILL under the pointer
-   rather than merely lightening. Hovering one is a commitment being made
-   visible before it is made.
-   AT REST IT IS NOT RED-FACED, only red-inked. Given a filled red surface it
-   won regardless: two "Remove" buttons down the destinations list pulled harder
-   than the one action on the page anybody should be taking, which is a page
-   shouting about the thing you least want to do. Red is spent on the moment of
-   commitment, not on the resting state — and it stays reserved for the things
-   that actually destroy data, so it keeps meaning something. */
+/* Destructive actions are filled red with white on them, so what they are is
+   legible at a glance rather than on inspection — you should never have to
+   read "Remove" carefully to notice it is the dangerous one.
+   Red stays reserved for the things that actually destroy data: deleting
+   backups, erasing a drive, dropping a destination. Spending it on anything
+   milder is what would make it stop meaning anything. */
 button.danger {
-  background: var(--btn-face);
+  background: var(--danger-face);
   border-color: var(--danger-edge);
   color: var(--danger-ink);
 }
 button.danger:hover {
-  background: var(--bad);
-  border-color: var(--bad);
-  color: #1a0b0b;
+  background: var(--danger-face-hi);
+  border-color: var(--danger-face-hi);
 }
 
 /* For taking a choice back — going back a step, undoing, closing. Subordinate

@@ -441,8 +441,63 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	}
 	s.ln = ln
 	s.mux = mux
-	s.http = &http.Server{Handler: loopbackOnly(fromTheDashboardOnly(mux)), ReadHeaderTimeout: 10 * time.Second}
+	s.http = &http.Server{Handler: loopbackOnly(fromTheDashboardOnly(s.logFailures(mux))), ReadHeaderTimeout: 10 * time.Second}
 	return s, nil
+}
+
+// logFailures records every request this dashboard refuses.
+//
+// NOTHING IN THIS PACKAGE LOGGED ANYTHING. A request that failed put its reason
+// in front of whoever was clicking and nowhere else: not the journal, not a
+// file, nowhere. So "I can't get this to work" left no trace to read, and the
+// only way to find out what happened was to sit beside the person and watch —
+// or guess. The message is already written for a human, because it is the one
+// the page shows; this simply keeps a copy.
+//
+// Failures only. A dashboard that polls every second would otherwise write a
+// line per second for ever, and the interesting events would be buried in it.
+func (s *Server) logFailures(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &failureRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if rec.status < 400 || s.log == nil {
+			return
+		}
+		s.log.Warn("dashboard request refused",
+			"method", r.Method, "path", r.URL.Path,
+			"status", rec.status, "reason", strings.TrimSpace(rec.body.String()))
+	})
+}
+
+// failureRecorder remembers the status and, for a failure, the first of the
+// body — which for these handlers is the sentence shown to the user.
+type failureRecorder struct {
+	http.ResponseWriter
+	status int
+	body   strings.Builder
+}
+
+func (f *failureRecorder) WriteHeader(code int) {
+	f.status = code
+	f.ResponseWriter.WriteHeader(code)
+}
+
+func (f *failureRecorder) Write(b []byte) (int, error) {
+	// Bounded: an error body is a sentence, but nothing here guarantees that,
+	// and a runaway handler must not be able to fill the journal.
+	if f.status >= 400 && f.body.Len() < 2048 {
+		f.body.Write(b)
+	}
+	return f.ResponseWriter.Write(b)
+}
+
+// Flush keeps the event streams working: they rely on the ResponseWriter also
+// being an http.Flusher, and a wrapper that dropped it would leave the
+// dashboard's live updates buffered until the connection closed.
+func (f *failureRecorder) Flush() {
+	if fl, ok := f.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
 }
 
 // loopbackOnly rejects requests whose Host header isn't loopback.
