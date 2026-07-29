@@ -51,9 +51,23 @@ type Result struct {
 	// data was written than the destination ever received.
 	//
 	// Set only on a run that completed and verified; a failed run leaves it 0.
-	StoredBytes int64  `json:"stored_bytes,omitempty"`
-	Err         string `json:"err,omitempty"`
+	StoredBytes int64 `json:"stored_bytes,omitempty"`
+	// Unstable names files that were being written WHILE they were read into
+	// this snapshot, so their copies may be torn.
+	//
+	// A zip is sealed for ever, which is what makes this worth saying out loud.
+	// A mirror that copies a file mid-write fixes itself on the next pass; a
+	// snapshot keeps that copy until it is deleted, and the first anyone would
+	// otherwise learn of it is the day they try to open it on another machine
+	// and it will not load. Naming it here is the difference between a backup
+	// that is imperfect and a backup that is imperfect AND silent.
+	Unstable []string `json:"unstable,omitempty"`
+	Err      string   `json:"err,omitempty"`
 }
+
+// maxUnstableNamed bounds the list: a folder where everything is being
+// rewritten should not produce a log line with fifty thousand paths in it.
+const maxUnstableNamed = 20
 
 // Run builds one encrypted snapshot for the job and writes it to the backend.
 // The password is mandatory: this function refuses to write an unprotected
@@ -104,7 +118,7 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 	// about 2 MB/s: neither end was busy, the job was simply waiting for the
 	// network tens of thousands of times a second.
 	buffered := bufio.NewWriterSize(stored, writeBufferSize)
-	files, bytes, err := writeZip(buffered, cfg, job, folders, password, report)
+	files, bytes, unstable, unstableCount, err := writeZip(buffered, cfg, job, folders, password, report)
 	if err == nil {
 		err = buffered.Flush() // before Close, or the tail is never sent
 	}
@@ -132,8 +146,13 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 	}
 
 	res.File, res.Files, res.Bytes, res.StoredBytes = final, files, bytes, stored.n
+	res.Unstable = unstable
 	log.Info("archive written", "archive", job.Name, "file", final,
 		"files", files, "bytes", bytes, "stored_bytes", stored.n)
+	if unstableCount > 0 {
+		log.Warn("some files were being written while this snapshot read them, so their copies may be incomplete",
+			"archive", job.Name, "count", unstableCount, "files", unstable)
+	}
 
 	keep := job.Keep
 	if keep <= 0 {
@@ -275,7 +294,7 @@ func measure(cfg *config.Config, job config.Archive, folders []config.Folder) (f
 }
 
 // writeZip streams every selected folder into an AES-256 encrypted zip.
-func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []config.Folder, password string, report func(Progress)) (files int, total int64, err error) {
+func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []config.Folder, password string, report func(Progress)) (files int, total int64, unstable []string, unstableCount int, err error) {
 	zw := zip.NewWriter(w)
 	prog := Progress{Phase: PhasePacking}
 	if report != nil {
@@ -292,9 +311,25 @@ func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []con
 		if zerr != nil {
 			return zerr
 		}
+		// Stat BEFORE reading, so the comparison after is against the state
+		// the read actually started from.
+		before, serr := src.Stat()
 		n, cerr := io.Copy(entry, src)
 		if cerr != nil {
 			return cerr
+		}
+		// CHANGED WHILE WE WERE READING IT? Then what went into the zip is
+		// part of one version and part of another. There is no retry to be had:
+		// the entry is already written, and a file being rewritten continuously
+		// would only tear again. Recording it is the honest answer.
+		if serr == nil {
+			if after, aerr := os.Stat(p); aerr == nil &&
+				(after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime())) {
+				if len(unstable) < maxUnstableNamed {
+					unstable = append(unstable, sanitize(f.Label)+"/"+rel)
+				}
+				unstableCount++
+			}
 		}
 		files++
 		total += n
@@ -308,9 +343,9 @@ func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []con
 	})
 	if werr != nil {
 		zw.Close()
-		return files, total, werr
+		return files, total, unstable, unstableCount, werr
 	}
-	return files, total, zw.Close()
+	return files, total, unstable, unstableCount, zw.Close()
 }
 
 // verifyZip re-reads the written archive from the target (spooled to a local

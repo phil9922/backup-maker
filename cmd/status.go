@@ -91,7 +91,7 @@ var statusCmd = &cobra.Command{
 				if a.State == "failed" || a.State == "due" {
 					mark = "  !!"
 				}
-				tw.add(a.Name, a.Target, a.Every, a.State+mark, humanTime(a.LastRun))
+				tw.add(a.Name, a.Target, a.Every, archiveState(a)+mark, humanTime(a.LastRun))
 			}
 			tw.print()
 			for _, a := range m.Archives {
@@ -227,6 +227,33 @@ func rowState(r status.Row) string {
 		return "backed up"
 	}
 	return r.State
+}
+
+// archiveState answers the same question rowState answers for a mirror: are
+// the files safe. It uses the same words, because the two tables sit on one
+// page describing two kinds of backup, and there is no reason a snapshot should
+// report "ok" where a mirror reports "backed up".
+//
+// "ok" and "due" both mean a snapshot exists and was written successfully — a
+// job being due says the NEXT one is owed, not that the last one is missing.
+// A job packing its very first zip has nothing on the destination yet and must
+// not claim otherwise; one packing its second has last time's zip sitting there
+// the whole time, so it is backed up while it works.
+func archiveState(a status.ArchiveRow) string {
+	switch a.State {
+	case "ok", "due":
+		return "backed up"
+	case "running", "preparing":
+		if a.LastRun.IsZero() {
+			return "first backup"
+		}
+		return "backed up"
+	case "never run":
+		// No zip exists. Naming it plainly, rather than "never run", says what
+		// it means for the person's files rather than for the schedule.
+		return "not backed up yet"
+	}
+	return a.State // failed, needs password, paused: faults and deliberate stops
 }
 
 // rowProgress says what a destination is doing right now, in the unit that

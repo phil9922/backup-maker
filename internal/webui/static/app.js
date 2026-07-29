@@ -825,13 +825,19 @@ function renderArchives(st) {
     for (const text of [covers, a.name, a.target, a.every]) {
       tr.appendChild(el('td', undefined, text));
     }
-    const state = el('td', undefined, a.state);
+    const state = el('td', undefined, archiveStateLabel(a));
     // Anything that is working or about to work is "busy", never "bad". A new
     // state added without a case here inherits red, which is how "running"
     // would have been drawn as a fault.
-    state.className = a.paused ? 'paused'
-      : a.state === 'ok' ? 'ok'
-      : (['never run', 'preparing', 'running', 'due'].includes(a.state) || a.needs_password ? 'busy' : 'bad');
+    // Green once a zip exists, including while the next one is being written:
+    // the dot answers the same question the word does, and amber beside
+    // "backed up" would take the reassurance straight back.
+    // ' dot' to match the mirror table: the same word in the same colour
+    // deserves the same marker beside it, and without it the two tables read
+    // as describing different kinds of thing.
+    state.className = (a.paused ? 'paused'
+      : (['ok', 'due'].includes(a.state) || (['running', 'preparing'].includes(a.state) && a.last_run)) ? 'ok'
+      : (['never run', 'preparing', 'running'].includes(a.state) || a.needs_password ? 'busy' : 'bad')) + ' dot';
     // A snapshot with no stored password never runs; offer to set it here
     // rather than sending the user to the command line.
     if (a.needs_password && !readOnly) {
@@ -876,8 +882,50 @@ function renderArchives(st) {
       actions.appendChild(stop);
     }
     tr.appendChild(actions);
+    // Files that were being written while the snapshot read them. Said on the
+    // row rather than buried in a tooltip, because a zip is sealed for ever:
+    // unlike the mirror, which recopies such a file on its next pass, this one
+    // keeps the torn copy until the snapshot is deleted.
+    if (a.unstable && a.unstable.length) {
+      const warn = el('tr', 'ignore-row');
+      const cell = el('td');
+      cell.colSpan = 8;
+      const n = a.unstable.length;
+      cell.appendChild(el('span', 'bad',
+        `${n} file${n === 1 ? ' was' : 's were'} being written while this snapshot read ${n === 1 ? 'it' : 'them'}, so ${n === 1 ? 'its copy' : 'their copies'} inside the zip may be incomplete:`));
+      cell.appendChild(el('div', 'muted mono small', a.unstable.join(', ')));
+      cell.appendChild(el('div', 'muted small',
+        'The next run will copy them cleanly if nothing is writing to them at the time.'));
+      warn.appendChild(cell);
+      body.appendChild(tr);
+      body.appendChild(warn);
+      if (a.detail) tr.title = a.detail;
+      continue;
+    }
     if (a.detail) tr.title = a.detail;
     body.appendChild(tr);
+  }
+}
+
+// The state column answers the same question the mirror's does — are the files
+// safe — in the same words. Two tables on one page describing two kinds of
+// backup had no business using two vocabularies, and "ok" is the engine's word
+// rather than an answer to anything a person asked.
+function archiveStateLabel(a) {
+  switch (a.state) {
+    case 'ok':
+    case 'due':
+      // Due means the NEXT snapshot is owed, not that the last one is missing.
+      return 'backed up';
+    case 'running':
+    case 'preparing':
+      // A first zip does not exist yet and must not be claimed; a second is
+      // being written while the first sits safely on the destination.
+      return a.last_run ? 'backed up' : 'first backup';
+    case 'never run':
+      return 'not backed up yet';
+    default:
+      return a.state; // failed, needs password, paused
   }
 }
 

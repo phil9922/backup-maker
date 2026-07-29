@@ -262,6 +262,11 @@ type ArchiveRow struct {
 	TotalFiles int   `json:"total_files,omitempty"`
 	DoneBytes  int64 `json:"done_bytes,omitempty"`
 	TotalBytes int64 `json:"total_bytes,omitempty"`
+	// Unstable names files that were being written while the last snapshot
+	// read them, so their copies inside that zip may be torn. A zip is sealed
+	// for ever, so unlike a mirror — which fixes such a file on its next pass —
+	// this one keeps the bad copy until it is deleted.
+	Unstable []string `json:"unstable,omitempty"`
 	// Phase is "packing" or "verifying". Verification re-reads the whole
 	// archive back off the destination, which for a multi-gigabyte snapshot is
 	// minutes of work that looked like a hang: the bar was full and the word
@@ -972,6 +977,13 @@ func (col *Collector) Collect() Model {
 				row.State = "due"
 			default:
 				row.State = "ok"
+			}
+			// Carried whatever the state: a snapshot that completed with torn
+			// entries is not "failed" — it exists and most of it is good — but
+			// saying nothing would leave the one thing worth knowing about it
+			// undiscoverable until the day somebody tries to open it.
+			if hasResult {
+				row.Unstable = res.Unstable
 			}
 			m.Archives = append(m.Archives, row)
 		}

@@ -170,3 +170,48 @@ func TestAFaultyDestinationStillReadsAsFaulty(t *testing.T) {
 		}
 	}
 }
+
+// THE GUARANTEE: a snapshot schedule answers the safety question in the same
+// words a mirror does.
+//
+// Two tables sit on one page describing two kinds of backup of the same files.
+// One said "backed up" and the other said "ok" — the engine's word, and not an
+// answer to anything a person asked. A reader has to translate between them to
+// work out whether both copies exist.
+func TestASnapshotSaysBackedUpInTheSameWordsAMirrorDoes(t *testing.T) {
+	past := time.Now().Add(-time.Hour)
+	for _, state := range []string{"ok", "due"} {
+		got := archiveState(status.ArchiveRow{State: state, LastRun: past})
+		if got != "backed up" {
+			t.Errorf("state %q reads as %q, want \"backed up\" — a zip exists either way", state, got)
+		}
+	}
+}
+
+// A job writing its second zip still has the first one on the destination the
+// whole time, so it is backed up while it works. A job writing its FIRST has
+// nothing there yet and must not claim otherwise.
+func TestARunningSnapshotOnlyClaimsABackupItAlreadyHas(t *testing.T) {
+	past := time.Now().Add(-time.Hour)
+	for _, state := range []string{"running", "preparing"} {
+		if got := archiveState(status.ArchiveRow{State: state, LastRun: past}); got != "backed up" {
+			t.Errorf("%q with a previous run reads as %q, want \"backed up\"", state, got)
+		}
+		if got := archiveState(status.ArchiveRow{State: state}); got != "first backup" {
+			t.Errorf("%q with no previous run reads as %q, want \"first backup\"", state, got)
+		}
+	}
+}
+
+// "never run" describes the schedule; the person wants to know about their
+// files. And a fault or a deliberate pause must never be dressed up as safety.
+func TestASnapshotThatHasNeverRunSaysSoAndFaultsAreNotSoftened(t *testing.T) {
+	if got := archiveState(status.ArchiveRow{State: "never run"}); got != "not backed up yet" {
+		t.Errorf("never run reads as %q, want \"not backed up yet\"", got)
+	}
+	for _, state := range []string{"failed", "needs password", "paused"} {
+		if got := archiveState(status.ArchiveRow{State: state}); got != state {
+			t.Errorf("%q reads as %q; a fault or a pause must not be dressed up", state, got)
+		}
+	}
+}

@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
@@ -224,5 +227,91 @@ func TestVerificationReportsProgressOfItsOwn(t *testing.T) {
 	}
 	if lastVerify.DoneBytes != lastVerify.TotalBytes {
 		t.Errorf("verification finished at %d of %d", lastVerify.DoneBytes, lastVerify.TotalBytes)
+	}
+}
+
+// THE GUARANTEE: a file that was being written while the snapshot read it is
+// named, not silently sealed in and forgotten.
+//
+// A zip is permanent. The mirror beside it recopies a torn file on its next
+// pass, so the damage there lasts seconds; a snapshot keeps that copy until
+// somebody deletes it, and the first anyone would otherwise learn of it is the
+// day they try to open it on another machine and it will not load. This is the
+// difference between a backup that is imperfect and one that is imperfect and
+// says nothing.
+func TestAFileWrittenDuringTheSnapshotIsNamedInTheResult(t *testing.T) {
+	src := t.TempDir()
+	dst := t.TempDir()
+	// Big enough that reading it takes long enough to be written to underneath,
+	// which is exactly the live-database case this exists for.
+	busy := filepath.Join(src, "database.db")
+	if err := os.WriteFile(busy, make([]byte, 32<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "quiet.txt"), []byte("still"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.New()
+	cfg.General.MachineName = "mach"
+	cfg.Folders = []config.Folder{{ID: "f1", Path: src, Label: "proj"}}
+	job := config.Archive{Name: "busy", Every: "daily", Target: "t", Keep: 2}
+
+	// A writer that keeps appending for the whole run, the way a database being
+	// written to does. Stopped as soon as the snapshot returns.
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if f, err := os.OpenFile(busy, os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+				_, _ = f.Write([]byte("x"))
+				_ = f.Close()
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	res := Run(localmirror.NewLocalFS(dst), cfg, job, "pw", slog.New(slog.DiscardHandler), nil)
+	close(stop)
+	wg.Wait()
+
+	if res.Err != "" {
+		t.Fatalf("a file changing mid-read failed the whole snapshot: %s", res.Err)
+	}
+	// The snapshot still completes — most of it is good, and refusing to write
+	// anything at all would be the worse answer.
+	if res.Files < 2 {
+		t.Errorf("packed %d files, want both", res.Files)
+	}
+	found := false
+	for _, u := range res.Unstable {
+		if strings.HasSuffix(u, "database.db") {
+			found = true
+		}
+		if strings.HasSuffix(u, "quiet.txt") {
+			t.Errorf("a file nothing touched was reported as unstable: %v", res.Unstable)
+		}
+	}
+	if !found {
+		t.Errorf("the file rewritten mid-read was not reported: %v", res.Unstable)
+	}
+}
+
+// A quiet folder reports nothing, or the warning becomes noise nobody reads.
+func TestAQuietSnapshotReportsNoUnstableFiles(t *testing.T) {
+	cfg, job, b, _ := testSetup(t)
+	res := Run(b, cfg, job, "pw", slog.New(slog.DiscardHandler), nil)
+	if res.Err != "" {
+		t.Fatal(res.Err)
+	}
+	if len(res.Unstable) != 0 {
+		t.Errorf("a folder nothing was writing to reported %v", res.Unstable)
 	}
 }
