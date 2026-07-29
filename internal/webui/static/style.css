@@ -11,6 +11,21 @@
   --line: #232a34;
   --panel: #151b23;
   --panel-2: #1a212b;
+  /* Controls. A button is a raised surface, so it sits a clear step above the
+     panel it rests on rather than being an outline drawn on it — --btn-edge is
+     visible against --panel-2 from across the room, which #2b3542 was not.
+     --btn-lip is the hairline of light along the top edge that makes it read
+     as raised, and that a press takes away. */
+  --btn-face: #263141;
+  --btn-face-hi: #2f3d50;
+  --btn-edge: #3a4859;
+  --btn-edge-hi: #4b5c70;
+  --btn-ink: #dbe3ec;
+  --btn-lip: rgba(255, 255, 255, 0.07);
+  --accent-hi: #78d3f9;
+  --danger-face: #3a222a;
+  --danger-edge: #6b3038;
+  --danger-ink: #ff9b96;
   /* Explanatory text — the sentence under a switch, the note beside a group
      title. It is muted because it is subordinate, NOT because it is optional:
      it is where every consequence of a setting is actually spelled out, so at
@@ -200,12 +215,100 @@ h2 {
 th:first-child, td:first-child { padding-left: var(--gutter); }
 th:last-child, td:last-child { padding-right: var(--gutter); }
 .row { display: flex; align-items: center; gap: 0.75rem; margin: 0.6rem 0; }
+/* CONTROLS
+   ---------------------------------------------------------------------------
+   This is an instrument panel for something people are trusting with their
+   files, so its controls are built to read as controls: raised, labelled, and
+   they latch when you press them. Every filled button carries a hairline of
+   light along its top edge as though lit from above, and drops that hairline
+   and a pixel of height on :active. That is the whole idea — no gradients, no
+   glow, nothing that pulses.
+
+   THE ONE RULE THAT MATTERS: accent belongs to the primary action, and to
+   nothing else. Every button on this page used to be accent-coloured text in a
+   near-invisible outline, which is why none of them stood out — "Start backing
+   up" was drawn exactly like "Back", and "Edit" in a table row had 0.1rem of
+   padding above its text. A page where everything is emphasised has no
+   emphasis. Default buttons are now plain-inked and solid; only .primary is
+   accent, and there is at most one of those in view at a time. */
 button {
-  background: #1c2430; color: var(--accent); border: 1px solid #2b3542;
-  border-radius: 6px; padding: 0.35rem 0.9rem; cursor: pointer; font-size: 0.9rem;
+  background: var(--btn-face);
+  color: var(--btn-ink);
+  border: 1px solid var(--btn-edge);
+  border-radius: 7px;
+  padding: 0.5rem 1.05rem;
+  min-height: 2.25rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.15;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--btn-lip), 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: background-color 90ms ease, border-color 90ms ease, transform 60ms ease, box-shadow 60ms ease;
 }
-button:hover { border-color: var(--accent); }
-button:disabled { opacity: 0.5; cursor: default; }
+button:hover { background: var(--btn-face-hi); border-color: var(--btn-edge-hi); }
+/* The latch. Losing the top hairline as it drops is what sells the press —
+   the light that was catching the raised edge no longer has an edge to catch. */
+button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+button:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+button:disabled:hover { background: var(--btn-face); border-color: var(--btn-edge); }
+
+/* There was no focus style at all, on any control, anywhere. Anyone driving
+   this from the keyboard was navigating blind. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* THE action, and there should be one of it in view. Solid accent with dark
+   ink on it: the only filled, high-contrast thing on the page, so the eye
+   finds it without being told. */
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06131c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+button.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+
+/* Destructive actions are the only controls that FILL under the pointer
+   rather than merely lightening. Hovering one is a commitment being made
+   visible before it is made.
+   AT REST IT IS NOT RED-FACED, only red-inked. Given a filled red surface it
+   won regardless: two "Remove" buttons down the destinations list pulled harder
+   than the one action on the page anybody should be taking, which is a page
+   shouting about the thing you least want to do. Red is spent on the moment of
+   commitment, not on the resting state — and it stays reserved for the things
+   that actually destroy data, so it keeps meaning something. */
+button.danger {
+  background: var(--btn-face);
+  border-color: var(--danger-edge);
+  color: var(--danger-ink);
+}
+button.danger:hover {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #1a0b0b;
+}
+
+/* For taking a choice back — deselecting, undoing, closing. Deliberately
+   quiet: no surface at all until you reach for it. Red belongs to the things
+   that destroy data, and spending it on un-picking a folder would blunt it
+   exactly where it is needed most. */
+button.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+button.quiet:hover { background: var(--btn-face); border-color: var(--btn-edge); color: var(--fg); }
 #scan-results { list-style: none; display: grid; gap: 0.5rem; margin: 0.5rem 0; }
 #scan-results li { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .share-form { display: grid; gap: 0.5rem; max-width: 24rem; margin-top: 0.6rem; }
@@ -316,15 +419,6 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
    to the far edge, away from the box they act on. */
 .card .ignore-editor button { margin-left: 0; }
 .card .ignore-editor .hint { flex-basis: 100%; font-size: 0.85rem; line-height: 1.45; }
-button.danger { color: var(--bad); border-color: #3a2a2e; }
-button.danger:hover { border-color: var(--bad); }
-
-/* For taking a choice back — deselecting, undoing, closing. Deliberately
-   quiet. Red belongs to the things that destroy data (deleting backups,
-   erasing a drive), and spending it on un-picking a folder would blunt it
-   exactly where it is needed most. */
-button.quiet { color: var(--muted); border-color: #2b3542; }
-button.quiet:hover { color: var(--fg); border-color: #3a4453; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .row.spread { justify-content: space-between; }
 
@@ -448,8 +542,21 @@ button.quiet:hover { color: var(--fg); border-color: #3a4453; }
 /* Inline result of a per-share connection test / small validation text. */
 .field-error { color: var(--bad); font-size: 0.9rem; }
 .field-ok { color: var(--ok); font-size: 0.9rem; }
-/* A compact affordance sitting inside a table cell (e.g. "enter password…"). */
-.small-btn { margin-left: 0.6rem; padding: 0.1rem 0.5rem; font-size: 0.8rem; }
+/* A compact control sitting inside a table cell or on a card (Edit, Stop,
+   "enter password…"). Smaller than the default, but still a button you can
+   hit: it used to be 0.1rem of padding around 0.8rem text, which is a link
+   wearing a box — barely taller than the words inside it and well under the
+   size a finger or a hurried pointer can land on.
+   No drop shadow at this size: a dozen of them down a dense table would be
+   noise, and the top lip alone is enough to keep them reading as raised. */
+.small-btn {
+  margin-left: 0.6rem;
+  padding: 0.32rem 0.75rem;
+  min-height: 1.9rem;
+  font-size: 0.85rem;
+  box-shadow: inset 0 1px 0 var(--btn-lip);
+}
+.small-btn:active:not(:disabled) { box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3); }
 .notice.warn { background: #2b1a1a; border-color: #6d2f2f; }
 .notice.subtle { background: #151b23; border-color: #232a34; color: var(--muted); margin-top: 0.75rem; }
 
@@ -457,11 +564,16 @@ button.quiet:hover { color: var(--fg); border-color: #3a4453; }
 .picker { border: 1px solid #232a34; border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
 .picker-list { list-style: none; margin: 0.4rem 0 0; padding: 0; max-height: 15rem; overflow-y: auto; }
 .picker-list li { display: flex; align-items: center; gap: 0.6rem; padding: 0.15rem 0; }
+/* A folder name in the picker is a link, not a control: it opens something
+   rather than doing something. It has to opt out of the whole button surface
+   above, or the picker turns into a wall of chips. */
 button.link {
   background: none; border: none; color: var(--fg); padding: 0.15rem 0;
   text-align: left; flex: 1; cursor: pointer;
+  min-height: 0; font-weight: 500; font-size: 0.95rem; box-shadow: none;
 }
-button.link:hover { color: var(--accent); }
+button.link:hover { color: var(--accent); background: none; border-color: transparent; }
+button.link:active:not(:disabled) { transform: none; box-shadow: none; }
 
 /* OPEN AND SELECT MUST NOT BE NEIGHBOURS. The name opens the folder and
    "Protect this" chooses it — two different outcomes from one row. The name
@@ -787,11 +899,18 @@ select {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: var(--s4); flex-wrap: wrap;
 }
+/* nowrap here pushed the whole page sideways on a phone. A released build's
+   version is short ("v0.1.9") and fits, so it never showed — but a build from
+   source carries a pseudo-version
+   ("v0.1.10-0.20260729024553-c9b4319c6c22-dirty"), which at 414px is wider
+   than the screen, and the Raspberry Pi instructions tell people to build from
+   source. The network view for phones is the one place this had to hold. */
 .version {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.8rem; color: var(--muted);
   background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 999px; padding: 0.1rem 0.6rem; white-space: nowrap;
+  border-radius: 999px; padding: 0.1rem 0.6rem;
+  max-width: 100%; overflow-wrap: anywhere;
 }
 
 /* The per-method delivery state sits tight under its own row, indented to the
@@ -914,3 +1033,10 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
    Muted says "deliberately not running" where green would imply it is about to
    and red would imply something went wrong. */
 #archive-rows td.paused { color: var(--muted); }
+
+/* Somebody who has asked their system not to animate things has asked for a
+   reason. The press still registers — it just stops sliding. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  button:active:not(:disabled) { transform: none; }
+}

@@ -441,7 +441,7 @@ function renderUnprotected(st) {
     // Only the buttons are withheld.
     if (!readOnly) {
       const actions = el('div', 'card-actions');
-      const setUp = el('button', 'small-btn', 'Set up a backup');
+      const setUp = el('button', 'small-btn primary', 'Set up a backup');
       setUp.onclick = () => Wizard.open(st, { firstRun: false });
       actions.appendChild(setUp);
       const drop = el('button', 'small-btn', 'Stop listing this folder');
@@ -512,7 +512,7 @@ function renderRetired(st) {
     if (r.delete_blocked) {
       actions.appendChild(el('span', 'muted small', r.delete_blocked));
     } else {
-      const del = el('button', 'danger', 'Delete backups…');
+      const del = el('button', 'small-btn danger', 'Delete backups…');
       del.onclick = () => deleteRetiredBackups(r, del);
       actions.appendChild(del);
     }
@@ -619,7 +619,7 @@ function openIgnoreEditor(tr, f) {
   input.type = 'text';
   input.value = (f.ignores || []).join(', ');
   input.placeholder = 'scratch, *.iso, assets/raw';
-  const save = el('button', 'small-btn', 'Save');
+  const save = el('button', 'small-btn primary', 'Save');
   const cancel = el('button', 'small-btn', 'Cancel');
   box.append(input, save, cancel);
   box.appendChild(el('span', 'muted hint',
@@ -768,7 +768,7 @@ function renderTargets(st) {
     }
     const actions = el('div', 'card-actions');
     if (!readOnly) {
-      const btn = el('button', 'danger', 'Remove');
+      const btn = el('button', 'small-btn danger', 'Remove');
       btn.onclick = () => removeTarget(t);
       actions.appendChild(btn);
     }
@@ -952,7 +952,7 @@ function renderPending(sources) {
       // would just look broken.
       row.appendChild(el('span', 'muted', 'approve it on the computer itself'));
     } else {
-      const btn = el('button', null, 'Approve');
+      const btn = el('button', 'primary', 'Approve');
       btn.onclick = () => acceptPair(p, btn);
       row.appendChild(btn);
       row.appendChild(el('span', 'muted',
@@ -1601,7 +1601,7 @@ function renderLANRequests(st) {
       ' — asked ' + humanTime(d.first_seen);
     row.appendChild(meta);
     const actions = el('div', 'lan-request-actions');
-    const ok = el('button', null, 'Approve');
+    const ok = el('button', 'primary', 'Approve');
     ok.onclick = () => lanDeviceAction(d.code, 'approve', ok);
     const no = el('button', 'danger', 'Deny');
     no.onclick = () => lanDeviceAction(d.code, 'forget', no);
@@ -1772,7 +1772,7 @@ function renderLANDevices(st, mode) {
     li.appendChild(meta);
     const actions = el('div', 'card-actions');
     if (!d.approved) {
-      const ok = el('button', null, 'Approve');
+      const ok = el('button', 'primary', 'Approve');
       ok.onclick = () => lanDeviceAction(d.code, 'approve', ok);
       actions.appendChild(ok);
     }

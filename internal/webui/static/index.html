@@ -117,7 +117,7 @@
         <div class="row pick-bar">
           <button type="button" id="pick-up">↑ Up</button>
           <span id="pick-path" class="muted mono"></span>
-          <button type="button" id="pick-here" hidden>Protect this folder</button>
+          <button type="button" id="pick-here" hidden class="primary">Protect this folder</button>
         </div>
         <ul id="pick-list" class="picker-list"></ul>
         <p id="pick-truncated" class="muted" hidden>Only the first 500 folders are shown.</p>
@@ -125,7 +125,7 @@
       <label class="muted" for="pick-manual">Or type a path</label>
       <div class="row">
         <input id="pick-manual" placeholder="/home/you/code" autocomplete="off">
-        <button type="button" id="pick-manual-go">Use this</button>
+        <button type="button" id="pick-manual-go" class="primary">Use this</button>
       </div>
       <p id="pick-chosen" class="chosen" hidden></p>
     </section>
@@ -147,7 +147,7 @@
           <input id="dm-url" placeholder="//nas-or-ip/share" autocomplete="off">
           <input id="dm-user" placeholder="username (blank = guest)" autocomplete="off">
           <input id="dm-pass" type="password" placeholder="password" autocomplete="new-password">
-          <button type="button" id="dm-add">Add this destination</button>
+          <button type="button" id="dm-add" class="primary">Add this destination</button>
         </div>
       </details>
       <details id="dest-pair">
@@ -161,7 +161,7 @@
         <div class="share-form">
           <input id="dp-id" placeholder="XXXXXXX-XXXXXXX-XXXXXXX-… (from &quot;backup-maker pair&quot;)" autocomplete="off">
           <input id="dp-name" placeholder="a name for that machine, e.g. attic-pi" autocomplete="off">
-          <button type="button" id="dp-add">Add this computer</button>
+          <button type="button" id="dp-add" class="primary">Add this computer</button>
           <p id="dp-error" class="field-error" hidden></p>
         </div>
       </details>
@@ -211,7 +211,7 @@
       <ul id="pairwait-list" class="cards"></ul>
       <p class="muted">You can close this — the dashboard shows when it pairs.</p>
       <div class="wiz-nav">
-        <button type="button" id="pairwait-close">Close</button>
+        <button type="button" id="pairwait-close" class="quiet">Close</button>
       </div>
     </section>
 
@@ -222,9 +222,9 @@
     </section>
 
     <section class="wiz-nav" id="wiz-nav">
-      <button type="button" id="wiz-back">Back</button>
-      <button type="button" id="wiz-next">Continue</button>
-      <button type="button" id="wiz-finish" hidden>Start backing up</button>
+      <button type="button" id="wiz-back" class="quiet">Back</button>
+      <button type="button" id="wiz-next" class="primary">Continue</button>
+      <button type="button" id="wiz-finish" hidden class="primary">Start backing up</button>
       <a href="#" id="wiz-skip" class="muted skip">Skip — I'll use the command line</a>
     </section>
   </main>
@@ -253,7 +253,7 @@
           <input id="adopt-share-url" placeholder="//nas-or-ip/share" autocomplete="off">
           <input id="adopt-share-user" placeholder="username (blank = guest)" autocomplete="off">
           <input id="adopt-share-pass" type="password" placeholder="password" autocomplete="new-password">
-          <button type="button" id="adopt-share-go">Connect</button>
+          <button type="button" id="adopt-share-go" class="primary">Connect</button>
         </div>
       </details>
     </section>
@@ -285,9 +285,9 @@
     </section>
 
     <section class="wiz-nav">
-      <button type="button" id="adopt-back">Back</button>
-      <button type="button" id="adopt-next">Continue</button>
-      <button type="button" id="adopt-finish" hidden>Restore this machine</button>
+      <button type="button" id="adopt-back" class="quiet">Back</button>
+      <button type="button" id="adopt-next" class="primary">Continue</button>
+      <button type="button" id="adopt-finish" hidden class="primary">Restore this machine</button>
     </section>
   </main>
 
@@ -317,7 +317,7 @@
         <p class="verdict-line" id="verdict-line">Checking…</p>
         <p id="status-line" class="muted">Connecting to daemon…</p>
       </div>
-      <button type="button" id="open-wizard">Set up a backup</button>
+      <button type="button" id="open-wizard" class="primary">Set up a backup</button>
     </section>
 
     <!-- The read-only network view's address, at the top where somebody would
@@ -502,7 +502,7 @@
           <label class="muted small" for="set-webhook-url">Address to POST to</label>
           <div class="row">
             <input id="set-webhook-url" type="url" placeholder="https://…" autocomplete="off" spellcheck="false">
-            <button type="button" id="save-webhook-url">Save</button>
+            <button type="button" id="save-webhook-url" class="primary">Save</button>
           </div>
           <p class="muted small" id="webhook-url-state"></p>
           <label class="row-check">
@@ -535,7 +535,7 @@
           <div class="row">
             <input id="set-ntfy-topic" type="url" placeholder="https://ntfy.sh/your-topic" autocomplete="off"
               spellcheck="false">
-            <button type="button" id="save-ntfy-topic">Save</button>
+            <button type="button" id="save-ntfy-topic" class="primary">Save</button>
           </div>
           <p class="muted small" id="ntfy-topic-state"></p>
           <!-- Saved on its own, not alongside the topic: the browser is never
@@ -544,7 +544,7 @@
           <label class="muted small" for="set-ntfy-token">Access token (only for a protected topic)</label>
           <div class="row">
             <input id="set-ntfy-token" type="password" placeholder="tk_…" autocomplete="off" spellcheck="false">
-            <button type="button" id="save-ntfy-token">Save</button>
+            <button type="button" id="save-ntfy-token" class="primary">Save</button>
           </div>
           <p class="muted small" id="ntfy-token-state"></p>
           <label class="row-check">
