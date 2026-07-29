@@ -159,6 +159,13 @@ function buildRow(key) {
 
   const seen = el('td');
   const actions = el('td', 'row-actions');
+  // Labels for the stacked layout on a narrow screen, where the header row is
+  // gone and each cell has to say what it is.
+  folder.dataset.label = 'Folder';
+  target.dataset.label = 'Destination';
+  state.dataset.label = 'State';
+  progress.dataset.label = 'Progress';
+  seen.dataset.label = 'Last sync';
   tr.append(folder, target, state, progress, seen, actions);
   tr._cells = { folder, folderName, folderPath, target, state, fill, label, seen, actions };
   return tr;
@@ -171,12 +178,23 @@ function buildRow(key) {
 function updateRow(tr, r, folder, first) {
   const c = tr._cells;
   setText(c.folderName, first ? (r.folder_label || r.folder_id) : '');
+  // Stacked on a phone, every card is on its own — the folder name is only in
+  // the first row of a group, so without this the second destination's card
+  // would not say which folder it is about.
+  tr.dataset.folder = r.folder_label || r.folder_id || '';
   setText(c.folderPath, first && folder && folder.path ? folder.path : '');
   tr.classList.toggle('grouped', !first);
   renderRowActions(c.actions, first ? folder : null, tr);
   setText(c.target, r.target_name || '—');
-  setText(c.state, stateLabel(r.state, r) + (r.stale ? ' ⚠' : ''));
-  c.state.className = stateClass(r.state, r) + ' dot';
+  // The dot goes on an inner span rather than the cell itself. A cell has one
+  // ::before, and on a narrow screen that is spent on the "State" label — with
+  // both rules aiming at it the marker and the word drew over each other.
+  if (!c.stateText) {
+    c.stateText = el('span');
+    c.state.replaceChildren(c.stateText);
+  }
+  setText(c.stateText, stateLabel(r.state, r) + (r.stale ? ' ⚠' : ''));
+  c.stateText.className = stateClass(r.state, r) + ' dot';
   // A state whose name doesn't tell you what to do about it gets the
   // explanation on hover rather than a row that just reads red.
   c.state.title = stateHelp(r.state);
@@ -883,10 +901,16 @@ function renderArchives(st) {
     // counting to 3, so adding this Folder column silently moved the colouring
     // and the "enter password…" button onto the schedule instead — a column
     // added a year from now would do it again.
-    for (const text of [covers, a.name, a.target, a.every]) {
-      tr.appendChild(el('td', undefined, text));
-    }
-    const state = el('td', undefined, archiveStateLabel(a));
+    const archiveLabels = ['Folder', 'Name', 'Destination', 'Every'];
+    [covers, a.name, a.target, a.every].forEach((text, i) => {
+      const td = el('td', undefined, text);
+      td.dataset.label = archiveLabels[i];
+      tr.appendChild(td);
+    });
+    tr.dataset.folder = covers;
+    const state = el('td');
+    const stateText = el('span', undefined, archiveStateLabel(a));
+    state.appendChild(stateText);
     // Anything that is working or about to work is "busy", never "bad". A new
     // state added without a case here inherits red, which is how "running"
     // would have been drawn as a fault.
@@ -896,7 +920,7 @@ function renderArchives(st) {
     // ' dot' to match the mirror table: the same word in the same colour
     // deserves the same marker beside it, and without it the two tables read
     // as describing different kinds of thing.
-    state.className = (a.paused ? 'paused'
+    stateText.className = (a.paused ? 'paused'
       : (['ok', 'due'].includes(a.state) || (['running', 'preparing'].includes(a.state) && a.last_run)) ? 'ok'
       : (['never run', 'preparing', 'running'].includes(a.state) || a.needs_password ? 'busy' : 'bad')) + ' dot';
     // A snapshot with no stored password never runs; offer to set it here
@@ -906,9 +930,14 @@ function renderArchives(st) {
       btn.onclick = () => enterArchivePassword(a);
       state.appendChild(btn);
     }
+    state.dataset.label = 'State';
     tr.appendChild(state);
-    tr.appendChild(archiveProgressCell(a));
-    tr.appendChild(el('td', undefined, humanTime(a.last_run)));
+    const prog = archiveProgressCell(a);
+    prog.dataset.label = 'Progress';
+    tr.appendChild(prog);
+    const last = el('td', undefined, humanTime(a.last_run));
+    last.dataset.label = 'Last run';
+    tr.appendChild(last);
 
     // Pause, edit, stop. Without these the only way to change a schedule was
     // to delete it and build it again — including retyping a password that by

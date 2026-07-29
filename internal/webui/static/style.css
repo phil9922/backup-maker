@@ -1118,3 +1118,96 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
 }
 .std-ignores strong { display: block; margin-bottom: var(--s1); }
 .std-ignores .mono { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+
+/* TABLES BECOME CARDS ON A PHONE.
+   ---------------------------------------------------------------------------
+   Both backup tables carry six to eight columns of genuinely useful detail, and
+   at 390px that is a horizontal scroll inside a vertical one: to read a row you
+   had to drag it sideways, and the column you were reading lost its heading on
+   the way. The status view exists to be checked from a phone, so that is the
+   one width it must not fail at.
+
+   Each row becomes a block, each cell a label-and-value line, and the header
+   row goes — its job is done by the labels. Nothing is hidden: the same facts
+   are present, stacked instead of ranged. */
+@media (max-width: 40rem) {
+  /* Nothing left to scroll sideways. */
+  #rows, #archive-rows { display: block; }
+  #rows thead, #archive-rows thead { display: none; }
+  #rows tbody, #archive-rows tbody { display: block; }
+  .table-wrap { overflow-x: visible; }
+
+  #rows tbody tr,
+  #archive-rows tbody tr {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: var(--s3);
+    margin-bottom: var(--s3);
+  }
+  /* The folder this card is about, as its heading. A continuation row leaves
+     the folder cell empty so the desktop table reads as one group, which on a
+     phone would leave a second destination's card anonymous. */
+  #rows tbody tr::before,
+  #archive-rows tbody tr::before {
+    content: attr(data-folder);
+    display: block;
+    font-weight: 600;
+    margin-bottom: var(--s2);
+  }
+  #rows tbody tr[data-folder=""]::before,
+  #archive-rows tbody tr[data-folder=""]::before { content: none; }
+
+  #rows tbody td,
+  #archive-rows tbody td {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: var(--s3);
+    align-items: baseline;
+    padding: 0.3rem 0;
+    border: none;
+    white-space: normal;
+  }
+  #rows tbody td::before,
+  #archive-rows tbody td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: var(--fs-small);
+  }
+  /* The folder cell is already the card's heading, and the action buttons
+     label themselves. */
+  #rows tbody td.folder-cell,
+  #rows tbody td.row-actions,
+  #archive-rows tbody td.row-actions {
+    display: block;
+  }
+  #rows tbody td.folder-cell::before,
+  #rows tbody td.row-actions::before,
+  #archive-rows tbody td.row-actions::before { content: none; }
+  #rows tbody td.folder-cell strong { display: none; }
+  /* The card is already headed with the folder, so the cell that repeats it
+     goes. Said once. */
+  #archive-rows tbody td:first-child { display: none; }
+  #rows tbody td.row-actions,
+  #archive-rows tbody td.row-actions {
+    text-align: left;
+    width: auto;
+    margin-top: var(--s2);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2);
+  }
+  #rows tbody td.row-actions button,
+  #archive-rows tbody td.row-actions button { margin-left: 0; }
+  /* The grouping rule that joins a folder's destinations is meaningless once
+     each one is its own card. */
+  #rows tbody tr.grouped td { border-top: none; }
+  #rows tbody tr + tr td, #archive-rows tbody tr + tr td { border-top: none; }
+  /* The bar needs the width more than the figure needs its own column. */
+  .progress-cell .progress-wrap { flex-wrap: wrap; }
+  #archive-rows .bar-label, .bar-label { flex-basis: auto; text-align: left; }
+  /* The editors open as a full-width row; they are forms, not cells. */
+  tr.ignore-row td { display: block; }
+  tr.ignore-row td::before { content: none; }
+}
