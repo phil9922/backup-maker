@@ -49,6 +49,13 @@
   /* The gutter every section shares, so the table, the cards and the panels
      all start on the same vertical line. */
   --gutter: 0.9rem;
+  /* ONE PAGE WIDTH, used by every top-level view. The dashboard was 82rem and
+     the wizard 52rem, so opening "Set up a backup" narrowed the page and moved
+     its left edge inward by 224px — the header and footer stayed put, so the
+     content visibly detached from them and then jumped back on the way out.
+     Whatever the right measure is, it is the same measure everywhere; prose
+     inside still sets its own narrower one. */
+  --page: 82rem;
   font-family: system-ui, sans-serif;
 }
 /* Figures that sit in columns — sizes, percentages, ages — must not jitter as
@@ -83,12 +90,12 @@ h1 { font-size: 1.2rem; font-weight: 600; }
    third of a monitor its columns wrap or scroll. Filling the whole width is
    the other mistake: the eye loses the row it is on. Prose inside sets its own
    narrower measure (.section-lede) regardless. */
-main { padding: var(--s5); max-width: 82rem; margin: 0 auto; display: grid; gap: var(--s6); }
+main { padding: var(--s5); max-width: var(--page); margin: 0 auto; display: grid; gap: var(--s6); }
 /* Grid items default to min-width:auto, which lets a wide table push the page
    sideways instead of scrolling inside .table-wrap. */
 main > section { min-width: 0; }
 footer {
-  max-width: 82rem; margin: 0 auto; padding: 1.25rem 1.5rem 2rem;
+  max-width: var(--page); margin: 0 auto; padding: 1.25rem 1.5rem 2rem;
   border-top: 1px solid #232a34; font-size: 0.85rem;
 }
 footer a { color: var(--accent); }
@@ -500,7 +507,7 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
    wizard used one 1.25rem everywhere: between the heading block and the step,
    between a subsection's title and its own contents, and between unrelated
    controls. Nothing said where one subject ended and the next began. */
-#wizard, #adopt { padding: var(--s5); max-width: 52rem; margin: 0 auto; display: grid; gap: var(--s6); }
+#wizard, #adopt { padding: var(--s5); max-width: var(--page); margin: 0 auto; display: grid; gap: var(--s6); }
 
 /* Inside a step, related controls sit close… */
 .wiz-panel { display: grid; gap: var(--s3); align-content: start; }
@@ -680,7 +687,11 @@ select {
 .choice:hover { border-color: #2b3542; }
 .choice:has(input:checked) { border-color: var(--accent); background: #161f29; }
 .choice input { margin-top: .25rem; }
-.choice-body { display: grid; gap: .3rem; }
+/* The card fills the page width like everything else; its sentences do not.
+   At the full measure these descriptions ran past 1200px, and a line that long
+   loses the reader on the way back to the left edge. Same rule as
+   .section-lede: one page width, prose sets its own. */
+.choice-body { display: grid; gap: .3rem; max-width: 58rem; }
 .choice-body strong { font-size: 1rem; }
 .choice-body .small, .small { font-size: var(--fs-small); }
 
