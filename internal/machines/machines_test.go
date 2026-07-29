@@ -69,9 +69,10 @@ func TestListWithoutScanSkipsTheNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List with nil scan: %v", err)
 	}
-	// Only this machine and the paired device: a nil scan is not an error, and
-	// drive/share targets are not machines.
-	want := []string{KindThis, "DEV-OMEN"}
+	// A nil scan is not an error, and nothing here touches the network: the
+	// share appears because it is in the CONFIG, read from disk, not because
+	// anybody went looking for it. The drive is still not a machine.
+	want := []string{KindThis, "DEV-OMEN", "nas"}
 	if !slices.Equal(ids(got), want) {
 		t.Errorf("ids = %v, want %v", ids(got), want)
 	}
@@ -218,7 +219,10 @@ func TestListBrowsable(t *testing.T) {
 	}
 }
 
-func TestListSkipsNonDeviceTargets(t *testing.T) {
+// A drive is storage on THIS computer and never a machine of its own. A share
+// is storage too — but the computer serving it is a machine, and one this
+// config already knows how to reach.
+func TestADriveIsNeverAMachineButAConfiguredShareHostIs(t *testing.T) {
 	cfg := testConfig("laptop",
 		config.Target{Type: "drive", Name: "sd-card", Path: "/media/sd"},
 		config.Target{Type: "share", Name: "nas-backups", URL: "//nas/backups"},
@@ -230,10 +234,84 @@ func TestListSkipsNonDeviceTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	// Drives and shares are storage ON a machine, not machines of their own.
-	want := []string{KindThis, "DEV-OMEN"}
+	want := []string{KindThis, "DEV-OMEN", "nas"}
 	if !slices.Equal(ids(got), want) {
 		t.Errorf("ids = %v, want %v", ids(got), want)
+	}
+}
+
+// THE GUARANTEE: a destination this computer already backs up to can be
+// reached without scanning the network for it.
+//
+// It used to be absent from the list entirely — only paired machines were read
+// out of the config — so the only route to a share already in daily use was to
+// go hunting for it on the network, where it turned up as a stranger asking
+// for a password the daemon had stored all along.
+func TestAConfiguredShareIsOfferedWithoutAScan(t *testing.T) {
+	cfg := testConfig("laptop", config.Target{
+		Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups", Username: "pk",
+	})
+
+	got, err := List(context.Background(), cfg, nil) // nil scan: no network at all
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found *Machine
+	for i := range got {
+		if got[i].Addr == "192.168.5.141" {
+			found = &got[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("the configured share is not offered without a scan: %v", ids(got))
+	}
+	if found.NeedsAuth {
+		t.Error("a destination this computer is already using is asking for a password again")
+	}
+	if !found.Browsable {
+		t.Error("the share host is not browsable, so its storage can never be listed")
+	}
+	if found.Name != "backup-pi" {
+		t.Errorf("name = %q, want the name this destination is known by", found.Name)
+	}
+}
+
+// One machine, not two, when a share is both configured and discovered —
+// otherwise the same computer appears twice and only one of the entries knows
+// the password.
+func TestAShareThatIsBothConfiguredAndScannedAppearsOnce(t *testing.T) {
+	cfg := testConfig("laptop", config.Target{
+		Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups",
+	})
+	scan := scanning([]discover.Host{{Addr: "192.168.5.141", Name: "raspberrypi"}}, nil)
+
+	got, err := List(context.Background(), cfg, scan)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	n := 0
+	for _, m := range got {
+		if m.Addr == "192.168.5.141" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the same host appears %d times: %v", n, ids(got))
+	}
+}
+
+// A port that is not the default has to survive into the machine id, or the
+// storage lookup goes to the wrong place.
+func TestANonDefaultSharePortSurvivesIntoTheMachineID(t *testing.T) {
+	got, err := ShareAddr("//nas.local:4450/backups")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "nas.local:4450" {
+		t.Errorf("ShareAddr = %q, want host:port", got)
+	}
+	if plain, err := ShareAddr("//nas.local/backups"); err != nil || plain != "nas.local" {
+		t.Errorf("ShareAddr = %q, %v — the default port must not be spelled out", plain, err)
 	}
 }
 

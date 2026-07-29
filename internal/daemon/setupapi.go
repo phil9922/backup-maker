@@ -29,7 +29,49 @@ func (d *daemon) listMachines(ctx context.Context, scan bool) (any, error) {
 }
 
 func (d *daemon) machineStorage(ctx context.Context, req webui.StorageRequest) (any, error) {
-	return machines.StorageFor(ctx, d.currentCfg(), req.Machine, req.Username, req.Password, nil, nil, nil)
+	cfg := d.currentCfg()
+	user, pass := req.Username, req.Password
+	if user == "" && pass == "" {
+		user, pass = d.storedShareLogin(cfg, req.Machine)
+	}
+	return machines.StorageFor(ctx, cfg, req.Machine, user, pass, nil, nil, nil)
+}
+
+// storedShareLogin returns the credentials this computer already holds for a
+// share host, or empty strings if it holds none.
+//
+// WHY THE DAEMON AND NOT THE machines PACKAGE: passwords live in state.json,
+// which that package deliberately knows nothing about — it composes discover,
+// browse and smbfs and takes credentials as arguments. The daemon is the piece
+// that already holds both halves.
+//
+// Without this, browsing a destination this machine backs up to every day
+// asked for its password again, because the request carried none and nothing
+// looked. Combined with the destination not appearing in the list at all until
+// a network scan found it, adding a second folder to an existing share meant
+// scan, re-select, retype — every time.
+func (d *daemon) storedShareLogin(cfg *config.Config, machineID string) (string, string) {
+	if machineID == "" || machineID == machines.KindThis {
+		return "", ""
+	}
+	creds := d.shareCredentials()
+	for _, t := range cfg.Targets {
+		if t.Type != "share" {
+			continue
+		}
+		addr, err := machines.ShareAddr(t.URL)
+		if err != nil || !strings.EqualFold(addr, machineID) {
+			continue
+		}
+		if pass, ok := creds[t.Name]; ok {
+			return t.Username, pass
+		}
+		// A guest share is configured with no password at all, and that is a
+		// real answer: it is why the username is returned even when the
+		// credential store has nothing for this target.
+		return t.Username, ""
+	}
+	return "", ""
 }
 
 // unusableDrives reports attached storage that cannot hold backups yet.

@@ -15,6 +15,7 @@ package machines
 import (
 	"context"
 	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
 
@@ -117,7 +118,61 @@ func List(ctx context.Context, cfg *config.Config, scan func(context.Context) ([
 			Note:      "this machine chooses where backups land, using its own \"receive\" setting",
 		})
 	}
+
+	// Network destinations THIS COMPUTER IS ALREADY USING, listed without a
+	// scan.
+	//
+	// They were missing entirely: only paired machines were read out of the
+	// config, so a share already holding this machine's backups appeared
+	// nowhere until you went looking for it on the network — and then it
+	// arrived as a stranger, asking for a password the daemon had stored all
+	// along. Adding a second folder to a destination already in daily use
+	// meant a network scan and retyping credentials, every single time.
+	//
+	// Deduplicated against anything the scan already produced, so a share that
+	// is both configured and discovered is one machine, not two.
+	seen := map[string]bool{}
+	for _, m := range out {
+		if m.Addr != "" {
+			seen[m.Addr] = true
+		}
+	}
+	for _, t := range cfg.Targets {
+		if t.Type != "share" {
+			continue
+		}
+		addr, err := ShareAddr(t.URL)
+		if err != nil || seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		out = append(out, Machine{
+			ID:        addr,
+			Name:      t.Name,
+			Kind:      KindSMB,
+			Addr:      addr,
+			Browsable: true,
+			// The credentials are already stored, so the caller supplies them
+			// rather than the user: see StorageFor's contract.
+			NeedsAuth: false,
+			Note:      "already set up here — no password needed",
+		})
+	}
 	return out, scanErr
+}
+
+// ShareAddr is the host part of a share URL, in the form StorageFor expects as
+// a machine id (host, or host:port when it is not the default). Exported so the
+// daemon can match a stored credential to the machine being browsed.
+func ShareAddr(rawURL string) (string, error) {
+	host, port, _, _, err := smbfs.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	if port != "" && port != "445" {
+		return net.JoinHostPort(host, port), nil
+	}
+	return host, nil
 }
 
 // StorageFor lists what can be selected on one machine. user/pass are only
