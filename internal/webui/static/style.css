@@ -581,6 +581,24 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
 .notice.warn { background: #2b1a1a; border-color: #6d2f2f; }
 .notice.subtle { background: #151b23; border-color: #232a34; color: var(--muted); margin-top: 0.75rem; }
 
+/* The edit form inside a table row. It reuses the wizard's .share-form so the
+   controls are identical to the ones that asked these questions in the first
+   place, but a table cell is as wide as the table — without a measure of its
+   own every field stretched across the page and the buttons ended up off the
+   right edge. */
+tr.ignore-row .share-form {
+  max-width: 30rem;
+  margin: var(--s3) 0 var(--s2);
+}
+tr.ignore-row .share-form .card-actions {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+tr.ignore-row .share-form .card-actions button { margin-left: 0; }
+tr.ignore-row .share-form p { white-space: normal; line-height: 1.45; }
+tr.ignore-row td { white-space: normal; }
+
 /* folder picker */
 .picker { border: 1px solid #232a34; border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
 /* The scrollbar gets a lane of its own, and the buttons keep clear of it.

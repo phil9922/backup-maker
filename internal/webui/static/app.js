@@ -254,6 +254,10 @@ function setText(node, text) {
 // exclude editor out from under someone mid-sentence. While one is open the
 // table is left alone; polling resumes on save or cancel.
 let editingIgnoresFor = null;
+// The archives table rebuilds on every poll too, so an open editor there needs
+// the same freeze the exclude editor has: a form that vanishes mid-sentence
+// once a second is not a form.
+let editingArchive = null;
 
 // renderRows draws the one table: every folder that has a live mirror, its
 // destinations grouped beneath it, and its actions on the leading row.
@@ -799,6 +803,7 @@ async function removeTarget(t) {
 }
 
 function renderArchives(st) {
+  if (editingArchive !== null) return;
   const sec = document.getElementById('archives-section');
   if (!st.archives || st.archives.length === 0) { sec.hidden = true; return; }
   sec.hidden = false;
@@ -873,8 +878,10 @@ function renderArchives(st) {
       pause.onclick = () => setArchivePaused(a, !a.paused);
       actions.appendChild(pause);
 
-      const edit = el('button', 'small-btn', 'Change…');
-      edit.onclick = () => editArchiveSchedule(a);
+      // "Edit", the same word the mirror table uses for the same idea. It used
+      // to say "Change…" and open two browser prompt() boxes.
+      const edit = el('button', 'small-btn', 'Edit');
+      edit.onclick = () => openArchiveEditor(tr, a);
       actions.appendChild(edit);
 
       const stop = el('button', 'danger small-btn', 'Stop');
@@ -2017,25 +2024,112 @@ async function setArchivePaused(a, paused) {
 // never sent to the browser), and re-pointing a schedule at a different folder
 // is how somebody ends up with a snapshot of the wrong thing — that is a new
 // schedule, made deliberately.
-async function editArchiveSchedule(a) {
-  const every = prompt(
-    `How often should "${a.name}" run?\n\n` +
-    `hourly, 12h, daily, or weekly.`, a.every);
-  if (every === null) return;
-  const keepRaw = prompt(
-    `How many snapshots should be kept?\n\n` +
-    `Older ones are deleted when a new one is written — not now.`,
-    String(a.keep || 5));
-  if (keepRaw === null) return;
-  const keep = parseInt(keepRaw, 10);
-  if (!Number.isFinite(keep) || keep < 1) { alert('Keep must be a whole number, 1 or more.'); return; }
+// Change a snapshot schedule, in a form built from the wizard's own controls
+// and filled in with what the job is set to now.
+//
+// It used to be two browser prompt() boxes: one asking you to TYPE "hourly,
+// 12h, daily, or weekly" into a text field with no list of the options and no
+// spell-check, the second asking for a number. A prompt() cannot show you the
+// current value, cannot validate, cannot be cancelled halfway without losing
+// the first answer, and looks like a page that has gone wrong. The wizard asks
+// these exact questions with a select and a number field; there was no reason
+// changing an answer should be a worse experience than giving it.
+function openArchiveEditor(tr, a) {
+  for (const open of tr.parentElement.querySelectorAll('tr.ignore-row')) open.remove();
+  editingArchive = a.name;
 
-  const resp = await mutate('/api/archives/' + encodeURIComponent(a.name) + '/schedule', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ every: every.trim(), keep }),
-  });
-  if (!resp.ok) alert(await resp.text()); else refresh();
+  const row = el('tr', 'ignore-row');
+  const cell = el('td');
+  cell.colSpan = 8;
+  row.appendChild(cell);
+
+  const form = el('div', 'share-form');
+  form.appendChild(el('label', 'muted', 'Run a snapshot'));
+  const every = el('select');
+  for (const [value, text] of [['hourly', 'every hour'], ['12h', 'every 12 hours'],
+    ['daily', 'every day'], ['weekly', 'every week']]) {
+    const opt = el('option', null, text);
+    opt.value = value;
+    // Prepopulated — the whole point. The old prompt() offered the current
+    // value as default text you had to retype correctly to keep.
+    if (a.every === value) opt.selected = true;
+    every.appendChild(opt);
+  }
+  form.appendChild(every);
+
+  form.appendChild(el('label', 'muted', 'Keep this many snapshots (older ones are deleted)'));
+  const keep = el('input');
+  keep.type = 'number';
+  keep.min = '1';
+  keep.value = String(a.keep || 5);
+  form.appendChild(keep);
+
+  form.appendChild(el('label', 'muted', 'New password (leave blank to keep the current one)'));
+  const pw = el('input');
+  pw.type = 'password';
+  pw.placeholder = 'unchanged';
+  pw.autocomplete = 'new-password';
+  const pw2 = el('input');
+  pw2.type = 'password';
+  pw2.placeholder = 'repeat new password';
+  pw2.autocomplete = 'new-password';
+  form.append(pw, pw2);
+  // A password change does not re-encrypt what is already written, and that is
+  // the one thing somebody would assume it does.
+  form.appendChild(el('p', 'muted small',
+    'Changing it affects snapshots written from now on. The zips already on ' +
+    'your destination still open with the password that made them — nothing ' +
+    'is re-encrypted, and nothing already written becomes unreadable.'));
+
+  const actions = el('div', 'card-actions');
+  const save = el('button', 'small-btn primary', 'Save');
+  const cancel = el('button', 'small-btn', 'Cancel');
+  actions.append(save, cancel);
+
+  const err = el('p', 'bad');
+  err.hidden = true;
+
+  const close = () => { editingArchive = null; refresh(); };
+  cancel.onclick = close;
+  save.onclick = async () => {
+    const n = parseInt(keep.value, 10);
+    if (!Number.isFinite(n) || n < 1) {
+      err.hidden = false;
+      setText(err, 'Keep must be a whole number, 1 or more.');
+      return;
+    }
+    if (pw.value !== pw2.value) {
+      err.hidden = false;
+      setText(err, 'The two passwords do not match.');
+      return;
+    }
+    save.disabled = true;
+    const name = encodeURIComponent(a.name);
+    let resp = await mutate('/api/archives/' + name + '/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ every: every.value, keep: n }),
+    });
+    if (resp.ok && pw.value !== '') {
+      resp = await mutate('/api/archives/' + name + '/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw.value }),
+      });
+    }
+    if (!resp.ok) {
+      err.hidden = false;
+      setText(err, await resp.text());
+      save.disabled = false;
+      return;
+    }
+    close();
+  };
+
+  form.append(actions, err);
+  cell.appendChild(form);
+  tr.after(row);
+  every.focus();
 }
 
 // "Stop" rather than "Delete": it stops the schedule running, and the
