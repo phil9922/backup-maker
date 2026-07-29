@@ -23,14 +23,6 @@
   --btn-ink: #eef3f8;
   --btn-lip: rgba(255, 255, 255, 0.07);
   --accent-hi: #78d3f9;
-  /* Destructive controls are filled red with white on them. The red is a deep
-     one on purpose: white on the bright --bad (#ef5350) is about 2.6:1, which
-     fails the contrast floor for text and reads as washed out. #b3231d carries
-     white at 6.2:1 and still says red across the room. */
-  --danger-face: #b3231d;
-  --danger-face-hi: #d0342c;
-  --danger-edge: #d0342c;
-  --danger-ink: #ffffff;
   /* Explanatory text — the sentence under a switch, the note beside a group
      title. It is muted because it is subordinate, NOT because it is optional:
      it is where every consequence of a setting is actually spelled out, so at
@@ -309,21 +301,13 @@ button.primary {
 }
 button.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
 
-/* Destructive actions are filled red with white on them, so what they are is
-   legible at a glance rather than on inspection — you should never have to
-   read "Remove" carefully to notice it is the dangerous one.
-   Red stays reserved for the things that actually destroy data: deleting
-   backups, erasing a drive, dropping a destination. Spending it on anything
-   milder is what would make it stop meaning anything. */
-button.danger {
-  background: var(--danger-face);
-  border-color: var(--danger-edge);
-  color: var(--danger-ink);
-}
-button.danger:hover {
-  background: var(--danger-face-hi);
-  border-color: var(--danger-face-hi);
-}
+/* .danger carries no colour of its own: Stop and Remove are drawn exactly like
+   Edit, on the same slate face.
+   The class is kept because it still says what these actions ARE — the markup
+   should not have to be rewritten to change how they look, and what stops a
+   destructive action being taken by accident is not its colour. Every one of
+   them is confirmed first, and the single action that deletes backups on
+   purpose needs the folder's name typed back before it will run. */
 
 /* For taking a choice back — going back a step, undoing, closing. Subordinate
    to the action beside it, but STILL PLAINLY A BUTTON: outlined rather than
