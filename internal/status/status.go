@@ -249,6 +249,33 @@ type ArchiveRow struct {
 	// Keep is how many snapshots are retained, so the panel can offer to
 	// change it rather than sending somebody to config.toml.
 	Keep int `json:"keep,omitempty"`
+	// Progress of the run happening right now, in SOURCE bytes and files.
+	// All zero when nothing is running.
+	//
+	// A snapshot of a real folder takes tens of minutes, and the row said only
+	// "running" for the whole of it — the same word at one minute and at
+	// twenty-nine, with nothing to say whether it was nearly done or barely
+	// started. Source bytes rather than bytes landed on the destination: the
+	// zip is compressed by an unknown and wildly varying ratio, so a bar
+	// measured against the output would fill early and stop.
+	DoneFiles  int   `json:"done_files,omitempty"`
+	TotalFiles int   `json:"total_files,omitempty"`
+	DoneBytes  int64 `json:"done_bytes,omitempty"`
+	TotalBytes int64 `json:"total_bytes,omitempty"`
+}
+
+// Completion is how much of the running snapshot has been packed, by bytes.
+// -1 when nothing is running or no total is known yet, which the dashboard
+// draws as an indeterminate bar rather than as zero progress.
+func (a ArchiveRow) Completion() float64 {
+	if a.TotalBytes <= 0 {
+		return -1
+	}
+	pct := float64(a.DoneBytes) / float64(a.TotalBytes) * 100
+	if pct > 100 {
+		return 100
+	}
+	return pct
 }
 
 // FolderInfo is one protected folder, for the dashboard's folder panel.
@@ -441,6 +468,9 @@ type Collector struct {
 	// from one that has never started — the panel said "never run" for two
 	// hours while it was running.
 	ArchiveRunning func() map[string]time.Time
+	// ArchiveProgress reports how far each running snapshot has got, keyed by
+	// job name. nil (not wired) simply leaves the bar indeterminate.
+	ArchiveProgress func() map[string]archive.Progress
 	// HasArchivePassword reports whether a job's zip password is stored. nil
 	// (not wired) means "assume yes" — only the daemon knows the state.
 	HasArchivePassword func(name string) bool
@@ -864,8 +894,16 @@ func (col *Collector) Collect() Model {
 		for _, r := range results {
 			resultByName[r.ArchiveName] = r
 		}
+		var progress map[string]archive.Progress
+		if col.ArchiveProgress != nil {
+			progress = col.ArchiveProgress()
+		}
 		for _, job := range cfg.Archives {
 			row := ArchiveRow{Name: job.Name, Target: job.Target, Every: job.Every}
+			if p, ok := progress[job.Name]; ok {
+				row.DoneFiles, row.TotalFiles = p.DoneFiles, p.TotalFiles
+				row.DoneBytes, row.TotalBytes = p.DoneBytes, p.TotalBytes
+			}
 			// Resolved through the same choke point the snapshot writer uses,
 			// so what the panel says a job covers and what it actually seals
 			// up cannot drift apart.

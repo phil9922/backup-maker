@@ -840,6 +840,7 @@ function renderArchives(st) {
       state.appendChild(btn);
     }
     tr.appendChild(state);
+    tr.appendChild(archiveProgressCell(a));
     tr.appendChild(el('td', undefined, humanTime(a.last_run)));
 
     // Pause, edit, stop. Without these the only way to change a schedule was
@@ -878,6 +879,48 @@ function renderArchives(st) {
     if (a.detail) tr.title = a.detail;
     body.appendChild(tr);
   }
+}
+
+// How far the running snapshot has got, drawn the way a mirror row draws it.
+//
+// A snapshot of a real folder takes tens of minutes, and this row said only
+// "running" for the whole of it — the same word at one minute and at
+// twenty-nine. Bytes are SOURCE bytes: the zip is compressed by a ratio nobody
+// knows in advance, so a bar measured against the file landing on the
+// destination would fill early and then sit still.
+function archiveProgressCell(a) {
+  const cell = el('td', 'progress-cell');
+  const running = a.total_bytes > 0 || a.state === 'running' || a.state === 'preparing';
+  if (!running) {
+    // Not a bar at 0%: an idle schedule is not a stalled one.
+    cell.appendChild(el('span', 'muted', '—'));
+    return cell;
+  }
+  const wrap = el('div', 'progress-wrap');
+  const bar = el('div', 'bar');
+  const fill = el('div', 'bar-fill busy');
+  const pct = a.total_bytes > 0
+    ? Math.max(0, Math.min(100, ((a.done_bytes || 0) / a.total_bytes) * 100))
+    : 0;
+  // Before the pre-pass finishes there is no denominator, and stripes say
+  // "working" without inventing one.
+  if (a.total_bytes > 0) {
+    fill.style.width = pct + '%';
+  } else {
+    fill.classList.add('indeterminate');
+    fill.style.width = '100%';
+  }
+  bar.appendChild(fill);
+  const label = el('span', 'bar-label');
+  setText(label, a.total_bytes > 0
+    ? `${humanBytes(a.done_bytes || 0)} of ${humanBytes(a.total_bytes)}`
+    : 'counting…');
+  wrap.append(bar, label);
+  cell.appendChild(wrap);
+  if (a.total_files > 0) {
+    cell.title = `${(a.done_files || 0).toLocaleString()} of ${a.total_files.toLocaleString()} files`;
+  }
+  return cell;
 }
 
 async function enterArchivePassword(a) {

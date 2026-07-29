@@ -52,7 +52,12 @@ type Result struct {
 // The password is mandatory: this function refuses to write an unprotected
 // archive. Every entry is re-read from the target and decrypted afterwards
 // to verify the archive is actually restorable.
-func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password string, log *slog.Logger) (res Result) {
+//
+// report, if non-nil, is called as the snapshot is packed — first with the
+// totals from the pre-pass, then once per file. It is what lets the dashboard
+// draw a real bar for a job that takes half an hour rather than a word that
+// does not change.
+func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password string, log *slog.Logger, report func(Progress)) (res Result) {
 	res = Result{ArchiveName: job.Name, When: time.Now()}
 	fail := func(err error) Result {
 		res.Err = err.Error()
@@ -83,7 +88,7 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 	// Counted on the way out rather than stat'ed afterwards: it is exact, and
 	// it costs nothing extra on a destination reached over SMB.
 	stored := &countingWriter{w: w}
-	files, bytes, err := writeZip(stored, cfg, job, folders, password)
+	files, bytes, err := writeZip(stored, cfg, job, folders, password, report)
 	if cerr := w.Close(); err == nil {
 		err = cerr
 	}
@@ -127,9 +132,29 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// writeZip streams every selected folder into an AES-256 encrypted zip.
-func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []config.Folder, password string) (files int, total int64, err error) {
-	zw := zip.NewWriter(w)
+// Progress reports how far a snapshot has got. Total is what the pre-pass
+// counted; Done rises as entries are packed.
+//
+// Bytes are SOURCE bytes, not bytes on the destination: the zip is compressed,
+// so measuring the output against a source total would draw a bar that reached
+// the end early and stopped. Compression ratio is not known in advance and
+// varies wildly across one folder — 2.7GB of images beside 1.4GB of source —
+// so the honest denominator is the one thing known before any work starts.
+type Progress struct {
+	DoneFiles  int
+	TotalFiles int
+	DoneBytes  int64
+	TotalBytes int64
+}
+
+// eachFile calls fn for every file a snapshot of these folders would contain.
+//
+// THE PRE-PASS AND THE PACK SHARE THIS, and that is the whole point: a total
+// counted by any other walk is a different question being answered, and the bar
+// would fill against a denominator that does not match the work. One place
+// decides what is in a snapshot.
+func eachFile(cfg *config.Config, job config.Archive, folders []config.Folder,
+	fn func(f config.Folder, absPath, rel string, d fs.DirEntry) error) error {
 	for _, f := range folders {
 		// A snapshot may deliberately keep what the mirror drops: the folder's
 		// exclude list is shared with the live mirror, so without this a
@@ -149,7 +174,6 @@ func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []con
 		root := f.Path
 		matcher := localmirror.NewMatcherFor(root, append(pats, ".stfolder", ".stignore", ".stversions"))
 
-		label := sanitize(f.Label)
 		werr := filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return nil // skip unreadable entries; archive what we can
@@ -168,27 +192,66 @@ func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []con
 			if d.IsDir() || !d.Type().IsRegular() {
 				return nil
 			}
-			src, oerr := os.Open(p)
-			if oerr != nil {
-				return nil
-			}
-			defer src.Close()
-			entry, zerr := zw.Encrypt(label+"/"+rel, password, zip.AES256Encryption)
-			if zerr != nil {
-				return zerr
-			}
-			n, cerr := io.Copy(entry, src)
-			if cerr != nil {
-				return cerr
-			}
-			files++
-			total += n
-			return nil
+			return fn(f, p, rel, d)
 		})
 		if werr != nil {
-			zw.Close()
-			return files, total, werr
+			return werr
 		}
+	}
+	return nil
+}
+
+// measure counts what the snapshot will contain, so the bar has a real
+// denominator. One local walk with no reads — cheap beside compressing the
+// same files, and the only way to say "1.2GB of 4.1GB" rather than a spinner.
+func measure(cfg *config.Config, job config.Archive, folders []config.Folder) (files int, bytes int64) {
+	_ = eachFile(cfg, job, folders, func(_ config.Folder, _, _ string, d fs.DirEntry) error {
+		info, err := d.Info()
+		if err != nil {
+			return nil // unreadable now, skipped by the pack too
+		}
+		files++
+		bytes += info.Size()
+		return nil
+	})
+	return files, bytes
+}
+
+// writeZip streams every selected folder into an AES-256 encrypted zip.
+func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []config.Folder, password string, report func(Progress)) (files int, total int64, err error) {
+	zw := zip.NewWriter(w)
+	prog := Progress{}
+	if report != nil {
+		prog.TotalFiles, prog.TotalBytes = measure(cfg, job, folders)
+		report(prog)
+	}
+	werr := eachFile(cfg, job, folders, func(f config.Folder, p, rel string, _ fs.DirEntry) error {
+		src, oerr := os.Open(p)
+		if oerr != nil {
+			return nil
+		}
+		defer src.Close()
+		entry, zerr := zw.Encrypt(sanitize(f.Label)+"/"+rel, password, zip.AES256Encryption)
+		if zerr != nil {
+			return zerr
+		}
+		n, cerr := io.Copy(entry, src)
+		if cerr != nil {
+			return cerr
+		}
+		files++
+		total += n
+		if report != nil {
+			// Reported per file rather than per chunk: a snapshot is tens of
+			// thousands of small files, and the dashboard polls once a second.
+			prog.DoneFiles, prog.DoneBytes = files, total
+			report(prog)
+		}
+		return nil
+	})
+	if werr != nil {
+		zw.Close()
+		return files, total, werr
 	}
 	return files, total, zw.Close()
 }

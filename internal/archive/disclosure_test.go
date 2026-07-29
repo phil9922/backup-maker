@@ -30,7 +30,7 @@ import (
 func TestASnapshotHidesItsContentsButNotItsFileNames(t *testing.T) {
 	cfg, job, b, dst := testSetup(t)
 
-	res := Run(b, cfg, job, "correct-horse-battery-staple", slog.New(slog.DiscardHandler))
+	res := Run(b, cfg, job, "correct-horse-battery-staple", slog.New(slog.DiscardHandler), nil)
 	if res.Err != "" {
 		t.Fatalf("run failed: %s", res.Err)
 	}

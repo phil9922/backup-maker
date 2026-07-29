@@ -366,6 +366,10 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
 .progress-cell .progress-wrap { display: flex; align-items: center; gap: var(--s3); }
 .progress-cell .bar { flex: 1 1 auto; }
 .bar-label { flex: 0 0 5.5rem; text-align: right; }
+/* The snapshot bar says "1.2GB of 4.1GB", which needs more room than a
+   percentage. Scoped to that table so the mirror's column keeps its width and
+   its figures keep lining up down the page. */
+#archive-rows .bar-label { flex: 0 0 9.5rem; }
 .bar {
   background: #1a212b; border-radius: 999px; height: 6px;
   overflow: hidden; min-width: 6rem;

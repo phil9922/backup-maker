@@ -85,7 +85,7 @@ func TestSnapshotNeverIncludesTheConfigDir(t *testing.T) {
 	cfg, job, b, dst := snapshotWithConfigDirInside(t)
 	job.NoDefaultIgnores = true
 
-	res := Run(b, cfg, job, "hunter2", slog.New(slog.DiscardHandler))
+	res := Run(b, cfg, job, "hunter2", slog.New(slog.DiscardHandler), nil)
 	if res.Err != "" {
 		t.Fatalf("run failed: %s", res.Err)
 	}

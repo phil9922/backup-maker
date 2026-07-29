@@ -79,6 +79,38 @@ func (d *daemon) archiveRunningSnapshot() map[string]time.Time {
 	return out
 }
 
+// noteArchiveProgress records how far a running snapshot has got.
+//
+// Kept in memory only, and dropped the moment the run ends: it describes work
+// in flight, and a figure left behind by a finished run would be a bar frozen
+// at whatever it happened to reach. Nothing here writes to disk — the callback
+// fires once per file, and a snapshot is tens of thousands of them.
+func (d *daemon) noteArchiveProgress(name string, p archive.Progress) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.archiveProgress == nil {
+		d.archiveProgress = map[string]archive.Progress{}
+	}
+	d.archiveProgress[name] = p
+}
+
+func (d *daemon) clearArchiveProgress(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.archiveProgress, name)
+}
+
+// archiveProgressSnapshot is the collector the status model reads.
+func (d *daemon) archiveProgressSnapshot() map[string]archive.Progress {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make(map[string]archive.Progress, len(d.archiveProgress))
+	for k, v := range d.archiveProgress {
+		out[k] = v
+	}
+	return out
+}
+
 // runArchive executes one job against its target and records the result.
 func (d *daemon) runArchive(cfg *config.Config, job config.Archive) {
 	var target *config.Target
@@ -132,7 +164,10 @@ func (d *daemon) runArchive(cfg *config.Config, job config.Archive) {
 		return
 	}
 
-	res = archive.Run(backend, cfg, job, password, d.log)
+	res = archive.Run(backend, cfg, job, password, d.log, func(p archive.Progress) {
+		d.noteArchiveProgress(job.Name, p)
+	})
+	d.clearArchiveProgress(job.Name)
 	d.recordArchiveResult(res, res.Err == "")
 }
 

@@ -53,6 +53,12 @@ type daemon struct {
 	// multi-gigabyte zip from one that has never started.
 	archiveRunning map[string]time.Time
 
+	// archiveProgress is how far each running snapshot has got, keyed by job
+	// name and guarded by mu. Memory only, and removed when the run ends: it
+	// describes work in flight, and a figure left behind by a finished job
+	// would be a bar stopped wherever it happened to reach.
+	archiveProgress map[string]archive.Progress
+
 	// tally is the lifetime "how much have you backed up for me" odometer.
 	// Written by every mirror engine and by the snapshot writer, persisted in
 	// batches rather than per file. Safe for concurrent use.
@@ -301,6 +307,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		Engines:            d.currentEngines,
 		Archives:           d.archiveStatus,
 		ArchiveRunning:     d.archiveRunningSnapshot,
+		ArchiveProgress:    d.archiveProgressSnapshot,
 		HasArchivePassword: d.hasArchivePassword,
 		SetupDone:          d.setupDone,
 		Space:              d.spaceSamples,

@@ -38,7 +38,7 @@ func TestRunRoundTrip(t *testing.T) {
 	cfg, job, b, dst := testSetup(t)
 	log := slog.New(slog.DiscardHandler)
 
-	res := Run(b, cfg, job, "hunter2", log)
+	res := Run(b, cfg, job, "hunter2", log, nil)
 	if res.Err != "" {
 		t.Fatalf("run failed: %s", res.Err)
 	}
@@ -89,7 +89,7 @@ func TestRunRoundTrip(t *testing.T) {
 
 func TestRunRequiresPassword(t *testing.T) {
 	cfg, job, b, _ := testSetup(t)
-	res := Run(b, cfg, job, "", slog.New(slog.DiscardHandler))
+	res := Run(b, cfg, job, "", slog.New(slog.DiscardHandler), nil)
 	if res.Err == "" {
 		t.Fatal("expected refusal without a password")
 	}
@@ -105,7 +105,7 @@ func TestRetention(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "testjob-20200101-000000.zip"), []byte("old"), 0o644)
 	os.WriteFile(filepath.Join(dir, "testjob-20200102-000000.zip"), []byte("old"), 0o644)
 
-	res := Run(b, cfg, job, "pw", log)
+	res := Run(b, cfg, job, "pw", log, nil)
 	if res.Err != "" {
 		t.Fatal(res.Err)
 	}
@@ -131,7 +131,7 @@ func TestIncludeEverythingSealsIgnoredFiles(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
 
 	// Default: node_modules is skipped, matching the mirror.
-	lean := Run(b, cfg, job, "pw", log)
+	lean := Run(b, cfg, job, "pw", log, nil)
 	if lean.Err != "" {
 		t.Fatalf("lean run failed: %s", lean.Err)
 	}
@@ -142,7 +142,7 @@ func TestIncludeEverythingSealsIgnoredFiles(t *testing.T) {
 	// Opted in: the junk is sealed too.
 	job.Name = "fatjob"
 	job.NoDefaultIgnores = true
-	fat := Run(b, cfg, job, "pw", log)
+	fat := Run(b, cfg, job, "pw", log, nil)
 	if fat.Err != "" {
 		t.Fatalf("fat run failed: %s", fat.Err)
 	}
@@ -157,7 +157,7 @@ func TestArchiveExtraIgnoreAppliesToSnapshotOnly(t *testing.T) {
 	cfg, job, b, _ := testSetup(t)
 	job.ExtraIgnore = []string{"sub"}
 
-	res := Run(b, cfg, job, "pw", slog.New(slog.DiscardHandler))
+	res := Run(b, cfg, job, "pw", slog.New(slog.DiscardHandler), nil)
 	if res.Err != "" {
 		t.Fatalf("run failed: %s", res.Err)
 	}
@@ -176,7 +176,7 @@ func TestArchiveExtraIgnoreAppliesToSnapshotOnly(t *testing.T) {
 func TestRunReportsWhatLandedOnTheDestination(t *testing.T) {
 	cfg, job, b, dst := testSetup(t)
 
-	res := Run(b, cfg, job, "hunter2", slog.New(slog.DiscardHandler))
+	res := Run(b, cfg, job, "hunter2", slog.New(slog.DiscardHandler), nil)
 	if res.Err != "" {
 		t.Fatalf("run failed: %s", res.Err)
 	}
@@ -196,7 +196,7 @@ func TestRunReportsWhatLandedOnTheDestination(t *testing.T) {
 	}
 
 	// A failed run leaves nothing behind, so it must claim nothing.
-	failed := Run(b, cfg, job, "", slog.New(slog.DiscardHandler))
+	failed := Run(b, cfg, job, "", slog.New(slog.DiscardHandler), nil)
 	if failed.Err == "" {
 		t.Fatal("an archive with no password was written anyway")
 	}
