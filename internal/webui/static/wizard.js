@@ -86,7 +86,7 @@ const Wizard = (() => {
     if (inc) inc.checked = true;
     rebuildOrder();
     $("wiz-error").hidden = true;
-    $("pick-chosen").hidden = true;
+    renderChosenFolder(); // clears the line left by a previous run
     $("dest-count").hidden = true;
     // A previous run may have ended on the waiting-to-pair panel, which
     // replaces the steps rather than being one of them.
@@ -217,17 +217,41 @@ const Wizard = (() => {
 
   // Offer folders already under protection, so a second kind of backup can be
   // attached to one instead of failing on the duplicate-path guard.
+  //
+  // SPLIT BY WHETHER ANYTHING ACTUALLY BACKS THE FOLDER UP. Being listed here
+  // is not the same as being protected: a folder set up for timed snapshots
+  // only is kept out of every unscoped destination, so once its last schedule
+  // is deleted nothing copies it at all — while the folder record correctly
+  // stays, because deleting a schedule must never delete anything else. This
+  // list used to show every recorded folder under one heading, so such a folder
+  // was offered as one "you're already protecting", inviting a second kind of
+  // backup to be added to a first one that did not exist.
+  //
+  // `f.protected !== false` rather than `f.protected`: an older daemon that
+  // does not send the field must keep the previous behaviour, not sweep every
+  // folder into the unprotected group.
   function renderExistingFolders() {
-    const box = $("existing-folders");
-    const list = $("existing-folder-list");
     const folders = (model && model.folders) || [];
+    const covered = folders.filter((f) => f.protected !== false);
+    const bare = folders.filter((f) => f.protected === false);
+
+    fillFolderList("existing-folders", "existing-folder-list", covered,
+      "Add a backup for this");
+    fillFolderList("unprotected-folders", "unprotected-folder-list", bare,
+      "Set up a backup for this");
+    $("existing-folders-more").hidden = folders.length === 0;
+  }
+
+  function fillFolderList(boxID, listID, folders, buttonText) {
+    const box = $(boxID);
+    const list = $(listID);
     box.hidden = folders.length === 0;
     list.replaceChildren();
     for (const f of folders) {
       const li = mk("li", "card");
       li.appendChild(mk("strong", null, f.label));
       li.appendChild(mk("span", "muted mono", f.path));
-      const btn = mk("button", null, "Add a backup for this");
+      const btn = mk("button", null, buttonText);
       btn.onclick = () => chooseFolder(f.path, f.id);
       li.appendChild(btn);
       list.appendChild(li);
@@ -237,9 +261,38 @@ const Wizard = (() => {
   function chooseFolder(path, folderID) {
     chosenFolderID = folderID || "";
     chosenFolder = path;
+    renderChosenFolder();
+  }
+
+  // Picking a folder has to be undoable. Choosing one used to write a line of
+  // text and nothing else: no way to clear it, and no sign that picking a
+  // different folder would replace it — so a wrong choice looked permanent, on
+  // the one step where being wrong matters most. Every other choice in this
+  // wizard can be taken back; this one now can too.
+  function clearChosenFolder() {
+    chosenFolder = "";
+    chosenFolderID = "";
+    renderChosenFolder();
+  }
+
+  function renderChosenFolder() {
     const p = $('pick-chosen');
+    p.replaceChildren();
+    if (!chosenFolder) {
+      p.hidden = true;
+      return;
+    }
     p.hidden = false;
-    p.textContent = (chosenFolderID ? 'Adding a backup for: ' : 'Protecting: ') + path;
+    p.appendChild(mk('span', null,
+      (chosenFolderID ? 'Adding a backup for: ' : 'Protecting: ') + chosenFolder));
+    // "Deselect", quiet rather than red: it undoes a selection and destroys
+    // nothing — nothing has even been saved yet. Red is what this dashboard
+    // uses for deleting backups and erasing a drive, and it only keeps that
+    // meaning if it is not also worn by un-picking a folder.
+    const undo = mk('button', 'small-btn quiet', 'Deselect');
+    undo.title = 'Deselect this folder and pick a different one. Nothing on disk is touched.';
+    undo.onclick = clearChosenFolder;
+    p.appendChild(undo);
   }
 
   // --- step 2: machines and their storage -------------------------------
@@ -303,18 +356,253 @@ const Wizard = (() => {
     const items = await resp.json();
     body.dataset.loaded = '1';
     body.replaceChildren();
-    if (!items || items.length === 0) {
+
+    // Storage that cannot be used YET is still storage that is there. Telling
+    // somebody who has just plugged a drive in that nothing is plugged in is
+    // the worst answer available, and it was the one this page used to give.
+    const stuck = m.kind === 'this' ? await loadUnusable() : { drives: [] };
+
+    if ((!items || items.length === 0) && !stuck.drives.length) {
       body.appendChild(mk('p', 'muted', m.kind === 'this'
-        ? 'No removable drives are plugged in right now.'
+        ? 'No drives are plugged into this computer right now.'
         : 'No storage offered by this computer.'));
     }
     for (const s of items || []) body.appendChild(storageRow(m, s, user, pass));
+    for (const u of stuck.drives) body.appendChild(unusableRow(u, stuck, m, body));
+    if (m.kind !== 'this') body.appendChild(machineWithoutBackupMaker(m));
 
     // Detected drives are a shortcut, not the whole story: a second internal
     // disk, or any folder at all, is a perfectly good destination. Without
     // this, a machine with nothing removable plugged in would offer no local
     // option whatsoever.
     if (m.kind === 'this') body.appendChild(localFolderPicker());
+  }
+
+  // --- drives that are there but not usable yet -------------------------
+
+  async function loadUnusable() {
+    const empty = { drives: [], can_prepare: false, command_prefix: '', allow_command: '' };
+    try {
+      const resp = await fetch('/api/drives/unusable');
+      if (!resp.ok) return empty;
+      const data = await resp.json();
+      return { ...empty, ...data, drives: data.drives || [] };
+    } catch {
+      return empty;
+    }
+  }
+
+  // One drive that is attached but cannot hold backups, shown alongside the
+  // ones that can — dimmed, unselectable, and with the reason in words.
+  function unusableRow(u, ctx, m, body) {
+    const wrap = mk('div', 'storage-choice unusable');
+    const row = mk('div', 'storage');
+    const cb = mk('input');
+    cb.type = 'checkbox';
+    cb.disabled = true;
+    cb.title = 'This drive cannot be used yet';
+    row.append(cb, mk('strong', null, u.name), mk('span', 'muted mono', u.device || u.path));
+    const size = [u.size ? fmtBytes(u.size) : '', u.bus ? u.bus.toUpperCase() : ''].filter(Boolean).join(', ');
+    if (size) row.appendChild(mk('span', 'muted', size));
+    wrap.append(row, mk('p', 'muted small', u.detail));
+
+    // Only a whole disk can be prepared. A directory with nothing mounted on
+    // it is a different problem with a different fix, and offering to format
+    // something in that state would be offering to format the system disk.
+    if (u.device && u.confirm) wrap.appendChild(preparePanel(u, ctx, m, body));
+    return wrap;
+  }
+
+  // The panel that erases a drive. Modelled on deleting backups: it says
+  // exactly what is destroyed, it shows the command it will run, and it will
+  // not act until the drive's own phrase has been typed back.
+  function preparePanel(u, ctx, m, body) {
+    const det = mk('details', 'prepare');
+    det.appendChild(mk('summary', null, 'Set this drive up…'));
+
+    det.appendChild(mk('p', 'warn',
+      `This ERASES ${u.name} completely. Everything on it is gone, and it cannot be undone. ` +
+      `Only do this to a drive whose contents you do not want — a new drive, or one you have already copied off.`));
+
+    const mount = mk('input');
+    mount.value = '/mnt/backups';
+    mount.autocomplete = 'off';
+    const label = mk('input');
+    label.value = 'BACKUPS';
+    label.autocomplete = 'off';
+    det.append(
+      labelled('Mount it at', mount, 'Where the drive appears on this computer. It is remembered by the drive\'s own ID, so it lands here after every reboot.'),
+      labelled('Call the drive', label, 'A name for the filesystem. Cosmetic.'));
+
+    // The typed confirmation belongs to the button. When the command has to be
+    // pasted into a terminal instead, the phrase is already in it, and a box
+    // that does nothing is one more thing to wonder about.
+    const typed = mk('input');
+    typed.autocomplete = 'off';
+    typed.placeholder = u.confirm;
+    if (ctx.can_prepare) {
+      det.appendChild(labelled(`Type ${u.confirm} to confirm`, typed,
+        'The size is the check: if it does not match the drive you meant, this is the wrong drive.'));
+    }
+
+    // The command is shown whether or not the button will work, so nothing
+    // happens as root that was not visible first — and so there is something
+    // to paste when the button is not available.
+    const cmd = mk('pre', 'cmd');
+    const refresh = () => {
+      cmd.textContent = `${ctx.command_prefix || 'sudo backup-maker prepare-drive'} \\\n` +
+        `  --device ${u.device} \\\n  --mount ${mount.value.trim() || '/mnt/backups'} \\\n` +
+        `  --label ${label.value.trim() || 'BACKUPS'} \\\n  --confirm "${u.confirm}"`;
+    };
+    mount.oninput = refresh;
+    label.oninput = refresh;
+    refresh();
+
+    const status = mk('p', 'muted small');
+    if (ctx.can_prepare) {
+      const go = mk('button', 'danger', 'Erase and set up this drive');
+      go.onclick = async () => {
+        if (typed.value.trim() !== u.confirm) {
+          status.textContent = `Nothing was changed: type ${u.confirm} to confirm.`;
+          return;
+        }
+        go.disabled = true;
+        status.textContent = 'Setting up the drive. This takes a few seconds…';
+        const resp = await mutate('/api/drives/prepare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            device: u.device,
+            mount: mount.value.trim() || '/mnt/backups',
+            label: label.value.trim() || 'BACKUPS',
+            confirm: typed.value.trim(),
+          }),
+        });
+        if (!resp.ok) {
+          go.disabled = false;
+          status.textContent = await resp.text();
+          return;
+        }
+        status.textContent = 'Done. The drive is ready — reloading the list…';
+        body.dataset.loaded = '';
+        await loadStorage(m, body, '', '');
+      };
+      det.append(mk('p', 'muted small', 'This will run, as an administrator:'), cmd, go, status);
+    } else {
+      det.append(
+        mk('p', 'muted small',
+          'This computer has not been set up to let the dashboard format a drive, so run this yourself in a terminal on this computer:'),
+        cmd, copyButton(cmd),
+        mk('p', 'muted small',
+          'Or, to do it from this page instead — now and in future — run the line below once, read what it says, and reload this page:'),
+        cmdBlock(ctx.allow_command));
+    }
+    return det;
+  }
+
+  function labelled(text, input, help) {
+    const wrap = mk('div', 'field');
+    const lab = mk('label', null, text);
+    lab.appendChild(input);
+    wrap.appendChild(lab);
+    if (help) wrap.appendChild(mk('p', 'muted small', help));
+    return wrap;
+  }
+
+  function cmdBlock(text) {
+    const pre = mk('pre', 'cmd', text);
+    const wrap = mk('div');
+    wrap.append(pre, copyButton(pre));
+    return wrap;
+  }
+
+  function copyButton(pre) {
+    const b = mk('button', 'copy', 'Copy');
+    b.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(pre.textContent);
+        b.textContent = 'Copied';
+        setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+      } catch {
+        // Clipboard access can be refused; selecting the text still works.
+        b.textContent = 'Select it and copy';
+      }
+    };
+    return b;
+  }
+
+  // --- a computer that is not running backup-maker -----------------------
+
+  // What this page can honestly say about a machine it can only reach as a
+  // file server: it cannot see inside, and a disk plugged into that computer
+  // has to be set up over there. No program can format a disk in a computer it
+  // is not running on, and pretending otherwise would be the one thing worse
+  // than saying so.
+  function machineWithoutBackupMaker(m) {
+    const wrap = mk('div', 'offbox');
+    wrap.appendChild(mk('p', 'muted small',
+      `backup-maker isn't running on ${m.name}, so it can only offer folders that computer already shares. ` +
+      `A disk you have just plugged into it won't appear here until it has been set up over there.`));
+    wrap.appendChild(mk('p', 'muted small',
+      'Expecting a bigger disk than the sizes above? A shared folder can sit on the computer\'s own system disk ' +
+      'rather than on the drive you meant — the size shown is the size of the disk it is really on.'));
+
+    const det = mk('details', 'recipe');
+    det.appendChild(mk('summary', 'muted', `Set up ${m.name} as a backup computer`));
+    const inner = mk('div');
+    det.appendChild(inner);
+    det.addEventListener('toggle', async () => {
+      if (!det.open || inner.dataset.loaded === '1') return;
+      inner.replaceChildren(mk('p', 'muted', 'Working out the commands…'));
+      const resp = await fetch('/api/machines/' + encodeURIComponent(m.id) + '/setup-recipe');
+      if (!resp.ok) { inner.replaceChildren(mk('p', 'muted', await resp.text())); return; }
+      inner.dataset.loaded = '1';
+      inner.replaceChildren(recipeChooser(await resp.json(), m));
+    });
+    wrap.appendChild(det);
+    return wrap;
+  }
+
+  function recipeChooser(data, m) {
+    const wrap = mk('div');
+    wrap.appendChild(mk('p', 'muted small',
+      `Run these in a terminal on ${data.machine || m.name} — not on this computer. ` +
+      `Which one depends on what kind of machine it is; this page has no way to tell, so pick it below.`));
+
+    const pick = mk('select');
+    for (const p of data.platforms || []) {
+      const o = mk('option', null, p.label);
+      o.value = p.id;
+      pick.appendChild(o);
+    }
+    const pre = mk('pre', 'cmd');
+    const note = mk('p', 'muted small');
+    const show = () => {
+      const p = (data.platforms || []).find(x => x.id === pick.value) || (data.platforms || [])[0];
+      if (!p) return;
+      pre.textContent = p.commands.join('\n');
+      note.textContent = p.note || '';
+    };
+    pick.onchange = show;
+    show();
+
+    // Deliberately a button, not a timer. This program never scans the network
+    // unless asked — see the comment on POST /api/scan — and a page quietly
+    // sweeping the LAN every few seconds would break that promise to make a
+    // spinner look busy.
+    const again = mk('button', null, 'Check for it again');
+    const status = mk('p', 'muted small');
+    again.onclick = async () => {
+      status.textContent = 'Looking…';
+      await loadMachines(true);
+      status.textContent = `If ${data.machine || m.name} is now running backup-maker, it appears above as a computer you can pair with.`;
+    };
+
+    wrap.append(labelled('What kind of computer is it?', pick), pre, copyButton(pre), note,
+      mk('p', 'muted small',
+        'Once it is running, that computer gets a dashboard of its own — open it there to set up the drive plugged into it.'),
+      again, status);
+    return wrap;
   }
 
   // A compact directory picker for choosing any folder on this computer as a

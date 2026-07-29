@@ -56,19 +56,31 @@ var statusCmd = &cobra.Command{
 			fmt.Println("  backup-maker add-target drive <mount>   # a local SD/USB/disk")
 			fmt.Println("  backup-maker add-target device <id>     # another machine on your LAN")
 		} else {
-			tw := newTable("FOLDER", "TARGET", "STATE", "PENDING", "LAST SEEN/SYNC")
+			tw := newTable("FOLDER", "TARGET", "STATE", "PROGRESS", "LAST SEEN/SYNC")
 			for _, r := range m.Rows {
-				pending := "-"
-				if r.NeedItems > 0 {
-					pending = fmt.Sprintf("%d (%s)", r.NeedItems, humanBytes(r.NeedBytes))
-				}
 				mark := ""
 				if r.Stale {
 					mark = "  !!"
 				}
-				tw.add(r.FolderLabel, r.TargetName, r.State+mark, pending, humanTime(r.LastSeen))
+				tw.add(r.FolderLabel, r.TargetName, rowState(r)+mark, rowProgress(r), rowLastSeen(r))
 			}
 			tw.print()
+		}
+
+		// A folder nothing backs up has no target, so it produces no row above
+		// and no schedule below — it is absent from every table on this page.
+		// That is precisely how one stayed unnoticed, so it gets said in words.
+		for _, f := range m.Folders {
+			// nil means the running daemon predates this field and has not
+			// answered — not that the folder is unprotected. Warning on silence
+			// would flag every folder on the machine during an upgrade.
+			if f.Protected == nil || *f.Protected {
+				continue
+			}
+			fmt.Printf("\n!! %s is not backed up by anything.\n", f.Label)
+			fmt.Printf("   %s is still listed here, but no destination mirrors it and no schedule snapshots it.\n", f.Path)
+			fmt.Println("   Give it a backup with:  backup-maker wizard")
+			fmt.Printf("   Or stop listing it in the dashboard's \"Not backed up by anything\" section.\n")
 		}
 
 		if len(m.Archives) > 0 {
@@ -193,6 +205,89 @@ func humanBytes(n int64) string {
 	default:
 		return fmt.Sprintf("%dB", n)
 	}
+}
+
+// rowState answers the only question this column is ever read for: are the
+// files safe.
+//
+// "scanning" and "syncing" answer a different one — what the program is doing —
+// and a destination holding a complete copy showed "scanning" for minutes at a
+// stretch, leaving the honest reading as "I cannot tell whether I have a
+// backup". That is the worst sentence a backup tool can produce, and it was
+// producing it while everything was fine. The activity moved to the PROGRESS
+// column, where it belongs.
+func rowState(r status.Row) string {
+	switch r.State {
+	case "scanning", "syncing":
+		if r.FirstBackup {
+			return "first backup"
+		}
+		return "backed up"
+	case "in sync":
+		return "backed up"
+	}
+	return r.State
+}
+
+// rowProgress says what a destination is doing right now, in the unit that
+// matters for the phase it is in.
+//
+// The column used to print "-" for everything that was not mid-transfer, which
+// includes the whole scanning phase — the part that takes the minutes on a
+// network share. Between that and "never" in the next column, a destination
+// steadily working through 70,000 files displayed as three dashes and a word.
+func rowProgress(r status.Row) string {
+	if r.State == "scanning" {
+		// One sentence for the whole scan, because from outside it is one
+		// activity: looking for what changed. The stage only decides which
+		// counter is honest to show against it.
+		what := "checking for changes"
+		if r.FirstBackup {
+			what = "working out what to copy"
+		}
+		if r.Phase == "source" && r.ScannedFiles == 0 {
+			return what
+		}
+		if r.ScanTotal > 0 {
+			return fmt.Sprintf("%s: %s of %s", what, humanCount(r.ScannedFiles), humanCount(r.ScanTotal))
+		}
+		if r.ScannedFiles > 0 {
+			return fmt.Sprintf("%s: %s so far", what, humanCount(r.ScannedFiles))
+		}
+		return what
+	}
+	if r.NeedItems > 0 {
+		return fmt.Sprintf("%d left (%s)", r.NeedItems, humanBytes(r.NeedBytes))
+	}
+	return "-"
+}
+
+// rowLastSeen never says "never" about a destination that is working. A first
+// pass takes minutes, and until one completes there is no timestamp to print —
+// but "never" describes a destination nothing has been written to, which is a
+// different and much worse thing than one that has not finished yet.
+func rowLastSeen(r status.Row) string {
+	if r.FirstBackup {
+		return "first backup running"
+	}
+	return humanTime(r.LastSeen)
+}
+
+// humanCount groups thousands, because six digits of file count are unreadable
+// without it.
+func humanCount(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	if len(s) <= 3 {
+		return s
+	}
+	var b strings.Builder
+	for i, c := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
 }
 
 func humanTime(t time.Time) string {

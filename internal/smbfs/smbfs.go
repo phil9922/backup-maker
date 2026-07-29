@@ -325,6 +325,33 @@ func (f *FS) Chtimes(rel string, atime, mtime time.Time) error {
 	return f.opErr(sh.Chtimes(f.p(rel), atime, mtime))
 }
 
+// ReadDir lists one directory, with the size and mtime of every entry in it.
+//
+// Exposed separately from WalkDir so a caller can keep several listings in
+// flight at once. A listing is one round trip's worth of latency and returns a
+// whole directory, so on a tree of ~9,000 directories the walk is ~9,000 waits
+// that do not depend on each other — the single biggest remaining cost of a
+// pass over a share, and the one thing about it that parallelises for free.
+//
+// Read-only, and the caller is expected to fail its pass on any error rather
+// than treat a short listing as an empty directory.
+func (f *FS) ReadDir(p string) ([]fs.DirEntry, error) {
+	sh, cancel, err := f.connCtx()
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	base := f.p(p)
+	if base == "" {
+		base = "."
+	}
+	ents, err := fs.ReadDir(sh.DirFS(base), ".")
+	if err != nil {
+		return nil, f.opErr(err)
+	}
+	return ents, nil
+}
+
 func (f *FS) WalkDir(root string, fn fs.WalkDirFunc) error {
 	sh, err := f.conn()
 	if err != nil {

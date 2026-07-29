@@ -91,6 +91,7 @@ func RetireRecord(cfg *config.Config, f config.Folder, now time.Time) config.Ret
 		Label:            f.Label,
 		ExtraIgnore:      f.ExtraIgnore,
 		NoDefaultIgnores: f.NoDefaultIgnores,
+		SnapshotOnly:     f.SnapshotOnly,
 		StoppedAt:        now,
 		MachineName:      cfg.General.MachineName,
 	}

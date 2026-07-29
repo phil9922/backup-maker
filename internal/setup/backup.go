@@ -127,6 +127,18 @@ func CreateBackup(req BackupRequest) (config.Folder, []config.Target, error) {
 		}
 	}
 
+	// Which KIND of backup this is, recorded on the folder itself.
+	//
+	// The destination-side flag (ArchivesOnly, set by scopeFor below) only
+	// governs destinations created here. Every destination already configured
+	// with an empty folder list means "every folder", and would otherwise take
+	// a folder created for snapshots and start mirroring it as well — which is
+	// exactly how one request for a daily zip turned into a continuous copy on
+	// every drive. Adding an incremental backup clears the flag, because that
+	// is a person asking for the mirror this time.
+	setSnapshotOnly(cfg, folder.ID, req.Mode == ModeTimed)
+	folder.SnapshotOnly = req.Mode == ModeTimed
+
 	// Credentials discovered along the way; only persisted once everything
 	// validates.
 	pendingCreds := map[string]string{}
@@ -350,6 +362,20 @@ func attachFolder(t *config.Target, folderID string) {
 		}
 	}
 	t.Folders = append(t.Folders, folderID)
+}
+
+// setSnapshotOnly records on the folder itself whether it is here for
+// scheduled snapshots alone. Kept beside scopeFor because the two answer the
+// same question from the two ends — the folder's and the destination's — and
+// only having the destination's end is what let a timed backup start
+// mirroring.
+func setSnapshotOnly(cfg *config.Config, folderID string, timed bool) {
+	for i := range cfg.Folders {
+		if cfg.Folders[i].ID == folderID {
+			cfg.Folders[i].SnapshotOnly = timed
+			return
+		}
+	}
 }
 
 // scopeFor returns the mirror scope for a newly created destination. A timed

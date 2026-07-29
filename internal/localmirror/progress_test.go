@@ -270,3 +270,42 @@ func TestInFlightBytesAreNotCountedTwiceOnceAFileLands(t *testing.T) {
 		t.Errorf("progress reported %d bytes done, want 150 (one landed file plus half of the next)", got)
 	}
 }
+
+// THE GUARANTEE: a scan reports how far through it is, not just how far it has
+// come — a count with no denominator cannot say whether it is nearly done.
+//
+// The scan is where the minutes go on a network share: one round trip per file
+// to decide what needs copying, before a byte moves. A destination steadily
+// working through 70,000 files displayed a full bar, a dash and the word
+// "never", which reads as a destination nothing has ever been written to.
+func TestAScanReportsHowManyFilesItHasCheckedAndOutOfHowMany(t *testing.T) {
+	src := t.TempDir()
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := newTestEngine(t, src, NewLocalFS(t.TempDir()), 0)
+
+	if _, _, err := e.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := e.Status()
+	if st.ScanTotalFiles != 3 {
+		t.Errorf("ScanTotalFiles = %d, want 3 — the denominator is known once the source walk finishes", st.ScanTotalFiles)
+	}
+	if st.ScannedFiles != 3 {
+		t.Errorf("ScannedFiles = %d, want 3", st.ScannedFiles)
+	}
+}
+
+// Before the source walk finishes there is genuinely no denominator, and the
+// honest answer is to say so. Inventing one — the previous pass's count, say —
+// would draw a bar that jumps backwards when the real number arrives.
+func TestAScanClaimsNoDenominatorBeforeItKnowsOne(t *testing.T) {
+	e := &Engine{}
+	if st := e.Status(); st.ScanTotalFiles != 0 {
+		t.Errorf("ScanTotalFiles = %d before any scan, want 0", st.ScanTotalFiles)
+	}
+}

@@ -191,6 +191,17 @@ type Folder struct {
 	Label            string   `toml:"label"`
 	ExtraIgnore      []string `toml:"extra_ignore,omitempty"`
 	NoDefaultIgnores bool     `toml:"no_default_ignores,omitempty"`
+	// SnapshotOnly marks a folder that exists to be archived on a schedule
+	// and must never be picked up by a destination that mirrors "every
+	// folder".
+	//
+	// ArchivesOnly says the same thing from the destination's side, and on its
+	// own it was not enough: asking for a timed snapshot of a folder created
+	// one, and then every unscoped destination already configured claimed the
+	// new folder and began mirroring it too. Somebody who wanted one daily zip
+	// got a continuous second copy of the folder on every drive they own,
+	// without being asked and without being told.
+	SnapshotOnly bool `toml:"snapshot_only,omitempty"`
 }
 
 // Retired is a folder that has been stopped but whose backups are still out
@@ -215,12 +226,18 @@ type Retired struct {
 	// ID is the folder's ORIGINAL id, kept verbatim. A paired machine holds the
 	// folder under this id, so turning the folder back on with a fresh one
 	// would stand up a second copy over there and retransfer everything.
-	ID               string    `toml:"id"`
-	Path             string    `toml:"path"`
-	Label            string    `toml:"label"`
-	ExtraIgnore      []string  `toml:"extra_ignore,omitempty"`
-	NoDefaultIgnores bool      `toml:"no_default_ignores,omitempty"`
-	StoppedAt        time.Time `toml:"stopped_at,omitzero"`
+	ID               string   `toml:"id"`
+	Path             string   `toml:"path"`
+	Label            string   `toml:"label"`
+	ExtraIgnore      []string `toml:"extra_ignore,omitempty"`
+	NoDefaultIgnores bool     `toml:"no_default_ignores,omitempty"`
+	// SnapshotOnly is carried through a stop so turning the folder back on
+	// restores the KIND of backup it had. Without it, a folder that only ever
+	// had a scheduled snapshot comes back unmarked and every destination that
+	// mirrors "every folder" claims it — reintroducing, on the way back, the
+	// exact unasked-for mirror that Folder.SnapshotOnly exists to prevent.
+	SnapshotOnly bool      `toml:"snapshot_only,omitempty"`
+	StoppedAt    time.Time `toml:"stopped_at,omitzero"`
 	// MachineName as it was when the folder was stopped. The destination
 	// subtree is <machine>/<label>, and a machine can be renamed by a hand edit
 	// or by adopting — the name recorded here is the one the files are actually
@@ -649,8 +666,20 @@ func (c *Config) FoldersForTarget(t Target) []Folder {
 		return nil
 	}
 	if len(t.Folders) == 0 {
-		return c.Folders
+		// "Every folder" means every folder that asked to be mirrored. A
+		// folder set up for scheduled snapshots did not, and sweeping it in
+		// here is how a timed backup silently became a continuous one.
+		out := make([]Folder, 0, len(c.Folders))
+		for _, f := range c.Folders {
+			if !f.SnapshotOnly {
+				out = append(out, f)
+			}
+		}
+		return out
 	}
+	// A folder named explicitly is an instruction, and stays one: this is how
+	// a snapshot-only folder can still be given a mirror on a chosen
+	// destination without becoming everybody's business.
 	want := map[string]bool{}
 	for _, id := range t.Folders {
 		want[id] = true

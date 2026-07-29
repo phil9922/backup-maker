@@ -29,6 +29,9 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 	// already put our configuration directory here.
 	e.warnAboutCopiedConfig()
 
+	// No denominator for the source walk: counting the folder first, only to
+	// then walk it, would double its cost for a number nobody waits on.
+	e.beginScanPhase("source", 0)
 	err = filepath.WalkDir(e.sourcePath, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			e.addFileError(p, walkErr)
@@ -61,6 +64,7 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 			return nil
 		}
 		sourceFiles[rel] = info
+		e.scanned.Add(1)
 		return nil
 	})
 	if err != nil {
@@ -79,10 +83,23 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 	// way — it is not a second pass over the destination), but it yields a real
 	// denominator, so the dashboard can show true progress instead of a
 	// spinner. Without it there is no honest way to say "412MB of 2.9GB".
+	//
+	// The destination is listed once, up front, rather than asked about each
+	// file in turn: see destIndex. On a share that is the difference between
+	// one round trip per directory and three per file, which is where the
+	// minutes of a pass were going.
+	// Counted against what the last completed pass found there, which is exact
+	// once one has ever landed and honestly absent before that.
+	e.beginScanPhase("listing", e.destFileHint)
+	idx, err := e.buildDestIndex()
+	if err != nil {
+		return 0, 0, err
+	}
+	e.beginScanPhase("comparing", int64(len(rels)))
 	pending := make([]string, 0, len(rels))
 	var pendingBytes int64
 	for _, rel := range rels {
-		if !e.shouldCopy(sourceFiles[rel], path.Join(e.destRoot, rel)) {
+		if !e.shouldCopyIndexed(sourceFiles[rel], rel, idx) {
 			continue
 		}
 		pending = append(pending, rel)
@@ -171,6 +188,14 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 
 	e.removeEmptyDestDirs()
 	e.prevScanStart = now // only read/written from the sync goroutine
+	// Past every failure return above: this pass reached the end, so what it
+	// learned is worth carrying across a restart. An interrupted pass gets here
+	// never, which is the whole guarantee.
+	e.notePassCompleted(PassMark{
+		PassStart:    now,
+		MtimeTrusted: e.mtimeTrusted,
+		DestFiles:    int64(len(idx.byRel)),
+	})
 	return copied, removed, nil
 }
 

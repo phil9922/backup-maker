@@ -203,6 +203,13 @@ func (t Totals) Counted() bool { return t.MirrorTargets > 0 || t.Bytes > 0 }
 // passes through the byte counter.
 func (t Totals) Partial() bool { return t.DeviceTargets > 0 }
 
+// StoppedFolder is a folder a schedule names that is no longer being backed
+// up, carried with its id so the row can offer to turn it back on.
+type StoppedFolder struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
 // ArchiveRow is one scheduled-archive job's health line.
 type ArchiveRow struct {
 	Name string `json:"name"`
@@ -217,13 +224,22 @@ type ArchiveRow struct {
 	// CoversEverything marks a job with no folder list, which means every
 	// folder — including any added later. Said out loud rather than rendered
 	// as a list that silently grows.
-	CoversEverything bool      `json:"covers_everything,omitempty"`
-	Target           string    `json:"target"`
-	Every            string    `json:"every"`
-	LastRun          time.Time `json:"last_run,omitzero"`
-	NextDue          time.Time `json:"next_due,omitzero"`
-	State            string    `json:"state"` // ok | due | failed | never run | needs password
-	Detail           string    `json:"detail,omitempty"`
+	CoversEverything bool `json:"covers_everything,omitempty"`
+	// StoppedFolders names folders this job is set up to snapshot that have
+	// been stopped, so it now covers nothing and cannot run.
+	//
+	// Saying "nothing — its folder is stopped" without saying WHICH folder, or
+	// offering to turn it back on, leaves somebody staring at a schedule they
+	// cannot fix from the page it is shown on. That is exactly what happened
+	// after a stop took a snapshot schedule down with the mirror it was asked
+	// to remove.
+	StoppedFolders []StoppedFolder `json:"stopped_folders,omitempty"`
+	Target         string          `json:"target"`
+	Every          string          `json:"every"`
+	LastRun        time.Time       `json:"last_run,omitzero"`
+	NextDue        time.Time       `json:"next_due,omitzero"`
+	State          string          `json:"state"` // ok | due | failed | never run | needs password
+	Detail         string          `json:"detail,omitempty"`
 	// NeedsPassword marks a job with no stored zip password — it cannot run
 	// until one is entered (an adoption may leave jobs in this state).
 	NeedsPassword bool `json:"needs_password,omitempty"`
@@ -258,6 +274,26 @@ type FolderInfo struct {
 	// zip. Both can be true; a folder can have a live mirror and a snapshot,
 	// and saying so is the point.
 	Snapshotted bool `json:"snapshotted"`
+	// Protected is the plain question the UI actually asks: is anything at all
+	// backing this folder up right now. It is exactly Continuous || Snapshotted,
+	// published as one field so the wizard and the dashboard cannot drift apart
+	// by each re-deriving it.
+	//
+	// FALSE IS A REAL STATE, not a bug in the config. Deleting a folder's last
+	// schedule leaves the folder recorded — deliberately, because removing a
+	// schedule must never delete anything — and a folder marked SnapshotOnly is
+	// kept out of every unscoped destination. A snapshot-only folder whose last
+	// schedule is gone therefore has both halves off and nothing copying it. The
+	// wizard used to list such a folder under "already protecting" and offer to
+	// add a second kind of backup to a first one that did not exist.
+	//
+	// A POINTER BECAUSE THE ZERO VALUE POINTS THE WRONG WAY. The CLI decodes
+	// this model from whatever daemon is running, which during an upgrade is
+	// the old one: a plain bool would decode as false — "backed up by nothing" —
+	// for every folder on the machine, and the command would cry wolf about
+	// folders it can see being mirrored two lines above. nil means the daemon
+	// did not say; only a non-nil false is a claim.
+	Protected *bool `json:"protected"`
 }
 
 // TargetInfo is one configured destination.
@@ -315,13 +351,34 @@ type SpaceSample struct {
 
 // Row is one folder × target health line.
 type Row struct {
-	FolderID    string    `json:"folder_id"`
-	FolderLabel string    `json:"folder_label"`
-	FolderPath  string    `json:"folder_path"`
-	TargetName  string    `json:"target_name"`
-	TargetType  string    `json:"target_type"`
-	State       string    `json:"state"` // in sync | syncing | offline | stale | awaiting-pair | wrong-drive | name-clash | error
-	Completion  float64   `json:"completion"`
+	FolderID    string  `json:"folder_id"`
+	FolderLabel string  `json:"folder_label"`
+	FolderPath  string  `json:"folder_path"`
+	TargetName  string  `json:"target_name"`
+	TargetType  string  `json:"target_type"`
+	State       string  `json:"state"` // in sync | syncing | offline | stale | awaiting-pair | wrong-drive | name-clash | error
+	Completion  float64 `json:"completion"`
+	// ScannedFiles is how many files the scan has looked at so far, and
+	// ScanTotal how many there are to look at. Only set while State is
+	// "scanning", when no transfer totals exist to fill a bar with. ScanTotal is
+	// 0 while the source is still being walked, which is honest: the bar draws
+	// as indeterminate rather than inventing a denominator.
+	ScannedFiles int64 `json:"scanned_files,omitempty"`
+	ScanTotal    int64 `json:"scan_total,omitempty"`
+	// Phase names which stage of the scan those two counters describe:
+	// "source", "listing" or "comparing". Without it a count has no unit, and
+	// the longest stage on a share reported the next stage's zero.
+	Phase string `json:"phase,omitempty"`
+	// FirstBackup marks a destination working on its first-ever pass: it has no
+	// completed sync to report yet, but it is not idle either.
+	//
+	// THE DIFFERENCE BETWEEN "never" AND "not finished yet". A first pass over a
+	// network share is minutes of work, and every restart begins it again — so a
+	// destination that had been faithfully copying for two days, and by then held
+	// a complete copy, still reported "never" because no single pass had ever run
+	// to the end. Printing "never" for that is not merely unhelpful, it is wrong:
+	// it describes a destination nothing has ever been written to.
+	FirstBackup bool      `json:"first_backup,omitempty"`
 	NeedItems   int       `json:"need_items"`
 	NeedBytes   int64     `json:"need_bytes"`
 	LastSeen    time.Time `json:"last_seen,omitzero"`
@@ -378,6 +435,12 @@ type Collector struct {
 	Client   func() *syncthing.Client
 	Engines  func() []*localmirror.Engine
 	Archives func() ([]archive.Result, map[string]time.Time)
+	// ArchiveRunning reports which schedules are executing right now. A
+	// snapshot's LastRun is only written when it COMPLETES, so without this a
+	// job part-way through writing a multi-gigabyte zip is indistinguishable
+	// from one that has never started — the panel said "never run" for two
+	// hours while it was running.
+	ArchiveRunning func() map[string]time.Time
 	// HasArchivePassword reports whether a job's zip password is stored. nil
 	// (not wired) means "assume yes" — only the daemon knows the state.
 	HasArchivePassword func(name string) bool
@@ -607,6 +670,9 @@ func (col *Collector) Collect() Model {
 		// Real transfer progress, so a drive/share row animates like a device
 		// row instead of jumping 0 → 100 when the pass ends.
 		row.Completion = st.Completion()
+		row.ScannedFiles = st.ScannedFiles
+		row.ScanTotal = st.ScanTotalFiles
+		row.Phase = st.Phase
 		row.NeedItems = st.TotalFiles - st.DoneFiles
 		if row.NeedItems < 0 {
 			row.NeedItems = 0
@@ -634,8 +700,12 @@ func (col *Collector) Collect() Model {
 			wakeable[t.Name] = true
 		}
 	}
+	// Applied to both row sources here rather than in the engine block, so a
+	// paired machine on its first sync gets the same honesty a share does.
 	for i := range m.Rows {
 		m.Rows[i].WakeEnabled = wakeable[m.Rows[i].TargetName]
+		m.Rows[i].FirstBackup = m.Rows[i].LastSeen.IsZero() &&
+			(m.Rows[i].State == "scanning" || m.Rows[i].State == "syncing")
 	}
 
 	// Space reclaimed per destination, so the dashboard can say what was
@@ -667,11 +737,15 @@ func (col *Collector) Collect() Model {
 		}
 	}
 	for _, f := range cfg.Folders {
+		protected := cfg.Protected(f.ID)
 		m.Folders = append(m.Folders, FolderInfo{
 			ID: f.ID, Label: f.Label, Path: f.Path, Ignores: f.ExtraIgnore,
 			NoDefaultIgnores: f.NoDefaultIgnores,
 			Continuous:       continuous[f.ID],
 			Snapshotted:      snapshotted[f.ID],
+			// config.Protected, not `continuous || snapshotted`, so this field
+			// and setup.StopMirroring's refusal are literally the same function.
+			Protected: &protected,
 		})
 	}
 	// Stopped folders. Built straight from the config: every question this
@@ -780,6 +854,12 @@ func (col *Collector) Collect() Model {
 	// Scheduled archive jobs.
 	if col.Archives != nil && len(cfg.Archives) > 0 {
 		results, lastRuns := col.Archives()
+		running := map[string]bool{}
+		if col.ArchiveRunning != nil {
+			for name := range col.ArchiveRunning() {
+				running[name] = true
+			}
+		}
 		resultByName := map[string]archive.Result{}
 		for _, r := range results {
 			resultByName[r.ArchiveName] = r
@@ -794,6 +874,16 @@ func (col *Collector) Collect() Model {
 			row.Keep = job.Keep
 			for _, f := range cfg.FoldersForArchive(job) {
 				row.Folders = append(row.Folders, f.Label)
+			}
+			// A job that names a folder which has since been stopped resolves
+			// to nothing above. Name it here, with its id, so the row can say
+			// what is missing and offer the one action that fixes it.
+			if !row.CoversEverything {
+				for _, id := range job.Folders {
+					if rec, ok := cfg.RetiredByID(id); ok {
+						row.StoppedFolders = append(row.StoppedFolders, StoppedFolder{ID: rec.ID, Label: rec.Label})
+					}
+				}
 			}
 			every, _ := config.ParseEvery(job.Every)
 			row.LastRun = lastRuns[job.Name]
@@ -816,7 +906,23 @@ func (col *Collector) Collect() Model {
 			case hasResult && res.Err != "":
 				row.State = "failed"
 				row.Detail = res.Err
+			case running[job.Name]:
+				// Running now. Ranked above "never run" and "due" because both
+				// of those describe a job that is NOT running, which is exactly
+				// the wrong thing to say about one that is.
+				row.State = "running"
+				row.Detail = "writing a snapshot now"
+			case row.LastRun.IsZero() && (row.CoversEverything || len(row.Folders) > 0):
+				// Created but not yet started. The scheduler checks for due
+				// jobs every 30 seconds, so a brand-new schedule sits here for
+				// up to half a minute — and "never run" for something that is
+				// about to run reads as broken, especially right after you
+				// pressed the button that made it.
+				row.State = "preparing"
+				row.Detail = "the first snapshot starts within about 30 seconds"
 			case row.LastRun.IsZero():
+				// Never run and cannot: it covers no live folder. Distinct
+				// from "preparing", which promises something is coming.
 				row.State = "never run"
 			case every > 0 && time.Since(row.LastRun) > every+time.Hour:
 				row.State = "due"

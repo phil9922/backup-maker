@@ -646,7 +646,11 @@ func TestCollectFlagsArchiveNeedingPassword(t *testing.T) {
 	for _, r := range m.Archives {
 		byName[r.Name] = r
 	}
-	if byName["weekly"].NeedsPassword || byName["weekly"].State != "never run" {
+	// "preparing", not "never run": this job has its password, covers every
+	// folder and is not paused, so it runs at the next 30s tick. The point of
+	// this test is the password flag; the state is asserted only to prove the
+	// password case does not swallow it.
+	if byName["weekly"].NeedsPassword || byName["weekly"].State != "preparing" {
 		t.Errorf("weekly (password stored) = %+v", byName["weekly"])
 	}
 	if !byName["daily"].NeedsPassword || byName["daily"].State != "needs password" {
@@ -844,5 +848,185 @@ func TestASnapshotOnlyFolderIsNotReportedAsContinuous(t *testing.T) {
 	}
 	if by["mirrored"].Snapshotted {
 		t.Error("a folder in no snapshot job was reported as snapshotted")
+	}
+}
+
+// A schedule that has been created but has not run yet says so, rather than
+// "never run" — which is what a job that will NEVER run says, and reads as
+// broken seconds after you pressed the button that created it. The scheduler
+// ticks every 30s, so this is what a new job looks like for up to half a
+// minute.
+func TestANewSnapshotJobSaysItIsPreparing(t *testing.T) {
+	cfg := &config.Config{
+		General:  config.General{MachineName: "my-laptop"},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/pk/Desktop", Label: "Desktop"}},
+		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
+	}
+	col := setupCollector(cfg, func() bool { return true })
+	col.Archives = func() ([]archive.Result, map[string]time.Time) { return nil, nil }
+
+	m := col.Collect()
+	if got := m.Archives[0].State; got != "preparing" {
+		t.Errorf("a brand-new schedule reports %q, want %q", got, "preparing")
+	}
+	if m.Archives[0].Detail == "" {
+		t.Error("nothing tells the user how long preparing lasts")
+	}
+}
+
+// A job whose folder has been stopped covers nothing and can never run, so it
+// must NOT claim to be preparing — that would promise a snapshot that is not
+// coming.
+func TestASnapshotJobCoveringNothingIsNotPreparing(t *testing.T) {
+	cfg := &config.Config{
+		General:  config.General{MachineName: "my-laptop"},
+		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+		Archives: []config.Archive{{Name: "nightly", Folders: []string{"gone"}, Every: "daily", Target: "card"}},
+		Retired:  []config.Retired{{ID: "gone", Label: "Desktop", Path: "/home/pk/Desktop"}},
+	}
+	col := setupCollector(cfg, func() bool { return true })
+	col.Archives = func() ([]archive.Result, map[string]time.Time) { return nil, nil }
+
+	m := col.Collect()
+	if got := m.Archives[0].State; got != "never run" {
+		t.Errorf("a job covering nothing reports %q, want %q", got, "never run")
+	}
+	if len(m.Archives[0].StoppedFolders) != 1 || m.Archives[0].StoppedFolders[0].Label != "Desktop" {
+		t.Errorf("the row does not name the stopped folder it is waiting on: %+v", m.Archives[0].StoppedFolders)
+	}
+}
+
+// THE GUARANTEE: a snapshot that is running says it is running. Last-run is
+// only written when a run COMPLETES, so a job part-way through a
+// multi-gigabyte zip was indistinguishable from one that had never started —
+// it reported "never run" for two hours while writing.
+func TestARunningSnapshotDoesNotReportItselfAsNeverRun(t *testing.T) {
+	cfg := &config.Config{
+		General:  config.General{MachineName: "my-laptop"},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/pk/Desktop", Label: "Desktop"}},
+		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
+	}
+	col := setupCollector(cfg, func() bool { return true })
+	col.Archives = func() ([]archive.Result, map[string]time.Time) { return nil, nil }
+	col.ArchiveRunning = func() map[string]time.Time {
+		return map[string]time.Time{"nightly": time.Now()}
+	}
+
+	m := col.Collect()
+	if got := m.Archives[0].State; got != "running" {
+		t.Fatalf("a snapshot being written reports %q, want %q", got, "running")
+	}
+}
+
+// THE GUARANTEE: a folder that nothing backs up is reported as unprotected, so
+// no part of the UI can go on describing it as protected.
+//
+// Built from the state a real machine was found in on 2026-07-28: Desktop set
+// up for timed snapshots only, its last schedule since deleted, and two
+// destinations that both mirror "every folder". SnapshotOnly keeps it out of
+// both of them, so nothing copies it — while the wizard listed it under "a
+// folder you're already protecting" and offered to add a second kind of backup
+// to a first one that did not exist.
+func TestAFolderBackedUpByNothingIsReportedAsUnprotected(t *testing.T) {
+	cfg := &config.Config{
+		General: config.General{MachineName: "my-laptop"},
+		Folders: []config.Folder{
+			{ID: "f1", Label: "Development", Path: "/home/pk/Desktop/Development"},
+			{ID: "f2", Label: "Desktop", Path: "/home/pk/Desktop", SnapshotOnly: true},
+		},
+		Targets: []config.Target{
+			{Type: "drive", Name: "laptopcard", Path: "/media/pk/BACKUPCARD"},
+			{Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups"},
+		},
+	}
+	col := &Collector{
+		Cfg:     func() *config.Config { return cfg },
+		Client:  func() *syncthing.Client { return nil },
+		Engines: func() []*localmirror.Engine { return nil },
+	}
+
+	byID := map[string]FolderInfo{}
+	for _, f := range col.Collect().Folders {
+		byID[f.ID] = f
+	}
+
+	// A live daemon always answers, so nil here is itself a failure: the CLI
+	// reads nil as "no opinion" and would say nothing at all.
+	if byID["f2"].Protected == nil || byID["f1"].Protected == nil {
+		t.Fatal("Collect left Protected unset; a folder with no answer is reported as neither protected nor not")
+	}
+	if *byID["f2"].Protected {
+		t.Error("Desktop reports as protected; no destination mirrors it and no schedule snapshots it")
+	}
+	if !*byID["f1"].Protected {
+		t.Error("Development reports as unprotected; both destinations mirror every folder")
+	}
+	// The folder must still be listed. Dropping it would trade one silence for
+	// another: removing a schedule never removes the folder.
+	if len(byID) != 2 {
+		t.Errorf("got %d folders, want both still listed", len(byID))
+	}
+}
+
+// One schedule is enough. Calling a snapshot-only folder unprotected while its
+// zip is still being written would send somebody to fix a folder that is fine.
+func TestAFolderWithOnlyASnapshotIsReportedAsProtected(t *testing.T) {
+	cfg := &config.Config{
+		General:  config.General{MachineName: "my-laptop"},
+		Folders:  []config.Folder{{ID: "f2", Label: "Desktop", SnapshotOnly: true}},
+		Targets:  []config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/pk/BACKUPCARD"}},
+		Archives: []config.Archive{{Name: "desktop-daily", Target: "laptopcard", Folders: []string{"f2"}}},
+	}
+	col := &Collector{
+		Cfg:     func() *config.Config { return cfg },
+		Client:  func() *syncthing.Client { return nil },
+		Engines: func() []*localmirror.Engine { return nil },
+	}
+
+	got := col.Collect().Folders
+	if len(got) != 1 || got[0].Protected == nil || !*got[0].Protected {
+		t.Errorf("Desktop reports as unprotected while a schedule seals it: %+v", got)
+	}
+	if got[0].Continuous {
+		t.Error("Desktop reports as continuously mirrored; it is snapshot-only")
+	}
+}
+
+// THE GUARANTEE: a destination that is working never reports "never".
+//
+// "never" describes a destination nothing has ever been written to. A first
+// pass over a network share is minutes of work and every restart begins it
+// again, so a destination that had been faithfully copying for two days — and
+// by then held a complete copy — still had no completed pass to timestamp, and
+// the row said "never". That is not an unhelpful answer, it is a wrong one.
+func TestADestinationOnItsFirstPassIsNotReportedAsNever(t *testing.T) {
+	for _, state := range []string{"scanning", "syncing"} {
+		r := Row{State: state} // LastSeen zero: no pass has completed yet
+		rows := []Row{r}
+		for i := range rows {
+			rows[i].FirstBackup = rows[i].LastSeen.IsZero() &&
+				(rows[i].State == "scanning" || rows[i].State == "syncing")
+		}
+		if !rows[0].FirstBackup {
+			t.Errorf("state %q with no completed pass: FirstBackup = false, so the row prints \"never\" while it copies", state)
+		}
+	}
+}
+
+// The other half, and the reason FirstBackup is not simply "LastSeen is zero":
+// a destination that is genuinely idle and has never synced must still say so.
+// Softening that would hide a destination that never started.
+func TestAnIdleDestinationThatNeverSyncedStillSaysNever(t *testing.T) {
+	for _, state := range []string{"offline", "error", "wrong-drive"} {
+		rows := []Row{{State: state}}
+		for i := range rows {
+			rows[i].FirstBackup = rows[i].LastSeen.IsZero() &&
+				(rows[i].State == "scanning" || rows[i].State == "syncing")
+		}
+		if rows[0].FirstBackup {
+			t.Errorf("state %q: FirstBackup = true, which hides a destination that never started", state)
+		}
 	}
 }

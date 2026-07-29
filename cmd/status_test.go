@@ -131,3 +131,42 @@ func TestTotalsLineOmitsAnUnknownStartDate(t *testing.T) {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
 }
+
+// THE GUARANTEE: the state column answers "are my files safe", not "what is the
+// program doing".
+//
+// A destination holding a complete copy read "scanning" for minutes at a time,
+// which leaves the only honest interpretation as "I cannot tell whether I have
+// a backup". That is the worst sentence a backup tool can produce, and it was
+// producing it while everything was fine. The activity belongs in the progress
+// column; this one has to keep its promise.
+func TestTheStateColumnSaysWhetherThereIsABackupNotWhatTheProgramIsDoing(t *testing.T) {
+	for _, state := range []string{"scanning", "syncing", "in sync"} {
+		r := status.Row{State: state, LastSeen: time.Now().Add(-time.Minute)}
+		if got := rowState(r); got != "backed up" {
+			t.Errorf("a destination holding a copy while %q reads as %q, want \"backed up\"", state, got)
+		}
+	}
+}
+
+// The other half: a destination with no completed pass has no copy to promise,
+// and must not claim one. Softening this would be the same failure in reverse.
+func TestADestinationWithNoCompletedPassNeverClaimsToBeBackedUp(t *testing.T) {
+	for _, state := range []string{"scanning", "syncing"} {
+		r := status.Row{State: state, FirstBackup: true}
+		if got := rowState(r); got != "first backup" {
+			t.Errorf("a destination on its first pass while %q reads as %q, want \"first backup\"", state, got)
+		}
+	}
+}
+
+// A fault still reads as a fault. Reframing must not swallow the states that
+// mean something is actually wrong.
+func TestAFaultyDestinationStillReadsAsFaulty(t *testing.T) {
+	for _, state := range []string{"offline", "stale", "full", "wrong-drive", "name-clash", "error"} {
+		r := status.Row{State: state}
+		if got := rowState(r); got != state {
+			t.Errorf("%q reads as %q; a fault must not be dressed up", state, got)
+		}
+	}
+}

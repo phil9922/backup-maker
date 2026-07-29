@@ -42,6 +42,18 @@ type WFile interface {
 	Sync() error
 }
 
+// DirLister is implemented by backends that can list one directory on its own,
+// so a tree can be walked with several listings in flight at once.
+//
+// Separate from Backend for the same reason SpaceReporter is: a backend that
+// cannot do this should fall back to the sequential WalkDir, not fail to exist.
+// Only worth using where a listing costs a network round trip.
+type DirLister interface {
+	// ReadDir lists path, whose entries must carry size and mtime without a
+	// further round trip (DirEntry.Info must not go back to the server).
+	ReadDir(path string) ([]fs.DirEntry, error)
+}
+
 // SpaceReporter is implemented by backends that can say how full their storage
 // is. It is deliberately separate from Backend: a backend that can't answer
 // should disable space reclaiming, not fail to exist. Callers type-assert.
@@ -96,6 +108,14 @@ func (l *localFS) Rename(oldp, newp string) error {
 
 func (l *localFS) Chtimes(p string, atime, mtime time.Time) error {
 	return os.Chtimes(l.abs(p), atime, mtime)
+}
+
+// ReadDir satisfies DirLister. A local listing is a syscall, so nothing here
+// asks for it in parallel — it exists so the parallel walk can be exercised
+// against a real tree without a share, and so a caller that wants one
+// directory does not have to walk to get it.
+func (l *localFS) ReadDir(p string) ([]fs.DirEntry, error) {
+	return os.ReadDir(l.abs(p))
 }
 
 func (l *localFS) WalkDir(root string, fn fs.WalkDirFunc) error {

@@ -112,6 +112,10 @@ type State struct {
 	// internal/daemon/tally.go): a busy folder syncs every few seconds, and
 	// state.json is not a log.
 	MirrorLastSync map[string]map[string]time.Time `json:"mirror_last_sync,omitempty"`
+	// MirrorScanState is what each folder × destination pair learned on its last
+	// COMPLETED pass — folder id -> target name -> ScanMark. Nested for exactly
+	// the reason MirrorLastSync is.
+	MirrorScanState map[string]map[string]ScanMark `json:"mirror_scan_state,omitempty"`
 	// BytesCopiedTotal and FilesCopiedTotal are the lifetime odometer: every
 	// byte and file backup-maker has itself written to a destination since
 	// CountingSince, re-copies of a changed file included. It lives here rather
@@ -131,6 +135,40 @@ type State struct {
 	BytesCopiedTotal uint64    `json:"bytes_copied_total,omitempty"`
 	FilesCopiedTotal uint64    `json:"files_copied_total,omitempty"`
 	CountingSince    time.Time `json:"counting_since,omitzero"`
+}
+
+// ScanMark is what one folder × destination pair learned on its last COMPLETED
+// pass, so a restart does not begin from ignorance.
+//
+// ONLY EVER WRITTEN FOR A PASS THAT FINISHED. A pass that was interrupted
+// learned nothing it is entitled to claim: promoting a half-pass's clock would
+// tell the next one that files it never reached had already been checked. The
+// mark can therefore only ever cause a redundant recopy, never a skip — which
+// is the property that makes it safe to lose in a crash.
+type ScanMark struct {
+	// PassStart is when the last completed pass BEGAN — not when it ended.
+	// It is the engine's "changed since the last scan" clock, and the end time
+	// would be blind to everything edited while the pass was running.
+	PassStart time.Time `json:"pass_start,omitzero"`
+	// MtimeTrusted caches the probe that asks whether this destination
+	// preserves file timestamps. nil means never calibrated.
+	//
+	// THIS IS THE ONE THAT COSTS REAL BYTES. On a destination that does NOT
+	// preserve them — FAT-formatted USB on a router, NAS firmware that ignores
+	// SetInfo — the engine falls back to comparing size against the last scan
+	// time, and that time lives in memory alone. Every restart reset it to zero,
+	// which reads as "everything changed", so every same-size file in the folder
+	// was recopied. On a machine restarted 54 times in a day, onto the slowest
+	// class of destination there is.
+	MtimeTrusted *bool `json:"mtime_trusted,omitempty"`
+	// DestFiles is how many files that pass found on the destination — the only
+	// honest denominator the next pass's listing phase can show.
+	DestFiles int64 `json:"dest_files,omitempty"`
+	// TargetUUID ties this mark to the storage it was learned from. Different
+	// storage under the same target name has learned nothing and must not
+	// inherit another drive's clock — the same reasoning that makes
+	// DriveTargetUUIDs worth recording at all.
+	TargetUUID string `json:"target_uuid,omitempty"`
 }
 
 func LoadState() (*State, error) {

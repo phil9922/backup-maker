@@ -19,9 +19,18 @@ function humanBytes(n) {
   return n + 'B';
 }
 
-function stateClass(state) {
+function stateClass(state, row) {
   if (state === 'in sync') return 'ok';
-  if (state === 'syncing' || state === 'scanning') return 'busy';
+  // Nothing is wrong here, so nothing should be red: this folder is waiting on
+  // a decision, not reporting a fault.
+  if (state === 'no destination yet') return 'muted';
+  if (state === 'syncing' || state === 'scanning') {
+    // Green once there is a copy on the destination: the dot answers the same
+    // question the label does, and amber next to "backed up" would take the
+    // reassurance straight back. Amber is for the first backup, which really
+    // is still in progress.
+    return row && !row.first_backup ? 'ok' : 'busy';
+  }
   // A machine that has never paired is waiting on a person, not broken; red
   // would send someone hunting a fault that doesn't exist.
   if (state === 'awaiting-pair') return 'busy';
@@ -29,7 +38,23 @@ function stateClass(state) {
 }
 
 // The states whose internal names aren't what you'd say out loud.
-function stateLabel(state) {
+//
+// "SCANNING" AND "SYNCING" ANSWER THE WRONG QUESTION. They say what the program
+// is doing; the only question this column is ever read for is whether the files
+// are safe. A destination holding a complete copy showed "scanning" for minutes
+// at a time and left the honest reading as "I can't tell whether I have a
+// backup" — which is the worst thing a backup tool can say, and it was saying it
+// while everything was fine.
+//
+// So the column answers the safety question and the progress column says what is
+// happening right now. A destination that has completed a pass has a backup on
+// it, and keeps saying so while it looks for changes. One that has never
+// finished a pass has no copy to promise yet, and says that instead.
+function stateLabel(state, row) {
+  if (state === 'scanning' || state === 'syncing') {
+    return row && row.first_backup ? 'first backup' : 'backed up';
+  }
+  if (state === 'in sync') return 'backed up';
   if (state === 'awaiting-pair') return 'waiting to pair';
   if (state === 'name-clash') return 'name already in use';
   return state;
@@ -39,6 +64,10 @@ function stateLabel(state) {
 // this: it is the one state a person cannot act on without being told what the
 // remedy is, and the remedy is not guessable.
 function stateHelp(state) {
+  if (state === 'no destination yet') {
+    return 'This folder is being watched but has nowhere to send copies yet. ' +
+      'Add a destination and it starts backing up within seconds.';
+  }
   if (state !== 'name-clash') return '';
   return 'Another computer already backs up to this destination under the same ' +
     'name. Nothing is being written, because the two would delete each ' +
@@ -105,7 +134,14 @@ function rowKey(r) { return r.folder_id + '\u0000' + r.target_name; }
 function buildRow(key) {
   const tr = el('tr');
   tr.dataset.key = key;
-  const folder = el('td');
+  // The folder cell carries the name and the path it stands for. A label on
+  // its own is not enough to act on: two folders called "Documents" on one
+  // machine are not the same promise, and "stop" against the wrong one is a
+  // decision made on a guess.
+  const folder = el('td', 'folder-cell');
+  const folderName = el('strong');
+  const folderPath = el('div', 'muted mono small');
+  folder.append(folderName, folderPath);
   const target = el('td');
   const state = el('td');
 
@@ -122,17 +158,25 @@ function buildRow(key) {
   progress.appendChild(wrap);
 
   const seen = el('td');
-  tr.append(folder, target, state, progress, seen);
-  tr._cells = { folder, target, state, fill, label, seen };
+  const actions = el('td', 'row-actions');
+  tr.append(folder, target, state, progress, seen, actions);
+  tr._cells = { folder, folderName, folderPath, target, state, fill, label, seen, actions };
   return tr;
 }
 
-function updateRow(tr, r) {
+// updateRow fills one folder×destination row. first says whether this is the
+// leading row of its folder's group: the name, path and buttons appear once
+// per folder, and the continuation rows leave those cells empty so a folder
+// with three destinations reads as one block rather than three repetitions.
+function updateRow(tr, r, folder, first) {
   const c = tr._cells;
-  setText(c.folder, r.folder_label || r.folder_id);
-  setText(c.target, r.target_name);
-  setText(c.state, stateLabel(r.state) + (r.stale ? ' ⚠' : ''));
-  c.state.className = stateClass(r.state) + ' dot';
+  setText(c.folderName, first ? (r.folder_label || r.folder_id) : '');
+  setText(c.folderPath, first && folder && folder.path ? folder.path : '');
+  tr.classList.toggle('grouped', !first);
+  renderRowActions(c.actions, first ? folder : null, tr);
+  setText(c.target, r.target_name || '—');
+  setText(c.state, stateLabel(r.state, r) + (r.stale ? ' ⚠' : ''));
+  c.state.className = stateClass(r.state, r) + ' dot';
   // A state whose name doesn't tell you what to do about it gets the
   // explanation on hover rather than a row that just reads red.
   c.state.title = stateHelp(r.state);
@@ -141,23 +185,63 @@ function updateRow(tr, r) {
   const pct = Math.max(0, Math.min(100, r.completion || 0));
   c.fill.style.width = pct + '%';
   c.fill.className = 'bar-fill ' + (active ? 'busy' : stateClass(r.state));
-  // A target that is scanning has no denominator yet; stripes say "working"
-  // without inventing a number.
-  c.fill.classList.toggle('indeterminate', r.state === 'scanning' && !r.total_bytes);
+  // A scan with a denominator drives a real bar. Stripes are only for the part
+  // before the source walk has finished, when there genuinely is no number.
+  const scanning = r.state === 'scanning';
+  c.fill.classList.toggle('indeterminate', scanning && !r.total_bytes && !r.scan_total);
+  if (scanning && !r.total_bytes && r.scan_total > 0) {
+    c.fill.style.width = Math.min(100, ((r.scanned_files || 0) / r.scan_total) * 100) + '%';
+  }
 
   if (r.total_bytes > 0) {
     setText(c.label, `${humanBytes(r.transferred_bytes || 0)} of ${humanBytes(r.total_bytes)}`);
   } else if (r.need_items > 0) {
     setText(c.label, `${r.need_items} left`);
+  } else if (scanning) {
+    // Deciding what needs copying, which against a network drive is minutes of
+    // work before a byte moves. Saying how many files it has looked at is the
+    // difference between "working" and "stuck" — this column previously showed
+    // a dash beside a full bar, which read as finished. Out of how many is the
+    // rest of it: a bare count cannot say whether it is nearly done.
+    setText(c.label, scanLabel(r));
   } else if (r.state === 'in sync') {
     setText(c.label, '100%');
   } else {
     setText(c.label, '—');
   }
 
-  timeCells.set(tr, r.last_seen);
-  setText(c.seen, humanTime(r.last_seen));
+  // "never" is for a destination nothing has been written to. A first pass
+  // takes minutes and has no completed sync to timestamp yet, which is not the
+  // same thing — and printing "never" beside a bar that is visibly moving is
+  // how a destination holding a complete copy read as untouched. Dropped from
+  // timeCells too, or the one-second ticker would put "never" straight back.
+  if (r.first_backup) {
+    timeCells.delete(tr);
+    setText(c.seen, 'first backup running');
+  } else {
+    timeCells.set(tr, r.last_seen);
+    setText(c.seen, humanTime(r.last_seen));
+  }
   if (r.detail) tr.title = r.detail; else tr.removeAttribute('title');
+}
+
+// What a scanning row says it is doing.
+//
+// The three stages of a scan count three different things — files in your
+// folder, files already on the destination, files compared — and on a network
+// share the middle one is where the minutes go. One label for all three said
+// "checked 0 of 70,827" for minutes at a stretch, describing a stage that had
+// not started, which reads exactly like being stuck.
+function scanLabel(r) {
+  const done = (r.scanned_files || 0).toLocaleString();
+  // One sentence for the whole scan, because from outside it is one activity:
+  // looking for what changed. The stage only decides which counter is honest to
+  // show against it.
+  const what = r.first_backup ? 'working out what to copy' : 'checking for changes';
+  if (r.phase === 'source' && !r.scanned_files) return what + '…';
+  if (r.scan_total > 0) return `${what}: ${done} of ${r.scan_total.toLocaleString()}`;
+  if (r.scanned_files) return `${what}: ${done} so far`;
+  return what + '…';
 }
 
 // Only touch the DOM when the value actually changed, so the browser isn't
@@ -166,12 +250,57 @@ function setText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
+// The table is rebuilt from the model on every poll, which would wipe an open
+// exclude editor out from under someone mid-sentence. While one is open the
+// table is left alone; polling resumes on save or cancel.
+let editingIgnoresFor = null;
+
+// renderRows draws the one table: every folder that has a live mirror, its
+// destinations grouped beneath it, and its actions on the leading row.
 function renderRows(st) {
+  // Rebuilding while someone is typing in the exclude editor would wipe the
+  // box out from under them mid-sentence. Progress stops updating for the few
+  // seconds it is open, which is the cheaper of the two costs.
+  if (editingIgnoresFor !== null) return;
   const table = document.getElementById('rows');
+  const sec = document.getElementById('folders-section');
   const body = table.querySelector('tbody');
-  const rows = st.rows || [];
-  if (rows.length === 0) {
+
+  // The editor is not one of the rows this function tracks, so nothing else
+  // would ever take it away: closing it only clears the flag above. It also
+  // has to go before the ordering below, which addresses rows by index and
+  // would otherwise count it.
+  for (const stale of body.querySelectorAll('tr.ignore-row')) stale.remove();
+
+  // Only folders with a live mirror. A snapshot-only folder belongs under
+  // Timed snapshots, where its schedule and password are — listing it here
+  // would claim a protection it does not have.
+  const folders = new Map();
+  for (const f of st.folders || []) {
+    if (f.continuous !== false) folders.set(f.id, f);
+  }
+
+  const byFolder = new Map();
+  for (const r of st.rows || []) {
+    if (!folders.has(r.folder_id)) continue;
+    if (!byFolder.has(r.folder_id)) byFolder.set(r.folder_id, []);
+    byFolder.get(r.folder_id).push(r);
+  }
+  // A folder with nowhere to send its copies would otherwise vanish from this
+  // page entirely — and it is the folder most in need of being looked at.
+  const ordered = [];
+  for (const [id, f] of folders) {
+    const rows = byFolder.get(id);
+    if (rows && rows.length) {
+      ordered.push(...rows);
+      continue;
+    }
+    ordered.push({ folder_id: id, folder_label: f.label, target_name: '', state: 'no destination yet' });
+  }
+
+  if (ordered.length === 0) {
     table.hidden = true;
+    if (sec) sec.hidden = true;
     rowNodes.clear();
     timeCells.clear();
     body.replaceChildren();
@@ -179,7 +308,8 @@ function renderRows(st) {
   }
 
   const seen = new Set();
-  rows.forEach((r, i) => {
+  let lastFolder = null;
+  ordered.forEach((r, i) => {
     const key = rowKey(r);
     seen.add(key);
     let tr = rowNodes.get(key);
@@ -187,7 +317,8 @@ function renderRows(st) {
       tr = buildRow(key);
       rowNodes.set(key, tr);
     }
-    updateRow(tr, r);
+    updateRow(tr, r, folders.get(r.folder_id), r.folder_id !== lastFolder);
+    lastFolder = r.folder_id;
     // Keep DOM order matching the model without recreating anything.
     if (body.children[i] !== tr) body.insertBefore(tr, body.children[i] || null);
   });
@@ -199,47 +330,125 @@ function renderRows(st) {
     }
   }
   table.hidden = false;
+  if (sec) sec.hidden = false;
 }
 
-// The folder panel is rebuilt from scratch on every poll, which would wipe an
-// open exclude editor out from under someone mid-sentence. While one is open
-// the whole panel is left alone; polling resumes on save or cancel.
-let editingIgnoresFor = null;
+// renderRowActions puts Edit and Stop on a folder's leading row only, and
+// rebuilds them solely when the folder they belong to changes — this runs on
+// every poll, and replacing a button under a pointer that is hovering it is
+// how a click lands on nothing.
+function renderRowActions(cell, folder, tr) {
+  const want = folder && !readOnly ? folder.id : '';
+  if (cell.dataset.for === want) return;
+  cell.dataset.for = want;
+  cell.replaceChildren();
+  if (!want) return;
+  const edit = el('button', 'small-btn', 'Edit');
+  edit.title = 'Change what this folder excludes';
+  edit.onclick = () => openIgnoreEditor(tr, folder);
+  cell.appendChild(edit);
+  const stop = el('button', 'small-btn danger', 'Stop');
+  stop.title = folder.snapshotted
+    ? 'Stop one or both kinds of backup of this folder'
+    : 'Stop backing up this folder. The copies already made are kept.';
+  stop.onclick = () => (folder.snapshotted ? openStopChooser(tr, folder) : removeFolder(folder));
+  cell.appendChild(stop);
+}
 
-function renderFolders(st) {
-  if (editingIgnoresFor !== null) return;
-  const sec = document.getElementById('folders-section');
-  const list = document.getElementById('folder-list');
-  // Only the folders that actually have a live mirror. A snapshot-only folder
-  // belongs under "Timed snapshots", where its schedule and password
-  // are — listing it here alongside folders copied within seconds of a save
-  // claimed a protection it does not have.
-  const folders = (st.folders || []).filter((f) => f.continuous !== false);
-  sec.hidden = folders.length === 0;
+// A folder with both kinds of backup needs to be asked WHICH to stop.
+//
+// There used to be one button, and it stopped the folder — taking the snapshot
+// schedule with it. Somebody who wanted a daily snapshot, got an unwanted
+// continuous mirror as well and pressed the only control on offer, silently
+// lost the backup they actually wanted. A confirm() box cannot ask this: it has
+// two answers and this question has three.
+function openStopChooser(tr, f) {
+  for (const open of tr.parentElement.querySelectorAll('tr.ignore-row')) open.remove();
+  editingIgnoresFor = f.id;
+  const row = el('tr', 'ignore-row');
+  const cell = el('td');
+  cell.colSpan = 6;
+  row.appendChild(cell);
+
+  const box = el('div', 'ignore-editor');
+  box.appendChild(el('span', 'hint',
+    `"${f.label}" has both kinds of backup: it is copied continuously AND sealed into a scheduled snapshot. ` +
+    `Which do you want to stop? Nothing is deleted either way — the copies already made stay where they are.`));
+
+  const mirrorOnly = el('button', 'small-btn', 'Stop copying continuously');
+  mirrorOnly.title = 'The scheduled snapshot keeps running';
+  mirrorOnly.onclick = async () => {
+    mirrorOnly.disabled = true;
+    const resp = await mutate('/api/folders/' + encodeURIComponent(f.id) + '/stop-mirror', { method: 'POST' });
+    if (!resp.ok) { alert(await resp.text()); mirrorOnly.disabled = false; return; }
+    editingIgnoresFor = null;
+    refresh();
+  };
+
+  const everything = el('button', 'small-btn danger', 'Stop both');
+  everything.title = 'Stop the continuous copy and the scheduled snapshot';
+  everything.onclick = () => {
+    editingIgnoresFor = null;
+    removeFolder(f);
+  };
+
+  const cancel = el('button', 'small-btn quiet', 'Cancel');
+  cancel.onclick = () => { editingIgnoresFor = null; refresh(); };
+
+  box.append(mirrorOnly, everything, cancel);
+  cell.appendChild(box);
+  let after = tr;
+  while (after.nextElementSibling && after.nextElementSibling.classList.contains('grouped')) {
+    after = after.nextElementSibling;
+  }
+  after.after(row);
+}
+
+// Folders that are recorded here but that nothing is copying.
+//
+// SEPARATE FROM "No longer protected", which is a different situation with
+// different actions. Those are folders REMOVED from the config, each carrying
+// the destinations that still hold its copies — which is why that panel can
+// offer "Turn back on" and the one deliberate "Delete backups…" in the program.
+// A folder here is still configured and has no copies recorded anywhere, so
+// both of those buttons would be aimed at nothing; pointing the deleting one at
+// a live folder is exactly what the first rule of this codebase forbids.
+//
+// The two honest actions are: give it a backup, or stop listing it.
+function renderUnprotected(st) {
+  const sec = document.getElementById('unprotected-section');
+  const list = document.getElementById('unprotected-list');
+  if (!sec || !list) return;
+  // `=== false` and not `!f.protected`: a daemon too old to send the field must
+  // not have every folder declared unprotected.
+  const bare = (st.folders || []).filter((f) => f.protected === false);
+  if (bare.length === 0) { sec.hidden = true; return; }
+  sec.hidden = false;
   list.replaceChildren();
-  for (const f of folders) {
+
+  for (const f of bare) {
     const li = el('li', 'card');
-    // Four slots, always in this order, so every card lines up with the one
-    // above it whatever its own content is: icon, name, metadata, actions.
     li.appendChild(icon('folder'));
     li.appendChild(el('strong', null, f.label));
+
     const meta = el('div', 'card-meta');
     if (f.path) meta.appendChild(el('span', 'muted mono', f.path));
-    if (f.ignores && f.ignores.length) {
-      meta.appendChild(el('span', 'muted', 'excluding: ' + f.ignores.join(', ')));
-    }
+    meta.appendChild(el('span', 'bad', 'no destination is mirroring it and no schedule is snapshotting it'));
     li.appendChild(meta);
-    const actions = el('div', 'card-actions');
+
+    // The fact is shown on the read-only network view too — it is a health
+    // fact, and the same reasoning that keeps space warnings there keeps this.
+    // Only the buttons are withheld.
     if (!readOnly) {
-      const edit = el('button', 'small-btn',
-        f.ignores && f.ignores.length ? 'edit excludes' : 'exclude files…');
-      edit.onclick = () => openIgnoreEditor(li, f);
-      actions.appendChild(edit);
-      const btn = el('button', 'danger', 'Stop protecting');
-      btn.onclick = () => removeFolder(f);
-      actions.appendChild(btn);
+      const actions = el('div', 'card-actions');
+      const setUp = el('button', 'small-btn', 'Set up a backup');
+      setUp.onclick = () => Wizard.open(st, { firstRun: false });
+      actions.appendChild(setUp);
+      const drop = el('button', 'small-btn', 'Stop listing this folder');
+      drop.onclick = () => removeFolder(f);
+      actions.appendChild(drop);
+      li.appendChild(actions);
     }
-    li.appendChild(actions);
     list.appendChild(li);
   }
 }
@@ -394,13 +603,17 @@ async function reportAndRefresh(resp) {
 
 // Inline editor for one folder's excludes. Comma-separated, matching the
 // wizard, so the same list can be typed the same way in either place.
-function openIgnoreEditor(li, f) {
-  // The panel is frozen while an editor is open, so the other cards' buttons
+function openIgnoreEditor(tr, f) {
+  // The table is frozen while an editor is open, so the other rows' buttons
   // are still live: only ever show one box, or it isn't clear which folder
   // Save applies to.
-  for (const open of li.parentElement.querySelectorAll('.ignore-editor')) open.remove();
+  for (const open of tr.parentElement.querySelectorAll('tr.ignore-row')) open.remove();
   editingIgnoresFor = f.id;
-  const box = el('div', 'ignore-editor card-wide');
+  const row = el('tr', 'ignore-row');
+  const cell = el('td');
+  cell.colSpan = 6;
+  row.appendChild(cell);
+  const box = el('div', 'ignore-editor');
 
   const input = el('input');
   input.type = 'text';
@@ -438,7 +651,14 @@ function openIgnoreEditor(li, f) {
     close();
   };
 
-  li.appendChild(box);
+  cell.appendChild(box);
+  // After the folder's LAST destination row, so the editor sits under the
+  // whole group rather than splitting it.
+  let after = tr;
+  while (after.nextElementSibling && after.nextElementSibling.classList.contains('grouped')) {
+    after = after.nextElementSibling;
+  }
+  after.after(row);
   input.focus();
 }
 
@@ -590,9 +810,14 @@ function renderArchives(st) {
     // an optional box — it can say anything, and on a real machine it said
     // something that read like the right folder while the job covered a
     // different one. The folder is the fact worth checking.
+    const stopped = a.stopped_folders || [];
     const covers = a.covers_everything
       ? 'every folder'
-      : (a.folders && a.folders.length ? a.folders.join(', ') : 'nothing — its folder is stopped');
+      : (a.folders && a.folders.length
+        ? a.folders.join(', ')
+        : (stopped.length
+          ? `nothing — ${stopped.map(s => s.label).join(', ')} is stopped`
+          : 'nothing — its folder is stopped'));
     // Built by name rather than by index. The state cell used to be found by
     // counting to 3, so adding this Folder column silently moved the colouring
     // and the "enter password…" button onto the schedule instead — a column
@@ -601,9 +826,12 @@ function renderArchives(st) {
       tr.appendChild(el('td', undefined, text));
     }
     const state = el('td', undefined, a.state);
+    // Anything that is working or about to work is "busy", never "bad". A new
+    // state added without a case here inherits red, which is how "running"
+    // would have been drawn as a fault.
     state.className = a.paused ? 'paused'
       : a.state === 'ok' ? 'ok'
-      : (a.state === 'never run' || a.needs_password ? 'busy' : 'bad');
+      : (['never run', 'preparing', 'running', 'due'].includes(a.state) || a.needs_password ? 'busy' : 'bad');
     // A snapshot with no stored password never runs; offer to set it here
     // rather than sending the user to the command line.
     if (a.needs_password && !readOnly) {
@@ -619,6 +847,21 @@ function renderArchives(st) {
     // design cannot be recovered — and there was no way to stop one at all.
     const actions = el('td', 'row-actions');
     if (!readOnly) {
+      // A schedule covering nothing cannot run, and Pause / Change / Stop are
+      // all answers to a different question. Offer the one thing that fixes
+      // it, first, so the row says what to do rather than only what is wrong.
+      for (const s of stopped) {
+        // The real retired record, not a stub: reenableFolder says which
+        // destinations it will reconnect to, and it can only do that from the
+        // record that lists them.
+        const rec = (st.retired || []).find((r) => r.id === s.id);
+        if (!rec) continue;
+        const back = el('button', 'small-btn', `Turn ${s.label} back on`);
+        back.title = 'Start backing this folder up again, so this schedule can run';
+        back.onclick = () => reenableFolder(rec);
+        actions.appendChild(back);
+      }
+
       const pause = el('button', 'small-btn', a.paused ? 'Resume' : 'Pause');
       pause.onclick = () => setArchivePaused(a, !a.paused);
       actions.appendChild(pause);
@@ -915,8 +1158,8 @@ function applyStatus(st) {
   // matching promise in README.md both stop being true and must change with it.
   setText(line, 'Everything stays on your own network.');
   renderVerdict(st);
+  renderUnprotected(st);
   renderRows(st);
-  renderFolders(st);
   renderRetired(st);
   renderTargets(st);
   renderArchives(st);
@@ -1078,6 +1321,7 @@ function renderVerdict(st) {
   const offline = targets.filter((t) => t.state === 'offline');
 
   const folders = st.folders || [];
+  const unprotected = folders.filter((f) => f.protected === false);
 
   let state = 'ok';
   let text;
@@ -1094,6 +1338,15 @@ function renderVerdict(st) {
     text = targets.length === 0 && folders.length === 0
       ? 'Nothing is being backed up yet'
       : 'Nothing is being backed up';
+  } else if (unprotected.length > 0) {
+    // Ahead of a broken destination on purpose. A destination that needs
+    // attention is a backup at risk; a folder backed up by nothing is a backup
+    // that does not exist, and the page said "Everything is backed up" while
+    // one sat there.
+    state = 'bad';
+    text = unprotected.length === 1
+      ? `${unprotected[0].label} is not backed up by anything`
+      : `${unprotected.length} folders are not backed up by anything`;
   } else if (broken.length > 0) {
     state = 'bad';
     text = broken.length === 1

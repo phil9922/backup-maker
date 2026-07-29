@@ -95,8 +95,18 @@
       <div id="existing-folders" hidden>
         <h3>Add another kind of backup to a folder you're already protecting</h3>
         <ul id="existing-folder-list" class="cards"></ul>
-        <p class="muted">…or choose a new folder below.</p>
       </div>
+      <!-- Folders that are recorded but that nothing actually copies: a
+           snapshot-only folder whose last schedule was deleted is left listed
+           on purpose, because deleting a schedule never deletes anything. It
+           used to appear in the block above, offering to add a SECOND kind of
+           backup to a first one that did not exist. -->
+      <div id="unprotected-folders" hidden>
+        <h3>Set up a backup for a folder that isn't protected</h3>
+        <p class="muted">These folders are still listed here, but nothing is backing them up right now — no destination mirrors them and no schedule snapshots them.</p>
+        <ul id="unprotected-folder-list" class="cards"></ul>
+      </div>
+      <p id="existing-folders-more" class="muted" hidden>…or choose a new folder below.</p>
       <!-- THE FOLDER YOU ARE LOOKING AT IS SELECTABLE, from the path bar.
            Without this the picker was inverted from every other file picker
            anyone has used: to protect ~/Desktop/Development you had to be in
@@ -325,16 +335,6 @@
       </div>
     </section>
 
-    <section>
-      <div class="table-wrap">
-        <table id="rows" hidden>
-          <thead>
-            <tr><th>Folder</th><th>Destination</th><th>State</th><th>Progress</th><th>Last seen/sync</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
 
     <!-- The two kinds of backup, kept apart.
          They used to share one "Folders being protected" list, which said
@@ -343,18 +343,68 @@
          invisible once the wizard closed. A continuous mirror and a sealed
          weekly zip are different promises about your files, and the page now
          makes you choose which one you are looking at. -->
+    <!-- Folders nothing is copying. Above everything else on purpose: a folder
+         believed to be protected and backed up by nothing is the worst state
+         this page can describe, and until now it was the only one the page
+         could not describe at all. Such a folder has no mirror, so it produces
+         no row in "Incremental backups", and no schedule, so it produces none
+         under "Timed snapshots" either — it was invisible here while the wizard
+         went on calling it a folder "you're already protecting". -->
+    <section id="unprotected-section" hidden>
+      <h2>Not backed up by anything</h2>
+      <p class="section-lede">These folders are still listed here, but nothing is copying
+        them: no destination mirrors them and no schedule snapshots them. Set up a backup,
+        or stop listing the folder. Nothing on disk is touched either way.</p>
+      <ul id="unprotected-list" class="cards"></ul>
+    </section>
+
     <section id="folders-section" hidden>
       <!-- Named with the wizard's own word. The wizard offers "Incremental"
            and "Timed"; calling the same thing "backed up continuously" here
            left nothing connecting the section to the choice that made it. -->
       <h2>Incremental backups</h2>
       <p class="section-lede">Copied within seconds of you saving, with about 30 days
-        of previous versions kept alongside. This is what the table above is showing.</p>
-      <ul id="folder-list" class="cards"></ul>
+        of previous versions kept alongside.</p>
+      <!-- ONE table, not a table plus a list of the same folders underneath.
+           The two used to sit one above the other saying the same names twice:
+           the table gave a folder its state per destination, the cards below
+           gave the same folder its path and its buttons. Nothing lived in both
+           and neither was complete, so reading "is Development safe, and where
+           is it" meant joining two lists by eye. A folder's destinations are
+           grouped under its name, and its actions sit on the same row. -->
+      <div class="table-wrap">
+        <table id="rows" hidden>
+          <thead>
+            <tr>
+              <th>Folder</th><th>Destination</th><th>State</th>
+              <th>Progress</th><th>Last sync</th><th class="actions-col"></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="archives-section" hidden>
+      <h2>Timed snapshots</h2>
+      <p class="section-lede">A complete copy, frozen at one moment and sealed into a
+        password-protected zip. Nothing is copied in between runs.</p>
+      <div class="table-wrap">
+        <table id="archive-rows">
+          <thead>
+            <!-- WHAT is snapshotted comes first, before the job's own name.
+                 The name is whatever somebody typed; the folder is the thing
+                 they will want to check, and its absence is how a snapshot of
+                 the wrong directory went unnoticed. -->
+            <tr><th>Folder</th><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </section>
 
     <section id="targets-section" hidden>
-      <h2>Where backups go</h2>
+      <h2>Backup Drives</h2>
       <ul id="target-list" class="cards"></ul>
     </section>
 
@@ -378,24 +428,6 @@
         already made are still on your destinations. Turn one back on to carry on where
         it left off, or delete its backups for good.</p>
       <ul id="retired-list" class="cards"></ul>
-    </section>
-
-    <section id="archives-section" hidden>
-      <h2>Timed snapshots</h2>
-      <p class="section-lede">A complete copy, frozen at one moment and sealed into a
-        password-protected zip. Nothing is copied in between runs.</p>
-      <div class="table-wrap">
-        <table id="archive-rows">
-          <thead>
-            <!-- WHAT is snapshotted comes first, before the job's own name.
-                 The name is whatever somebody typed; the folder is the thing
-                 they will want to check, and its absence is how a snapshot of
-                 the wrong directory went unnoticed. -->
-            <tr><th>Folder</th><th>Name</th><th>Destination</th><th>Every</th><th>State</th><th>Last run</th><th></th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
     </section>
 
     <section id="receive-section" hidden>

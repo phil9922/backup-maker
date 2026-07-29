@@ -56,6 +56,10 @@ func ReenableFolder(id string) (ReenableResult, error) {
 		Label:            rec.Label,
 		ExtraIgnore:      rec.ExtraIgnore,
 		NoDefaultIgnores: rec.NoDefaultIgnores,
+		// Restore the KIND of backup it had, not just the folder. A folder
+		// that only ever had a scheduled snapshot must not come back mirrored
+		// by every destination that mirrors "every folder".
+		SnapshotOnly: rec.SnapshotOnly,
 	}
 	res := ReenableResult{Folder: f}
 	cfg.Folders = append(cfg.Folders, f)
@@ -134,9 +138,30 @@ func ForgetRetired(id string) error {
 // a job, and one that mirrors nothing is simply idle.
 func dropFolderRefs(cfg *config.Config, id string) {
 	for ti := range cfg.Targets {
-		if len(cfg.Targets[ti].Folders) > 0 {
-			cfg.Targets[ti].Folders = withoutString(cfg.Targets[ti].Folders, id)
+		t := &cfg.Targets[ti]
+		if len(t.Folders) == 0 {
+			continue // already "every folder"; nothing scoped to drop
 		}
+		kept := withoutString(t.Folders, id)
+		if len(kept) == 0 {
+			// AN EMPTY LIST MEANS EVERY FOLDER, so clearing this one on its own
+			// would take a destination told to mirror a single folder and hand
+			// it every folder on the machine — silently, at the moment somebody
+			// tidies up a folder they stopped. This destination was scoped to
+			// the folder being forgotten, so what it should mirror now is
+			// nothing, which is what ArchivesOnly means.
+			//
+			// Both are set together and neither is safe alone: the flag is what
+			// stops the empty list meaning "everything" (FoldersForTarget reads
+			// it first and returns before it ever looks at the list), and the
+			// list must still be emptied because a target naming a folder that
+			// no longer exists fails validation. The archive loop below guards
+			// the same way, by dropping a job left covering nothing.
+			t.ArchivesOnly = true
+			t.Folders = nil
+			continue
+		}
+		t.Folders = kept
 	}
 	var kept []config.Archive
 	for _, a := range cfg.Archives {

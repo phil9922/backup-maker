@@ -18,22 +18,6 @@ const mtimeTolerance = 2 * time.Second
 
 const tmpSuffix = ".bmtmp"
 
-// needsCopy compares a source file against its mirror by size and mtime.
-func needsCopy(b Backend, srcInfo os.FileInfo, destPath string) bool {
-	di, err := b.Stat(destPath)
-	if err != nil {
-		return true
-	}
-	if di.Size() != srcInfo.Size() {
-		return true
-	}
-	delta := srcInfo.ModTime().Sub(di.ModTime())
-	if delta < 0 {
-		delta = -delta
-	}
-	return delta > mtimeTolerance
-}
-
 // progressWriter counts bytes on their way to the destination and reports the
 // running total for the current attempt.
 //

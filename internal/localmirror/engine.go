@@ -9,7 +9,6 @@ package localmirror
 import (
 	"context"
 	"log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,7 +43,11 @@ type Engine struct {
 	ignore      *Matcher
 	counted     func(bytes int64)
 	synced      func(at time.Time)
-	log         *slog.Logger
+	passDone    func(PassMark)
+	// destFileHint is how many files the last completed pass found on the
+	// destination, used only as the denominator while the current one lists it.
+	destFileHint int64
+	log          *slog.Logger
 
 	kick chan struct{} // watcher → sync loop nudges
 
@@ -73,6 +76,31 @@ type Engine struct {
 	// is already doing network I/O, is exactly the kind of contention worth
 	// avoiding. It is folded into doneBytes when the snapshot is taken.
 	inFlight atomic.Int64
+
+	// Files examined during the current scan. Atomic for the same reason as
+	// inFlight: it is bumped once per file on a path already doing network
+	// I/O. It exists so a scan that takes minutes can say how far it has got
+	// instead of showing a full bar and the word "syncing".
+	scanned atomic.Int64
+
+	// scanTotal is the denominator for scanned: how many files this scan has
+	// to examine. Known before the first destination round trip, because the
+	// source walk finishes and is sorted before anything is compared.
+	//
+	// A COUNT WITHOUT A DENOMINATOR IS NOT PROGRESS. "scanning, 12,889 files"
+	// says nothing about whether that is nearly done or barely started, and on
+	// a network share the compare phase is where the minutes go. A destination
+	// holding a complete copy spent quarter-hours looking identical to a dead
+	// one. 0 means genuinely unknown, which is honest and rare — never a guess.
+	scanTotal atomic.Int64
+
+	// phase names what scanned is counting, because the scan has three stages
+	// that cost wildly different amounts of time and count different things. A
+	// number on screen without its unit is how "checked 0 of 70,827" came to be
+	// displayed for minutes on end while the destination was being listed —
+	// technically true of the compare loop, which had not started.
+	// Guarded by mu with the rest of the display state.
+	phase string
 
 	// mtime calibration: some servers silently ignore Chtimes; on those,
 	// comparing by mtime would recopy everything forever, so we fall back to
@@ -133,9 +161,26 @@ type Options struct {
 	// is one: this package copies files and knows nothing about where the daemon
 	// keeps its bookkeeping. A pass that could not run — target away, wrong
 	// storage, no room — never reaches it, because nothing was synced.
-	Synced  func(at time.Time)
-	Ignores []string
-	Log     *slog.Logger
+	Synced func(at time.Time)
+	// PrevScanStart seeds the "changed since the last completed scan" clock from
+	// wherever the caller persisted it. Zero means never scanned — which on a
+	// destination that does not preserve timestamps costs one full recopy of the
+	// folder, which is exactly why it is worth carrying across a restart.
+	PrevScanStart time.Time
+	// MtimeTrusted seeds the timestamp-preservation probe. nil re-probes on the
+	// first pass, which is the right answer for a destination never seen before
+	// and the wrong one for the same card every morning.
+	MtimeTrusted *bool
+	// DestFileCount seeds how many files the last completed pass found on the
+	// destination, so the listing phase has a denominator to report against
+	// instead of counting up from nothing.
+	DestFileCount int64
+	// PassCompleted, if set, is called with what a FINISHED pass learned, so the
+	// caller can persist it. A pass that was interrupted never reaches it, for
+	// the same reason Synced is only called by one that synced.
+	PassCompleted func(PassMark)
+	Ignores       []string
+	Log           *slog.Logger
 	// InstallID identifies this installation, and Owns reports whether a claim
 	// found on a destination belongs to it (counting ids inherited by adopting
 	// a machine — see config.State.Owns). Together they are what tells this
@@ -162,32 +207,40 @@ func New(o Options) *Engine {
 		o.OfflinePoll = 5 * time.Second
 	}
 	return &Engine{
-		FolderID:    o.FolderID,
-		TargetName:  o.TargetName,
-		TargetType:  o.TargetType,
-		sourcePath:  o.SourcePath,
-		backend:     o.Backend,
-		destRoot:    config.DestRoot(o.MachineName, o.Label),
-		machineDir:  config.MachineDir(o.MachineName),
-		machineName: o.MachineName,
-		installID:   o.InstallID,
-		owns:        o.Owns,
-		uuid:        o.UUID,
-		maxAge:      time.Duration(o.MaxAgeDays) * 24 * time.Hour,
-		verify:      o.Verify,
-		pollEvery:   o.OfflinePoll,
-		minFree:     o.MinFreeBytes,
-		reclaimer:   o.Reclaimer,
-		ignore:      NewMatcherFor(o.SourcePath, o.Ignores),
-		counted:     o.Counted,
-		synced:      o.Synced,
+		FolderID:     o.FolderID,
+		TargetName:   o.TargetName,
+		TargetType:   o.TargetType,
+		sourcePath:   o.SourcePath,
+		backend:      o.Backend,
+		destRoot:     config.DestRoot(o.MachineName, o.Label),
+		machineDir:   config.MachineDir(o.MachineName),
+		machineName:  o.MachineName,
+		installID:    o.InstallID,
+		owns:         o.Owns,
+		uuid:         o.UUID,
+		maxAge:       time.Duration(o.MaxAgeDays) * 24 * time.Hour,
+		verify:       o.Verify,
+		pollEvery:    o.OfflinePoll,
+		minFree:      o.MinFreeBytes,
+		reclaimer:    o.Reclaimer,
+		ignore:       NewMatcherFor(o.SourcePath, o.Ignores),
+		counted:      o.Counted,
+		synced:       o.Synced,
+		passDone:     o.PassCompleted,
+		destFileHint: o.DestFileCount,
 		log: o.Log.With("sub", "localmirror", "folder", o.FolderID,
 			"target", o.TargetName, "type", o.TargetType),
-		kick:         make(chan struct{}, 1),
-		state:        "scanning",
-		lastSync:     o.LastSync,
-		fileErrors:   map[string]string{},
-		mtimeTrusted: true,
+		kick:       make(chan struct{}, 1),
+		state:      "scanning",
+		lastSync:   o.LastSync,
+		fileErrors: map[string]string{},
+		// Seeded from the last completed pass where there was one. Without a
+		// seed, prevScanStart is zero — which on a destination that does not
+		// preserve timestamps means "every same-size file changed" and recopies
+		// the whole folder, once per restart, for ever.
+		prevScanStart: o.PrevScanStart,
+		mtimeTrusted:  o.MtimeTrusted == nil || *o.MtimeTrusted,
+		calibrated:    o.MtimeTrusted != nil,
 	}
 }
 
@@ -259,7 +312,21 @@ func (e *Engine) sync() {
 	// Make room before copying rather than discovering the problem mid-file.
 	e.ensureHeadroom(0)
 
-	e.setState("syncing")
+	// SCANNING, NOT SYNCING, until the work is actually known.
+	//
+	// Deciding what needs copying costs one Stat per file, and against a
+	// network drive that is minutes of round trips before a single byte moves.
+	// Reporting "syncing" throughout meant the row showed a state it was not
+	// in, with no totals to fill the progress bar — and Completion() returns
+	// 100 when it knows of nothing pending, so the bar sat FULL while a fifth
+	// of the files were still missing. "syncing / — / never" is unreadable and,
+	// worse, reads as finished.
+	//
+	// The state already existed and the dashboard already draws it as an
+	// indeterminate bar; nothing was ever putting the engine into it.
+	e.setState("scanning")
+	e.scanned.Store(0)
+	e.scanTotal.Store(0) // unknown until the source walk finishes
 	copied, removed, err := e.reconcile()
 	if err != nil {
 		if IsNoSpace(err) {
@@ -361,6 +428,17 @@ type Status struct {
 	FileErrors map[string]string `json:"file_errors,omitempty"`
 	Symlinks   int               `json:"symlinks_skipped,omitempty"`
 
+	// ScannedFiles is how many files the current scan has examined, and
+	// ScanTotalFiles how many it has to examine. Only meaningful while State is
+	// "scanning", when no transfer totals exist yet. ScanTotalFiles is 0 while
+	// the source is still being walked and the denominator is not yet known.
+	ScannedFiles   int64 `json:"scanned_files,omitempty"`
+	ScanTotalFiles int64 `json:"scan_total_files,omitempty"`
+	// Phase names the stage the scan is in: "source" while the folder is being
+	// walked, "listing" while the destination is, "comparing" while the two are
+	// matched up. Empty once copying starts.
+	Phase string `json:"phase,omitempty"`
+
 	// Progress of the current (or most recent) transfer. Totals are 0 when
 	// there was nothing to copy — which is the steady state, not an error.
 	DoneFiles  int   `json:"done_files,omitempty"`
@@ -414,16 +492,26 @@ func (e *Engine) Status() Status {
 		TotalFiles: e.totalFiles,
 		DoneBytes:  done,
 		TotalBytes: e.totalBytes,
+
+		ScannedFiles:   e.scanned.Load(),
+		ScanTotalFiles: e.scanTotal.Load(),
+		Phase:          e.phase,
 	}
 }
 
-// beginTransfer publishes the size of the work about to be done.
+// beginTransfer publishes the size of the work about to be done. Reaching here
+// is what turns "scanning" into "syncing": the totals now exist, so the bar can
+// stop guessing and show real progress.
 func (e *Engine) beginTransfer(files int, bytes int64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.doneFiles, e.totalFiles = 0, files
 	e.doneBytes, e.totalBytes = 0, bytes
 	e.inFlight.Store(0)
+	e.phase = "" // the scan is over; bytes are the unit from here
+	if e.state == "scanning" {
+		e.state = "syncing"
+	}
 }
 
 // advanceTransfer records one completed file, folding whatever that file
@@ -460,6 +548,44 @@ func (e *Engine) noteSynced(at time.Time) {
 	if e.synced != nil {
 		e.synced(at)
 	}
+}
+
+// PassMark is what a completed pass learned and is entitled to carry forward.
+type PassMark struct {
+	// PassStart is when the pass BEGAN. Not when it ended: the end time would
+	// be blind to every file edited while the pass was running, and the next
+	// pass would skip them.
+	PassStart time.Time
+	// MtimeTrusted is the calibration result, so the next start does not
+	// re-probe — and, on a destination that failed the probe, does not spend a
+	// restart recopying every same-size file before rediscovering it.
+	MtimeTrusted bool
+	// DestFiles is how many files this pass found on the destination.
+	DestFiles int64
+}
+
+// notePassCompleted hands the caller what this pass learned, for persisting.
+//
+// Reached only at the very end of a successful reconcile, past every failure
+// return — for the same reason noteSynced is. A pass that was interrupted
+// examined an unknown fraction of the tree and has no business advancing a
+// clock that means "everything up to here has been checked".
+func (e *Engine) notePassCompleted(mk PassMark) {
+	if e.passDone != nil {
+		e.passDone(mk)
+	}
+}
+
+// beginScanPhase publishes which stage of the scan is running and how much of
+// it there is. total 0 means the denominator is genuinely unknown — a first
+// pass has no prior count to compare against, and an invented one draws a bar
+// that jumps backwards when the real number arrives.
+func (e *Engine) beginScanPhase(name string, total int64) {
+	e.scanned.Store(0)
+	e.scanTotal.Store(total)
+	e.mu.Lock()
+	e.phase = name
+	e.mu.Unlock()
 }
 
 // endTransfer clears progress once a pass finishes. Counters must not linger:
@@ -502,24 +628,6 @@ func (e *Engine) calibrateMtime() {
 		e.mtimeTrusted = false
 		e.log.Warn("target does not preserve file timestamps; using size+recency comparison instead")
 	}
-}
-
-// shouldCopy decides whether a source file needs (re)copying, honoring the
-// calibration result.
-func (e *Engine) shouldCopy(srcInfo os.FileInfo, destPath string) bool {
-	if e.mtimeTrusted {
-		return needsCopy(e.backend, srcInfo, destPath)
-	}
-	di, err := e.backend.Stat(destPath)
-	if err != nil {
-		return true
-	}
-	if di.Size() != srcInfo.Size() {
-		return true
-	}
-	// Same size: recopy only if the source changed since the last completed
-	// scan (zero on daemon start → one full recopy, then steady state).
-	return srcInfo.ModTime().After(e.prevScanStart)
 }
 
 // sanitize keeps names usable on FAT/NTFS/SMB targets.
