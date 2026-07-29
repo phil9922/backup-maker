@@ -45,8 +45,38 @@ func (d *daemon) runDueArchives() {
 		if !last.IsZero() && time.Since(last) < every {
 			continue
 		}
+		d.markArchiveRunning(job.Name, true)
 		d.runArchive(cfg, job)
+		d.markArchiveRunning(job.Name, false)
 	}
+}
+
+// markArchiveRunning records that a schedule is executing, so the dashboard can
+// say so. LastRun is only written when a run COMPLETES, which left a job
+// part-way through a multi-gigabyte zip reporting "never run" — the state of a
+// job that has not started, said about one that is running.
+func (d *daemon) markArchiveRunning(name string, running bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.archiveRunning == nil {
+		d.archiveRunning = map[string]time.Time{}
+	}
+	if running {
+		d.archiveRunning[name] = time.Now()
+		return
+	}
+	delete(d.archiveRunning, name)
+}
+
+// archiveRunningSnapshot is the collector the status model reads.
+func (d *daemon) archiveRunningSnapshot() map[string]time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make(map[string]time.Time, len(d.archiveRunning))
+	for k, v := range d.archiveRunning {
+		out[k] = v
+	}
+	return out
 }
 
 // runArchive executes one job against its target and records the result.

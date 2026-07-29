@@ -37,6 +37,66 @@ type Drive struct {
 	Total uint64 `json:"total,omitempty"`
 }
 
+// Reasons a piece of storage cannot hold backups yet. The dashboard picks its
+// own wording from these rather than parsing Detail.
+const (
+	ReasonBlank     = "blank"       // attached, nothing partitioned on it
+	ReasonUnmounted = "unmounted"   // has partitions, none of them mounted
+	ReasonReadOnly  = "readonly"    // the kernel marks the whole disk read-only
+	ReasonNotAMount = "not-a-mount" // a directory that only looks like a drive
+)
+
+// Unusable is storage that is present but cannot hold backups yet, with the
+// reason in words.
+//
+// It exists because the worst thing this program can say to somebody holding a
+// drive they have just plugged in is that no drives are plugged in. Drives()
+// lists mounted directories, so a disk with no filesystem is invisible to it —
+// this type carries what we could see and why it is not usable.
+type Unusable struct {
+	// Device is the kernel path (/dev/sda) for a whole disk, empty for a
+	// directory that is not a mount point.
+	Device string `json:"device,omitempty"`
+	// Name is what to call it on screen: an external drive's own product name
+	// where the bus reports one, otherwise the disk's vendor and model.
+	Name string `json:"name"`
+	Size uint64 `json:"size,omitempty"`
+	// Bus is usb, nvme or mmc where known — a USB disk often reports
+	// removable=0, so the bus is what actually tells an external drive apart.
+	Bus    string `json:"bus,omitempty"`
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
+	// Path is the directory concerned, for ReasonNotAMount.
+	Path string `json:"path,omitempty"`
+	// Free is bytes free, reported only where there is a filesystem to ask.
+	Free uint64 `json:"free,omitempty"`
+	// Confirm is what the user must type back before this drive is prepared.
+	// Computed here so the dashboard and the privileged helper that re-checks
+	// it can never disagree about the expected string.
+	Confirm string `json:"confirm,omitempty"`
+}
+
+// HumanSize renders a capacity the way the dashboard shows it.
+//
+// It is here, rather than in either caller, because it is part of the string a
+// user types back to confirm formatting a drive: the page that displays it and
+// the privileged helper that checks it must round identically or the
+// confirmation can never be satisfied.
+func HumanSize(n uint64) string {
+	switch {
+	case n >= 1<<40:
+		return fmt.Sprintf("%.1fTB", float64(n)/(1<<40))
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1fGB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fMB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fKB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
+}
+
 // Listing is one level of the picker.
 type Listing struct {
 	Path      string  `json:"path"`

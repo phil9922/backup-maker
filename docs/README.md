@@ -22,6 +22,13 @@ the binary.
 | **[5. Monitoring your backups](guide/5-monitoring.md)** | Alerts when backups stop, delivery to your phone, the read-only network view, and the status page written onto each destination. | 15 min |
 | **[6. Restoring & recovery](guide/6-restoring.md)** | Getting a file back, rebuilding a machine from a destination, repairing a backup someone edited. | 10 min |
 
+## Drives
+
+| Page | What it covers | |
+|---|---|---|
+| **[Preparing a new drive](guide/preparing-a-drive.md)** | A drive out of the box has no filesystem and cannot be used until it has one. Formatting it, mounting it so it comes back after a reboot, and getting one ready for a Pi or NAS on a different computer. | 10 min |
+| **[My drive doesn't show up](guide/troubleshooting-drives.md)** | A drive you plugged in isn't offered: blank, unmounted, read-only, or in a computer this one can't reach. | 5 min |
+
 ## Setting up specific hardware
 
 Read these when they apply to you, not before.

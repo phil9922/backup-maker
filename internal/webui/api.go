@@ -234,6 +234,66 @@ func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+// handleUnusableDrives reports storage attached to this computer that cannot
+// hold backups yet. Read-only, and the reason it exists: an empty storage list
+// used to be the whole answer, which told somebody holding a newly plugged-in
+// drive that nothing was plugged in.
+func (s *Server) handleUnusableDrives(w http.ResponseWriter, r *http.Request) {
+	if s.actions.UnusableDrives == nil {
+		unavailable(w, "drive detection")
+		return
+	}
+	out, err := s.actions.UnusableDrives()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// handlePrepareDrive formats a blank drive and mounts it.
+//
+// The only route on this API that destroys a filesystem. As with deleting
+// backups, the confirmation here is a shape check only — the check that
+// matters is made by the privileged helper, against the drive itself, at the
+// moment of acting. A page can be reloaded, scripted, or simply wrong.
+func (s *Server) handlePrepareDrive(w http.ResponseWriter, r *http.Request) {
+	if s.actions.PrepareDrive == nil {
+		unavailable(w, "preparing a drive")
+		return
+	}
+	var req PrepareDriveRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Confirm) == "" {
+		http.Error(w, "nothing was changed: type the phrase shown for that drive to confirm", http.StatusUnprocessableEntity)
+		return
+	}
+	out, err := s.actions.PrepareDrive(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// handleSetupRecipe returns the commands that put backup-maker on another
+// computer. It runs nothing anywhere: this program cannot reach inside a
+// machine it is not running on, and says so rather than pretending.
+func (s *Server) handleSetupRecipe(w http.ResponseWriter, r *http.Request) {
+	if s.actions.SetupRecipe == nil {
+		unavailable(w, "setup instructions")
+		return
+	}
+	out, err := s.actions.SetupRecipe(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
 func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 	var req BackupRequest
 	if !decodeJSON(w, r, &req) {
@@ -279,6 +339,20 @@ func writeDetailed(w http.ResponseWriter, err error) bool {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 	return true
+}
+
+// handleStopMirroring stops a folder's continuous copy while its scheduled
+// snapshots carry on. Deletes nothing, like every other stop on this API.
+func (s *Server) handleStopMirroring(w http.ResponseWriter, r *http.Request) {
+	if s.actions.StopMirroring == nil {
+		unavailable(w, "stopping a mirror")
+		return
+	}
+	if err := s.actions.StopMirroring(r.PathValue("id")); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 func (s *Server) handleRemoveFolder(w http.ResponseWriter, r *http.Request) {

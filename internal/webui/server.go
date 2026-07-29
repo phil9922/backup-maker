@@ -67,12 +67,26 @@ type Actions struct {
 	Machines func(ctx context.Context, scan bool) (any, error)
 	// Storage lists what can be selected on one machine.
 	Storage func(ctx context.Context, req StorageRequest) (any, error)
+	// UnusableDrives lists storage attached to THIS computer that cannot hold
+	// backups yet, with the reason. Read-only.
+	UnusableDrives func() (any, error)
+	// PrepareDrive formats a blank drive and mounts it. THE ONLY ROUTE ON THIS
+	// API THAT DESTROYS A FILESYSTEM. It carries a typed confirmation, which
+	// the daemon re-checks against the drive itself.
+	PrepareDrive func(ctx context.Context, req PrepareDriveRequest) (any, error)
+	// SetupRecipe returns the commands that install backup-maker on another
+	// computer found on the network. It runs nothing: a drive plugged into a
+	// machine that is not running backup-maker can only be set up over there.
+	SetupRecipe func(machineID string) (any, error)
 	// CreateBackup wires one folder to several destinations atomically.
 	CreateBackup func(req BackupRequest) (any, error)
 	// RemoveFolder and RemoveTarget only edit configuration; backup data on
 	// the target is never deleted.
 	RemoveFolder func(id string) error
-	RemoveTarget func(name string) error
+	// StopMirroring stops a folder's continuous copy and leaves its snapshot
+	// schedule running. Config only; no backup data is touched.
+	StopMirroring func(id string) error
+	RemoveTarget  func(name string) error
 	// RemoveArchive stops a snapshot schedule from running again. Config only:
 	// the zips it already wrote stay where they are, like every other removal
 	// on this API.
@@ -243,6 +257,16 @@ type StorageRequest struct {
 	Password string `json:"password,omitempty"`
 }
 
+// PrepareDriveRequest asks for a blank drive to be formatted and mounted.
+// Confirm is the phrase shown for that drive, typed back by the user; it is
+// checked against the drive by the privileged side, never here.
+type PrepareDriveRequest struct {
+	Device  string `json:"device"`
+	Mount   string `json:"mount"`
+	Label   string `json:"label,omitempty"`
+	Confirm string `json:"confirm"`
+}
+
 // BackupRequest mirrors setup.BackupRequest; kept as its own type so webui
 // doesn't force an import cycle and the JSON contract stays explicit.
 type BackupRequest struct {
@@ -374,8 +398,16 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("GET /api/browse", s.requireToken(s.handleBrowse))
 	mux.HandleFunc("GET /api/machines", s.requireToken(s.handleMachines))
 	mux.HandleFunc("POST /api/machines/storage", s.requireToken(s.handleStorage))
+	mux.HandleFunc("GET /api/machines/{id}/setup-recipe", s.requireToken(s.handleSetupRecipe))
+	mux.HandleFunc("GET /api/drives/unusable", s.requireToken(s.handleUnusableDrives))
+	// Formatting a drive erases it, so like deleting backups it is a POST to a
+	// path that says so, carrying a typed confirmation in its body.
+	mux.HandleFunc("POST /api/drives/prepare", s.requireToken(s.handlePrepareDrive))
 	mux.HandleFunc("POST /api/backups", s.requireToken(s.handleCreateBackup))
 	mux.HandleFunc("DELETE /api/folders/{id}", s.requireToken(s.handleRemoveFolder))
+	// Stopping ONE kind of backup. A POST rather than a DELETE because it
+	// changes how a folder is protected rather than removing it.
+	mux.HandleFunc("POST /api/folders/{id}/stop-mirror", s.requireToken(s.handleStopMirroring))
 	mux.HandleFunc("POST /api/folders/{id}/ignores", s.requireToken(s.handleSetFolderIgnores))
 	// Stopped folders. NOTE THE ASYMMETRY, WHICH IS DELIBERATE: every DELETE on
 	// this API is config-only and removes no data, here included. The one route

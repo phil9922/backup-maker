@@ -45,6 +45,40 @@ not 600GB. Work out `size × snapshots kept` rather than guessing.
 building. A drive you occasionally carry elsewhere is what survives a fire or a
 burglary — see [hardware.md](../setup/hardware.md).
 
+## Starting with a drive that has nothing on it
+
+A drive out of its box has no partitions and no filesystem. Plugging it in is
+not enough for any operating system to use it, so backup-maker cannot offer it
+as a destination — but it does now say so, by name, instead of reporting that
+nothing is plugged in.
+
+In the wizard the drive appears greyed out under the computer it is attached
+to, with the reason beside it and a *Set this drive up…* panel that erases it,
+formats it ext4 and mounts it permanently. The panel shows the command it will
+run before it runs it, and will not act until you have typed the drive's own
+size back — the check that catches the wrong drive.
+
+Two limits worth knowing before you rely on it:
+
+- **It only works on Linux.** macOS and Windows mount everything they recognise
+  by themselves; a drive needing more than that is a job for Disk Utility or
+  Disk Management.
+- **It only works on the computer the drive is plugged into.** No program can
+  partition a disk inside a machine it is not running on, so a drive in your
+  NAS or in another computer has to be set up over there.
+
+You can get around the second one by preparing the drive on a computer you can
+sit at and then moving it — the usual approach for a headless Pi. One catch
+worth knowing before you try it: a formatted drive moved to another machine
+still will not appear until that machine is told to mount it, because the
+mount instruction lives in `/etc/fstab` on the machine rather than on the
+drive. [Preparing a drive on one computer to use in
+another](troubleshooting-drives.md#preparing-a-drive-on-one-computer-to-use-in-another)
+covers it.
+
+[My drive doesn't show up](troubleshooting-drives.md) covers every case,
+including the drive that is plugged into a different computer.
+
 ## Sharing one drive between two computers
 
 You can. Backups are filed under the name of the computer that made them —
@@ -83,3 +117,5 @@ claimed it really is this one — reinstalled, or restored from a backup.
   that matters in the table above.
 - [When a destination fills up](../reference/space.md) — what happens when the box you chose
   runs out of room.
+- [My drive doesn't show up](troubleshooting-drives.md) — blank, unmounted,
+  read-only, or plugged into a computer this one cannot reach.

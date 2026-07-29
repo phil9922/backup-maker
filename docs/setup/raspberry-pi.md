@@ -362,19 +362,129 @@ needs root once the card is mounted and writable by you — only `f3probe` does.
 
 ## Step 4 — Format and mount the SSD
 
-> Not yet written — the reference Pi is still waiting for its drive, and this
-> guide only describes steps that have actually been carried out. It will
-> cover formatting the SSD ext4 and mounting it at `/mnt/backups` **by UUID
-> with `nofail`**, so that a drive which fails to appear leaves the Pi
-> bootable rather than stranded.
+A brand-new drive arrives with **nothing on it at all** — no partitions, no
+filesystem. Plugging it in is not enough: Linux has nothing to mount, and on a
+headless Pi there is no desktop session to mount it automatically even once
+there is. Until this step is done the drive is invisible to everything,
+including backup-maker, which is exactly as it should be.
 
-Steps 5 and 6 below are written and tested — they were set up against the
-mount point in advance, so when the drive arrives it only has to be mounted.
+You can do this from the dashboard or from the terminal. **Both do the same
+thing**, and the dashboard shows you the command it is about to run before it
+runs it.
+
+> **Thinking of preparing the drive on your laptop first and then plugging it
+> into the Pi?** That works, and for a headless Pi it is often the easier
+> route — but formatting it elsewhere is only half the job. The filesystem
+> travels with the drive; the instruction to *mount* it does not, because that
+> lives in `/etc/fstab` on each machine. A drive formatted on a laptop and
+> plugged into a Pi will sit there mounted nowhere, and so stay invisible.
+> [Preparing a drive on one computer to use in
+> another](../guide/troubleshooting-drives.md#preparing-a-drive-on-one-computer-to-use-in-another)
+> has the full sequence, including the UUID you need to carry across.
+
+### From the dashboard
+
+This needs backup-maker running on the Pi (Step 6). If you are setting the Pi
+up as a plain network drive and stopping at Step 5, use the terminal version
+below instead.
+
+Open the Pi's dashboard, start a backup, and reach **Where should the copies
+go?**. The drive appears under this computer, greyed out:
+
+> ⚠ **Ugreen Storage Device** `/dev/sda` 465.8GB, USB
+> Plugged in, but not set up for backups yet: there are no partitions on it.
+> ▸ Set this drive up…
+
+Open *Set this drive up…*, check the mount point is `/mnt/backups`, type the
+drive's size back to confirm, and press **Erase and set up this drive**.
+
+The first time, it will tell you it has not been allowed to do this and give
+you a line to run once. Because that permission lets the dashboard run this
+program as root, the program has to live somewhere only root can write — so
+install a copy there first, and grant the permission to that copy:
+
+```sh
+sudo install -o root -g root -m 755 ~/.local/bin/backup-maker /usr/local/bin/backup-maker
+sudo /usr/local/bin/backup-maker prepare-drive --install-sudoers
+```
+
+If you skip the first line, the second refuses and tells you why: a file you
+can overwrite yourself is a file anything running as you can overwrite, and
+granting it passwordless root would hand over root itself rather than the
+narrow permission being asked for.
+
+It prints the exact permission it is asking for and waits for you to type
+`yes`. Read it before you agree — it is three lines. Reload the dashboard
+afterwards and the button works.
+
+### From the terminal
+
+```sh
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINT
+```
+
+Find your drive and **be certain of the name**. `sda` on this Pi is the SSD;
+`mmcblk0` is the card the Pi boots from. Erasing the wrong one costs you the
+operating system.
+
+```sh
+sudo ~/.local/bin/backup-maker prepare-drive \
+    --device /dev/sda --mount /mnt/backups --label BACKUPS \
+    --confirm "sda 465.8GB" --dry-run
+```
+
+`--dry-run` prints every command it would run and changes nothing. Run it
+without `--dry-run` when you are happy. It refuses outright if the drive has
+anything on it, if anything is mounted from it, or if it holds a folder this
+machine backs up — so a mistyped device name fails safely rather than
+expensively.
+
+If you would rather run the standard tools yourself, this is all it does:
+
+```sh
+sudo sgdisk --clear --new=1:0:0 --typecode=1:8300 /dev/sda
+sudo mkfs.ext4 -m 1 -L BACKUPS /dev/sda1
+blkid -s UUID -o value /dev/sda1                    # note the UUID
+echo 'UUID=<uuid>  /mnt/backups  ext4  defaults,noatime,nofail  0  2' \
+    | sudo tee -a /etc/fstab
+sudo mount /mnt/backups
+sudo chown $USER:$USER /mnt/backups
+```
+
+### Why by UUID, and why `nofail`
+
+**By UUID** because device names are not stable. `/dev/sda` is whichever disk
+the kernel happened to see first; add a second drive and today's `sda` can be
+tomorrow's `sdb`. backup-maker refuses to write to a target whose marker file
+doesn't match what it expects — which is the right behaviour, and completely
+baffling when the cause is a drive that moved.
+
+**`nofail`** because without it a drive that fails to appear stops the boot,
+and a Pi with no screen or keyboard attached is then simply gone. With
+`nofail` it boots, the destination is missing, and backup-maker tells you so.
+
+### Check it worked
+
+```sh
+df -h /mnt/backups     # must show /dev/sda1, not /dev/mmcblk0p2
+touch /mnt/backups/probe && rm /mnt/backups/probe
+```
+
+If `df` names the card rather than the SSD, the drive is **not** mounted and
+you are looking at the bare directory underneath. Step 5 makes that failure
+loud rather than silent; do not skip it.
 
 ## Step 5 — Share the drive on the network
 
 This is what lets backup-maker treat the Pi as a network drive, with nothing
 installed on it beyond Samba.
+
+That is still true, and it is the simpler arrangement. The one thing it costs
+you: a drive plugged into the Pi can only be *set up* on the Pi, because no
+program can format a disk inside a computer it is not running on. Sharing a
+drive over the network does not change that. So with Samba alone, Step 4 is a
+terminal job — which is why Step 4 gives the commands as well as the buttons.
+Step 6 puts backup-maker on the Pi if you would rather do it from a browser.
 
 **First, protect the mount point from its own absence.** If the SSD ever
 fails to mount — a dead enclosure, a changed UUID, a knocked cable — a share

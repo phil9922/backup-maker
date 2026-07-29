@@ -63,12 +63,17 @@ h1 { font-size: 1.2rem; font-weight: 600; }
 /* The gap between sections is what stops the page reading as one long column.
    It was the same 1.5rem that separates things WITHIN a section, so nothing
    said where one subject ended and the next began. */
-main { padding: var(--s5); max-width: 60rem; margin: 0 auto; display: grid; gap: var(--s6); }
+/* Wider than a reading column, narrower than the screen. The main thing on
+   this page is a table, and a table genuinely wants room — squeezed into a
+   third of a monitor its columns wrap or scroll. Filling the whole width is
+   the other mistake: the eye loses the row it is on. Prose inside sets its own
+   narrower measure (.section-lede) regardless. */
+main { padding: var(--s5); max-width: 82rem; margin: 0 auto; display: grid; gap: var(--s6); }
 /* Grid items default to min-width:auto, which lets a wide table push the page
    sideways instead of scrolling inside .table-wrap. */
 main > section { min-width: 0; }
 footer {
-  max-width: 60rem; margin: 0 auto; padding: 1.25rem 1.5rem 2rem;
+  max-width: 82rem; margin: 0 auto; padding: 1.25rem 1.5rem 2rem;
   border-top: 1px solid #232a34; font-size: 0.85rem;
 }
 footer a { color: var(--accent); }
@@ -108,6 +113,30 @@ table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 0.5rem 0.9rem; white-space: nowrap; }
 th { color: var(--muted); font-weight: 500; font-size: 0.85rem; border-bottom: 1px solid #232a34; }
 tr + tr td { border-top: 1px solid #1a212b; }
+
+/* A folder's destinations are grouped under its name. The continuation rows
+   drop the rule between them so the group reads as one block, and the folder
+   column keeps its width even while empty so the destinations stay aligned. */
+tr.grouped td { border-top: none; }
+.folder-cell { min-width: 14rem; }
+.folder-cell strong { display: block; }
+.folder-cell .small { font-size: var(--fs-small); }
+/* The path can be long and is the one cell worth letting wrap rather than
+   widening the table for. */
+.folder-cell .mono { white-space: normal; word-break: break-all; }
+
+/* Actions sit hard right, away from the numbers they must not be misread as
+   belonging to. */
+td.row-actions, th.actions-col { text-align: right; width: 1%; }
+td.row-actions button { margin-left: 0.4rem; }
+td.muted { color: var(--muted); }
+
+/* The exclude editor opens as a full-width row under the folder it belongs
+   to, rather than beside one destination of several. */
+tr.ignore-row td { border-top: none; padding-top: 0; }
+tr.ignore-row .ignore-editor { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+tr.ignore-row .ignore-editor input { flex: 1 1 22rem; }
+tr.ignore-row .hint { flex-basis: 100%; white-space: normal; }
 td.ok { color: var(--ok); }
 td.busy { color: var(--busy); }
 td.bad { color: var(--bad); }
@@ -289,6 +318,13 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
 .card .ignore-editor .hint { flex-basis: 100%; font-size: 0.85rem; line-height: 1.45; }
 button.danger { color: var(--bad); border-color: #3a2a2e; }
 button.danger:hover { border-color: var(--bad); }
+
+/* For taking a choice back — deselecting, undoing, closing. Deliberately
+   quiet. Red belongs to the things that destroy data (deleting backups,
+   erasing a drive), and spending it on un-picking a folder would blunt it
+   exactly where it is needed most. */
+button.quiet { color: var(--muted); border-color: #2b3542; }
+button.quiet:hover { color: var(--fg); border-color: #3a4453; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .row.spread { justify-content: space-between; }
 
@@ -365,7 +401,26 @@ button.danger:hover { border-color: var(--bad); }
    so the snapshot password warning sat flush against the last input as though
    it were part of it. */
 .wiz-panel > .notice { margin-top: var(--s4); }
-#wizard, #adopt { padding: 1.5rem; max-width: 46rem; margin: 0 auto; display: grid; gap: 1.25rem; }
+/* THE GAP BETWEEN GROUPS MUST BEAT THE GAP WITHIN ONE, or the page reads as a
+   single undifferentiated column — the same fault the dashboard had. The
+   wizard used one 1.25rem everywhere: between the heading block and the step,
+   between a subsection's title and its own contents, and between unrelated
+   controls. Nothing said where one subject ended and the next began. */
+#wizard, #adopt { padding: var(--s5); max-width: 52rem; margin: 0 auto; display: grid; gap: var(--s6); }
+
+/* Inside a step, related controls sit close… */
+.wiz-panel { display: grid; gap: var(--s3); align-content: start; }
+/* …and anything that STARTS a new group gets real air above it. */
+.wiz-panel > .picker,
+.wiz-panel > .machines,
+.wiz-panel > #existing-folders,
+.wiz-panel > label,
+.wiz-panel > .row:first-child,
+.wiz-panel > details:first-of-type { margin-top: var(--s4); }
+.wiz-panel > :first-child { margin-top: 0; }
+/* A heading belongs to what follows it, not to what came before. */
+#existing-folders { display: grid; gap: var(--s2); }
+#existing-folders h3 { margin-bottom: var(--s1); }
 #wizard > section, #adopt > section { min-width: 0; }
 .wiz-head h2 { font-size: 1.3rem; }
 .wiz-progress {
@@ -382,7 +437,14 @@ button.danger:hover { border-color: var(--bad); }
 .wiz-nav { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .wiz-nav .skip { margin-left: auto; font-size: 0.85rem; }
 #wiz-finish, #adopt-finish { color: var(--ok); border-color: #2b4030; }
-.chosen { color: var(--ok); margin-top: 0.6rem; font-size: 0.9rem; }
+/* The folder you have chosen, with the button that lets you take it back.
+   A row so the button sits beside the text rather than under it, and wraps
+   under it on a narrow screen instead of overflowing. */
+.chosen {
+  color: var(--ok); margin-top: 0.6rem; font-size: 0.9rem;
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.chosen .small-btn { margin-left: 0; }
 /* Inline result of a per-share connection test / small validation text. */
 .field-error { color: var(--bad); font-size: 0.9rem; }
 .field-ok { color: var(--ok); font-size: 0.9rem; }
@@ -424,12 +486,60 @@ button.link:hover { color: var(--accent); }
    where no computer has been added by device ID. */
 .machines:empty { display: none; }
 .machine { background: #151b23; border: 1px solid #232a34; border-radius: 8px; padding: 0.6rem 0.9rem; }
-.machine-body { margin-top: 0.5rem; display: grid; gap: 0.35rem; }
+/* minmax(0, 1fr) rather than the default: a grid track sizes to its content,
+   so one long command line inside would stretch the whole page sideways
+   instead of scrolling inside its own block. */
+.machine-body {
+  margin-top: 0.5rem; display: grid; gap: 0.35rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+.machine-body > * { min-width: 0; }
 .storage {
   display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
   padding: 0.35rem 0.5rem; border-radius: 6px; cursor: pointer;
 }
 .storage:hover { background: #1c2430; }
+
+/* Storage that is attached but cannot hold backups yet. Dimmed rather than
+   hidden: the drive IS there, and the reason it cannot be picked is the most
+   useful thing on the page for whoever just plugged it in. */
+.unusable .storage { cursor: default; opacity: 0.75; }
+.unusable .storage:hover { background: none; }
+.unusable {
+  border: 1px dashed #3a3f4a; border-radius: 8px;
+  padding: 0.5rem 0.6rem; margin: 0.2rem 0;
+}
+.unusable > p { margin: 0.15rem 0 0 1.9rem; }
+.unusable strong { color: var(--fg); }
+
+/* The panel that erases a drive, and the one that explains a computer we
+   cannot see inside. */
+.prepare, .recipe { margin: 0.5rem 0 0.1rem 1.9rem; min-width: 0; }
+.unusable, .offbox { min-width: 0; }
+.prepare > summary, .recipe > summary { cursor: pointer; padding: 0.2rem 0; }
+.prepare[open], .recipe[open] { padding-bottom: 0.5rem; }
+.prepare .warn {
+  color: var(--bad); background: #1e1517; border: 1px solid #3a2a2e;
+  border-radius: 6px; padding: 0.5rem 0.7rem; margin: 0.4rem 0;
+}
+.field { margin: 0.5rem 0; }
+.field label { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.field p { margin: 0.2rem 0 0; }
+
+/* Any command a person is expected to run. Shown before it is run, not only
+   when it fails, so nothing happens as an administrator that was not visible
+   first. Long lines scroll rather than pushing the page sideways. */
+.cmd {
+  background: #10141a; border: 1px solid #232a34; border-radius: 6px;
+  padding: 0.6rem 0.7rem; margin: 0.4rem 0; overflow-x: auto;
+  font-size: var(--fs-small); line-height: 1.45; white-space: pre;
+}
+button.copy { padding: 0.15rem 0.6rem; font-size: 0.8rem; }
+
+.offbox {
+  border-top: 1px solid #232a34; margin-top: 0.6rem; padding-top: 0.6rem;
+}
+.offbox p { margin: 0.3rem 0; }
 .review { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin-top: 0.5rem; }
 .review dt { color: var(--muted); }
 .review dd { margin: 0; white-space: pre-line; }

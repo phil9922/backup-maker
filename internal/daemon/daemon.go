@@ -47,6 +47,12 @@ type daemon struct {
 	// MAC configured. Safe for concurrent use; rate-limits per target.
 	waker *wol.Waker
 
+	// archiveRunning holds the schedules executing right now, keyed by job
+	// name. Guarded by mu. A snapshot's last-run time is only written when it
+	// completes, so this is the only way to tell a job writing a
+	// multi-gigabyte zip from one that has never started.
+	archiveRunning map[string]time.Time
+
 	// tally is the lifetime "how much have you backed up for me" odometer.
 	// Written by every mirror engine and by the snapshot writer, persisted in
 	// batches rather than per file. Safe for concurrent use.
@@ -294,6 +300,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		Client:             d.engineClient,
 		Engines:            d.currentEngines,
 		Archives:           d.archiveStatus,
+		ArchiveRunning:     d.archiveRunningSnapshot,
 		HasArchivePassword: d.hasArchivePassword,
 		SetupDone:          d.setupDone,
 		Space:              d.spaceSamples,
@@ -510,6 +517,7 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 				ignores = append(ignores, cfg.Defaults.Ignore...)
 			}
 			ignores = append(ignores, f.ExtraIgnore...)
+			scanMark := d.marks.scanMark(f.ID, t.Name, p.uuid)
 			e := localmirror.New(localmirror.Options{
 				FolderID:     f.ID,
 				TargetName:   t.Name,
@@ -529,8 +537,17 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 				// restart, and where the next one is reported back to.
 				LastSync: d.marks.lastSync(f.ID, t.Name),
 				Synced:   d.syncRecorder(f.ID, t.Name),
-				Ignores:  ignores,
-				Log:      d.log,
+				// What the last COMPLETED pass over this pair learned, so this
+				// one does not start by re-learning it. Chiefly the timestamp
+				// calibration: without it, a destination that does not preserve
+				// mtimes recopies every same-size file it holds, once per
+				// daemon restart.
+				PrevScanStart: scanMark.PassStart,
+				MtimeTrusted:  scanMark.MtimeTrusted,
+				DestFileCount: scanMark.DestFiles,
+				PassCompleted: d.passRecorder(f.ID, t.Name, p.uuid),
+				Ignores:       ignores,
+				Log:           d.log,
 				// What tells this computer's folder on the destination from
 				// another computer's that happens to have the same name.
 				InstallID: installID,
@@ -1039,8 +1056,14 @@ func buildActions(d *daemon) webui.Actions {
 		RevertFolder: d.revertFolder,
 		Machines:     d.listMachines,
 		Storage:      d.machineStorage,
-		CreateBackup: d.createBackup,
-		RemoveFolder: setup.RemoveFolder,
+		// Seeing an unusable drive is read-only; preparing one is the only
+		// action on this API that destroys a filesystem.
+		UnusableDrives: d.unusableDrives,
+		PrepareDrive:   d.prepareDrive,
+		SetupRecipe:    d.setupRecipe,
+		CreateBackup:   d.createBackup,
+		RemoveFolder:   setup.RemoveFolder,
+		StopMirroring:  setup.StopMirroring,
 		// The three actions on a stopped folder. Methods rather than bare
 		// setup functions because each one has to say what it did in a
 		// sentence, and the delete needs the daemon's own way of opening a

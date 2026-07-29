@@ -6,7 +6,14 @@ once per computer.
 If you have not downloaded it yet, the archives are on the
 [releases page](https://github.com/phil9922/backup-maker/releases/latest) —
 unpack it and put the `backup-maker` binary somewhere on your `PATH`. There is
-nothing else to install, and **nothing to install on the destinations**.
+nothing else to install, and **nothing to install on the destinations** — a
+USB drive, a NAS, a router's shared disk and a Samba box all work untouched.
+
+One exception, and it is about setting up rather than backing up: a *blank*
+drive plugged into another computer has to be partitioned and mounted on that
+computer before anything can be shared from it. If you want to do that from a
+browser rather than a terminal, that machine needs backup-maker too — see
+[Troubleshooting: my drive doesn't show up](troubleshooting-drives.md).
 
 ## Quick start
 

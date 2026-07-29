@@ -46,4 +46,17 @@ Existing guards that enforce this, and must not be weakened:
   requires the folder's name typed back and is checked in the daemon.
 - **An empty `folders` list means EVERY folder.** Never let a scoped list
   become empty by removing entries from it — that silently widens a job from
-  one folder to all of them. See `setup.RemoveFolder`.
+  one folder to all of them. `setup.RemoveFolder` avoids it by leaving ids in
+  place; `setup.dropFolderRefs` and `setup.StopMirroring` avoid it by setting
+  `ArchivesOnly` when a list would empty, so the target mirrors nothing rather
+  than everything. **This has been violated twice** — once by a snapshot
+  schedule re-aiming itself at another folder, and once (found 2026-07-28) by
+  tidying up a stopped folder, which handed a destination scoped to that one
+  folder every folder on the machine.
+
+- **A folder that only wants scheduled snapshots must say so on the folder.**
+  `Target.ArchivesOnly` keeps a snapshot-only *destination* out of the mirror
+  engines; `Folder.SnapshotOnly` is the other half and keeps a snapshot-only
+  *folder* out of every unscoped destination. Without it, asking for one daily
+  zip started a continuous mirror of that folder on every drive configured —
+  which is what happened on 2026-07-28.

@@ -154,6 +154,7 @@ func (d *daemon) saveState(bytes, files uint64, since time.Time) error {
 	d.state.CountingSince = since
 	if d.marks != nil {
 		d.state.MirrorLastSync = d.marks.snapshot()
+		d.state.MirrorScanState = d.marks.scanSnapshot()
 	}
 	return d.state.Save()
 }

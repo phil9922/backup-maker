@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phil9922/backup-maker/internal/config"
+	"github.com/phil9922/backup-maker/internal/localmirror"
 )
 
 // syncMarks remembers when each folder last completed a sync to each drive/share
@@ -34,12 +35,28 @@ type syncMarks struct {
 	// — one destination inheriting another's clock — impossible rather than
 	// unlikely, and prunes a folder at a time.
 	at map[string]map[string]time.Time
+	// scans is folder id -> target name -> what the last COMPLETED pass learned.
+	// Alongside `at` rather than merged into it: `at` is the user-facing clock
+	// and this is engine bookkeeping, and the two have different rules about
+	// when they may be written.
+	scans map[string]map[string]config.ScanMark
 }
 
 // newSyncMarks seeds from persisted state, which is the entire point: the
 // engines started moments later get their clocks back.
 func newSyncMarks(s *config.State) *syncMarks {
-	m := &syncMarks{at: map[string]map[string]time.Time{}}
+	m := &syncMarks{
+		at:    map[string]map[string]time.Time{},
+		scans: map[string]map[string]config.ScanMark{},
+	}
+	for folder, byTarget := range s.MirrorScanState {
+		for target, mk := range byTarget {
+			if m.scans[folder] == nil {
+				m.scans[folder] = map[string]config.ScanMark{}
+			}
+			m.scans[folder][target] = mk
+		}
+	}
 	for folder, byTarget := range s.MirrorLastSync {
 		for target, when := range byTarget {
 			if when.IsZero() {
@@ -71,6 +88,57 @@ func (m *syncMarks) record(folder, target string, at time.Time) {
 		m.at[folder] = map[string]time.Time{}
 	}
 	m.at[folder][target] = at
+}
+
+// scanMark reports what to seed an engine's scan state with.
+//
+// A mark learned from DIFFERENT STORAGE under this target name is discarded
+// rather than inherited. Target names are just labels in config.toml: swap the
+// card in the slot, or point a share name somewhere else, and the name is the
+// same while nothing about the destination is. Handing the new storage the old
+// one's "everything up to here has been checked" would be a claim nobody made.
+func (m *syncMarks) scanMark(folder, target, uuid string) config.ScanMark {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mk := m.scans[folder][target]
+	if mk.TargetUUID != "" && uuid != "" && mk.TargetUUID != uuid {
+		return config.ScanMark{}
+	}
+	return mk
+}
+
+// recordPass stores what one completed pass learned.
+func (m *syncMarks) recordPass(folder, target, uuid string, mk localmirror.PassMark) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.scans[folder] == nil {
+		m.scans[folder] = map[string]config.ScanMark{}
+	}
+	trusted := mk.MtimeTrusted
+	m.scans[folder][target] = config.ScanMark{
+		PassStart:    mk.PassStart,
+		MtimeTrusted: &trusted,
+		DestFiles:    mk.DestFiles,
+		TargetUUID:   uuid,
+	}
+}
+
+// scanSnapshot copies the scan marks out for writing.
+func (m *syncMarks) scanSnapshot() map[string]map[string]config.ScanMark {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.scans) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]config.ScanMark, len(m.scans))
+	for folder, byTarget := range m.scans {
+		copied := make(map[string]config.ScanMark, len(byTarget))
+		for target, mk := range byTarget {
+			copied[target] = mk
+		}
+		out[folder] = copied
+	}
+	return out
 }
 
 // snapshot copies the marks out for writing. Returns nil when there are none,
@@ -129,6 +197,20 @@ func (m *syncMarks) prune(cfg *config.Config) bool {
 			delete(m.at, folder)
 		}
 	}
+	// The scan marks are pruned by the same rule and for the same reason: they
+	// are per folder × destination too, and a pair that no longer exists must
+	// not keep growing state.json.
+	for folder, byTarget := range m.scans {
+		for target := range byTarget {
+			if !live[folder][target] {
+				delete(byTarget, target)
+				dropped = true
+			}
+		}
+		if len(byTarget) == 0 {
+			delete(m.scans, folder)
+		}
+	}
 	return dropped
 }
 
@@ -144,6 +226,22 @@ func (d *daemon) syncRecorder(folderID, target string) func(time.Time) {
 		// Only ever marked dirty here: the tally's flush is what reaches the
 		// disk, so a folder syncing every few seconds costs one write per flush
 		// interval rather than one per sync.
+		d.tally.touch()
+	}
+}
+
+// passRecorder is handed to one mirror engine as Options.PassCompleted, and is
+// nil-safe for the same reason syncRecorder is.
+//
+// Losing this to a hard kill inside the flush window costs one redundant pass
+// and nothing else: the mark only ever suppresses a recopy, so its absence can
+// never cause a file to be skipped.
+func (d *daemon) passRecorder(folderID, target, uuid string) func(localmirror.PassMark) {
+	return func(mk localmirror.PassMark) {
+		if d.marks == nil {
+			return
+		}
+		d.marks.recordPass(folderID, target, uuid, mk)
 		d.tally.touch()
 	}
 }

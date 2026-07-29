@@ -249,6 +249,9 @@ it.
 
 - [Choosing destinations](docs/guide/3-destinations.md) — the arrangement that covers
   the most failure modes for the least money, and how to size it.
+- [Preparing a new drive](docs/guide/preparing-a-drive.md) — a drive out of the
+  box has no filesystem and cannot hold backups until it has one. Formatting
+  and mounting it, including readying one for a Pi on a different computer.
 - [Hardware guidance](docs/setup/hardware.md) — categories and principles
   rather than brands: always-on targets, offsite options, drives, formats.
 - [Setting up a Raspberry Pi as a backup target](docs/setup/raspberry-pi.md) —

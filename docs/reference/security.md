@@ -81,8 +81,94 @@ wondering what it will and won't do on its own.
   topic name is not a password: pick one with real randomness in it, or protect
   the topic and give backup-maker the access token.
 
+## Preparing a drive
+
+backup-maker runs as an ordinary user and never gains privilege on its own.
+Partitioning a disk needs root, so the one operation that requires it —
+formatting a blank drive — is a separate subcommand, and the daemon reaches it
+only through `sudo`. If `sudo` will not run it without a password, nothing
+tries to work around that: the dashboard shows you the command to run yourself.
+
+Granting the permission is opt-in, one command, and it prints the rule before
+installing it:
+
+```sh
+sudo backup-maker prepare-drive --install-sudoers
+```
+
+It writes one line to `/etc/sudoers.d/backup-maker`:
+
+```
+you ALL=(root) NOPASSWD: /usr/local/bin/backup-maker prepare-drive --from-stdin
+```
+
+**The rule has no wildcard, and that matters.** It names one exact command that
+takes no arguments; which drive to prepare arrives on standard input instead. A
+sudoers wildcard matches any further arguments, whitespace included, so an
+earlier version of this rule ended in `*` and also granted a passwordless
+`prepare-drive --force …` — the flag that skips the "there is already something
+on it" refusal, which is the check almost everything else here rests on. There
+is now nothing to inject: `--force` has no way through that door at all and
+remains available only to someone typing their own password at a terminal.
+
+**`--install-sudoers` refuses to name a binary you can overwrite.** Every check
+below lives *inside* this program, so granting passwordless root to a file a
+non-root user can replace would not grant "the right to prepare a blank drive",
+it would grant root outright — swap the file, run the command, be root. So the
+binary and every directory above it must be owned by root and not writable by
+group or others. If yours is in `~/.local/bin`, it will tell you to install it
+somewhere only root can write and run it again from there:
+
+```sh
+sudo install -o root -g root -m 755 ~/.local/bin/backup-maker /usr/local/bin/backup-maker
+sudo /usr/local/bin/backup-maker prepare-drive --install-sudoers
+```
+
+A sudoers rule still cannot express "only a disk with nothing on it". What
+actually protects you, all of it re-checked as root at the moment of acting and
+none of it decided in the browser:
+
+- the device must be a whole disk named exactly, not a partition, not a symlink,
+  not a `/dev/disk/by-*` alias
+- nothing may be mounted from it and it may not be in use as swap — which is
+  what puts the system disk permanently out of reach
+- `wipefs` must find **no** signature of any kind: a drive with a filesystem or
+  partition table on it is refused outright, and the flag that overrides this
+  is not reachable from the dashboard
+- no folder this machine backs up may live on the disk, and the mount point may
+  not overlap one
+- the typed confirmation must match a phrase derived from the drive itself
+
+The rule names one absolute path. **Move** the binary and the rule stops
+matching. **Replacing** the file at that path is a different matter — whatever
+sits there is what runs as root, which is precisely why the path has to be one
+only root can write to, and why `--install-sudoers` checks that before it will
+write the rule.
+
+Consequences worth weighing before you install it:
+
+- Anyone who can reach the dashboard **and** hold its token can format a blank
+  drive attached to that machine. The dashboard is bound to localhost and needs
+  a token from `state.json` (mode 0600), so this is the same trust boundary as
+  the rest of the API — but it is the only part of that API that reaches root.
+- The LAN network view is read-only and cannot trigger it.
+- It grants nothing else. It is not a general `NOPASSWD` and does not let the
+  dashboard run other commands as root.
+
+Remove it whenever you like; nothing else stops working:
+
+```sh
+sudo rm /etc/sudoers.d/backup-maker
+```
+
+Without it, drive preparation still works — you run the printed command in a
+terminal instead.
+
 ## See also
 
+- [My drive doesn't show up](../guide/troubleshooting-drives.md) — the whole
+  drive-setup flow, including what to run when you would rather not grant the
+  permission above.
 - [Monitoring your backups](../guide/5-monitoring.md) — what the read-only network view
   and the on-destination status page deliberately never show.
 - [When a destination fills up](space.md) — exactly what automatic reclamation
