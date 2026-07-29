@@ -16,15 +16,15 @@
      visible against --panel-2 from across the room, which #2b3542 was not.
      --btn-lip is the hairline of light along the top edge that makes it read
      as raised, and that a press takes away. */
-  --btn-face: #263141;
-  --btn-face-hi: #2f3d50;
-  --btn-edge: #3a4859;
-  --btn-edge-hi: #4b5c70;
-  --btn-ink: #dbe3ec;
+  --btn-face: #2c3a4c;
+  --btn-face-hi: #3a4c62;
+  --btn-edge: #4a5d75;
+  --btn-edge-hi: #647990;
+  --btn-ink: #eef3f8;
   --btn-lip: rgba(255, 255, 255, 0.07);
   --accent-hi: #78d3f9;
   --danger-face: #3a222a;
-  --danger-edge: #6b3038;
+  --danger-edge: #8c3f49;
   --danger-ink: #ff9b96;
   /* Explanatory text — the sentence under a switch, the note beside a group
      title. It is muted because it is subordinate, NOT because it is optional:
@@ -235,11 +235,11 @@ button {
   background: var(--btn-face);
   color: var(--btn-ink);
   border: 1px solid var(--btn-edge);
-  border-radius: 7px;
-  padding: 0.5rem 1.05rem;
-  min-height: 2.25rem;
+  border-radius: 8px;
+  padding: 0.62rem 1.25rem;
+  min-height: 2.6rem;
   font: inherit;
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 600;
   line-height: 1.15;
   cursor: pointer;
@@ -551,9 +551,9 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
    noise, and the top lip alone is enough to keep them reading as raised. */
 .small-btn {
   margin-left: 0.6rem;
-  padding: 0.32rem 0.75rem;
-  min-height: 1.9rem;
-  font-size: 0.85rem;
+  padding: 0.45rem 1rem;
+  min-height: 2.25rem;
+  font-size: 0.92rem;
   box-shadow: inset 0 1px 0 var(--btn-lip);
 }
 .small-btn:active:not(:disabled) { box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3); }
