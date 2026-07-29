@@ -912,8 +912,12 @@ function archiveProgressCell(a) {
   }
   bar.appendChild(fill);
   const label = el('span', 'bar-label');
+  // Naming the phase matters most at the end: packing finishes, the bar sits
+  // full, and verification then re-reads the whole archive off the destination
+  // for minutes. Without a word for that, a working job looks like a hung one.
+  const what = a.phase === 'verifying' ? 'checking it opens: ' : '';
   setText(label, a.total_bytes > 0
-    ? `${humanBytes(a.done_bytes || 0)} of ${humanBytes(a.total_bytes)}`
+    ? `${what}${humanBytes(a.done_bytes || 0)} of ${humanBytes(a.total_bytes)}`
     : 'counting…');
   wrap.append(bar, label);
   cell.appendChild(wrap);

@@ -23,9 +23,14 @@ import (
 func TestTheProgressTotalMatchesWhatIsActuallyPacked(t *testing.T) {
 	cfg, job, b, _ := testSetup(t)
 
+	// The LAST PACKING report, not simply the last: verification follows, and
+	// it counts compressed bytes read back off the destination — a different
+	// quantity answering a different question.
 	var last Progress
 	res := Run(b, cfg, job, "hunter2", slog.New(slog.DiscardHandler), func(p Progress) {
-		last = p
+		if p.Phase == PhasePacking {
+			last = p
+		}
 	})
 	if res.Err != "" {
 		t.Fatalf("run failed: %s", res.Err)
@@ -58,7 +63,7 @@ func TestTheProgressTotalHonoursTheExcludes(t *testing.T) {
 	var first Progress
 	seen := false
 	_ = Run(b, cfg, job, "pw", slog.New(slog.DiscardHandler), func(p Progress) {
-		if !seen {
+		if !seen && p.Phase == PhasePacking {
 			first, seen = p, true
 		}
 	})
@@ -80,7 +85,9 @@ func TestTheTotalIsKnownBeforePackingStarts(t *testing.T) {
 
 	var reports []Progress
 	_ = Run(b, cfg, job, "pw", slog.New(slog.DiscardHandler), func(p Progress) {
-		reports = append(reports, p)
+		if p.Phase == PhasePacking {
+			reports = append(reports, p)
+		}
 	})
 	if len(reports) < 2 {
 		t.Fatalf("got %d reports, want a total then one per file", len(reports))
@@ -183,5 +190,39 @@ func TestAFileVanishingAfterTheCountDoesNotFailTheRun(t *testing.T) {
 	}
 	if res.Files < 1 {
 		t.Errorf("packed %d files, want at least the one that still existed", res.Files)
+	}
+}
+
+// THE GUARANTEE: verification reports its own progress.
+//
+// Packing ends and the archive is then read back in full to prove it can be
+// opened. For a multi-gigabyte snapshot over a network that is minutes of work,
+// and with nothing reported the bar sat full at 100% while the state still said
+// "running" — indistinguishable from a hang, and reported as one.
+func TestVerificationReportsProgressOfItsOwn(t *testing.T) {
+	cfg, job, b, _ := testSetup(t)
+
+	var phases []string
+	var lastVerify Progress
+	res := Run(b, cfg, job, "pw", slog.New(slog.DiscardHandler), func(p Progress) {
+		if len(phases) == 0 || phases[len(phases)-1] != p.Phase {
+			phases = append(phases, p.Phase)
+		}
+		if p.Phase == PhaseVerifying {
+			lastVerify = p
+		}
+	})
+	if res.Err != "" {
+		t.Fatalf("run failed: %s", res.Err)
+	}
+	want := []string{PhasePacking, PhaseVerifying}
+	if len(phases) != len(want) || phases[0] != want[0] || phases[1] != want[1] {
+		t.Fatalf("phases = %v, want %v", phases, want)
+	}
+	if lastVerify.TotalBytes != res.StoredBytes {
+		t.Errorf("verification counted against %d bytes, the archive is %d", lastVerify.TotalBytes, res.StoredBytes)
+	}
+	if lastVerify.DoneBytes != lastVerify.TotalBytes {
+		t.Errorf("verification finished at %d of %d", lastVerify.DoneBytes, lastVerify.TotalBytes)
 	}
 }

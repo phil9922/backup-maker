@@ -7,6 +7,7 @@
 package archive
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"io/fs"
@@ -29,6 +30,12 @@ import (
 const DirName = "backup-maker-archives"
 
 const stampLayout = "20060102-150405"
+
+// writeBufferSize is how much is gathered before anything is handed to the
+// destination. 1MB because that is the largest a single SMB2 write carries in
+// practice; larger just gets split again on the way out, smaller means more
+// round trips for the same bytes.
+const writeBufferSize = 1 << 20
 
 // Result summarizes one archive run for status displays.
 type Result struct {
@@ -88,7 +95,19 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 	// Counted on the way out rather than stat'ed afterwards: it is exact, and
 	// it costs nothing extra on a destination reached over SMB.
 	stored := &countingWriter{w: w}
-	files, bytes, err := writeZip(stored, cfg, job, folders, password, report)
+	// BUFFERED, because the destination writer is the network.
+	//
+	// An SMB backend turns every Write into its own request and waits for it,
+	// and the zip's compressor emits small blocks — so the snapshot was paying
+	// a round trip per block. Measured against a Raspberry Pi on ethernet, from
+	// a laptop with a 526 Mbit/s link and the Pi at load 0.00, that came to
+	// about 2 MB/s: neither end was busy, the job was simply waiting for the
+	// network tens of thousands of times a second.
+	buffered := bufio.NewWriterSize(stored, writeBufferSize)
+	files, bytes, err := writeZip(buffered, cfg, job, folders, password, report)
+	if err == nil {
+		err = buffered.Flush() // before Close, or the tail is never sent
+	}
 	if cerr := w.Close(); err == nil {
 		err = cerr
 	}
@@ -96,7 +115,14 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 		_ = b.Remove(tmp)
 		return fail(err)
 	}
-	if err := verifyZip(b, tmp, password, files); err != nil {
+	if err := verifyZip(b, tmp, password, files, func(read int64) {
+		if report != nil {
+			report(Progress{
+				Phase: PhaseVerifying, DoneFiles: files, TotalFiles: files,
+				DoneBytes: read, TotalBytes: stored.n,
+			})
+		}
+	}); err != nil {
 		_ = b.Remove(tmp)
 		return fail(fmt.Errorf("verification: %w", err))
 	}
@@ -117,6 +143,21 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 		log.Warn("archive retention prune failed", "archive", job.Name, "err", err)
 	}
 	return res
+}
+
+// countingReader reports how much of the archive has been read back, so the
+// verification phase can show progress instead of a full bar that does not move.
+type countingReader struct {
+	r      io.Reader
+	n      int64
+	report func(int64)
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	c.report(c.n)
+	return n, err
 }
 
 // countingWriter totals the bytes handed to the destination, so the size of the
@@ -141,11 +182,27 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 // varies wildly across one folder — 2.7GB of images beside 1.4GB of source —
 // so the honest denominator is the one thing known before any work starts.
 type Progress struct {
+	// Phase is "packing" while files are being compressed into the zip, and
+	// "verifying" while the finished archive is read back and decrypted.
+	//
+	// VERIFICATION IS NOT A ROUNDING ERROR AT THE END. It re-reads every byte
+	// of the archive from the destination — for a 3.4GB snapshot over a network
+	// that was ten minutes, during which the bar sat full at 100% and the state
+	// still said "running". It looked hung, and was reported as hung, while it
+	// was doing exactly what it promises: proving the backup can be opened
+	// again before keeping it.
+	Phase      string
 	DoneFiles  int
 	TotalFiles int
 	DoneBytes  int64
 	TotalBytes int64
 }
+
+// Phases a snapshot passes through.
+const (
+	PhasePacking   = "packing"
+	PhaseVerifying = "verifying"
+)
 
 // eachFile calls fn for every file a snapshot of these folders would contain.
 //
@@ -220,7 +277,7 @@ func measure(cfg *config.Config, job config.Archive, folders []config.Folder) (f
 // writeZip streams every selected folder into an AES-256 encrypted zip.
 func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []config.Folder, password string, report func(Progress)) (files int, total int64, err error) {
 	zw := zip.NewWriter(w)
-	prog := Progress{}
+	prog := Progress{Phase: PhasePacking}
 	if report != nil {
 		prog.TotalFiles, prog.TotalBytes = measure(cfg, job, folders)
 		report(prog)
@@ -260,7 +317,7 @@ func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []con
 // temp file so memory use stays flat), checks the entry count, and fully
 // decrypts every entry — proof the backup is restorable with the password
 // before we keep it.
-func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int) error {
+func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int, onRead func(int64)) error {
 	src, err := b.OpenRead(relPath)
 	if err != nil {
 		return err
@@ -272,7 +329,15 @@ func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int) e
 	}
 	defer os.Remove(spool.Name())
 	defer spool.Close()
-	size, err := io.Copy(spool, src)
+	// Same reason the write side is buffered: reading back over SMB in the
+	// default 32KB chunks is 32 round trips per megabyte, and verification
+	// re-reads the WHOLE archive — for a 3.4GB snapshot that was the slower
+	// half of the job.
+	var r io.Reader = src
+	if onRead != nil {
+		r = &countingReader{r: src, report: onRead}
+	}
+	size, err := io.CopyBuffer(spool, r, make([]byte, writeBufferSize))
 	if err != nil {
 		return err
 	}

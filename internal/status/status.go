@@ -262,6 +262,11 @@ type ArchiveRow struct {
 	TotalFiles int   `json:"total_files,omitempty"`
 	DoneBytes  int64 `json:"done_bytes,omitempty"`
 	TotalBytes int64 `json:"total_bytes,omitempty"`
+	// Phase is "packing" or "verifying". Verification re-reads the whole
+	// archive back off the destination, which for a multi-gigabyte snapshot is
+	// minutes of work that looked like a hang: the bar was full and the word
+	// had not changed since it started.
+	Phase string `json:"phase,omitempty"`
 }
 
 // Completion is how much of the running snapshot has been packed, by bytes.
@@ -903,6 +908,7 @@ func (col *Collector) Collect() Model {
 			if p, ok := progress[job.Name]; ok {
 				row.DoneFiles, row.TotalFiles = p.DoneFiles, p.TotalFiles
 				row.DoneBytes, row.TotalBytes = p.DoneBytes, p.TotalBytes
+				row.Phase = p.Phase
 			}
 			// Resolved through the same choke point the snapshot writer uses,
 			// so what the panel says a job covers and what it actually seals

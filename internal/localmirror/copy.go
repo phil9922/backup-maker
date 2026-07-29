@@ -18,6 +18,9 @@ const mtimeTolerance = 2 * time.Second
 
 const tmpSuffix = ".bmtmp"
 
+// writeBufferSize matches the largest a single SMB2 write carries in practice.
+const writeBufferSize = 1 << 20
+
 // progressWriter counts bytes on their way to the destination and reports the
 // running total for the current attempt.
 //
@@ -87,7 +90,10 @@ func copyFile(b Backend, srcPath, relPath string, now time.Time, verify bool, pr
 		if progress != nil {
 			w = &progressWriter{w: w, report: progress}
 		}
-		n, err := io.Copy(w, src)
+		// CopyBuffer with a large buffer, not io.Copy: a share backend turns
+		// each Write into its own SMB request and waits for it, so the default
+		// 32KB means 32 round trips per megabyte. A local drive does not care.
+		n, err := io.CopyBuffer(w, src, make([]byte, writeBufferSize))
 		if err != nil {
 			cleanup()
 			return 0, fmt.Errorf("copying %s: %w", relPath, err)
