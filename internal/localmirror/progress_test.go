@@ -4,6 +4,7 @@ package localmirror
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -287,17 +288,50 @@ func TestAScanReportsHowManyFilesItHasCheckedAndOutOfHowMany(t *testing.T) {
 	}
 	e := newTestEngine(t, src, NewLocalFS(t.TempDir()), 0)
 
+	// One pass to populate the destination: against an empty one there is
+	// nothing to list and nothing to tidy, so those counters would read zero
+	// for reasons that say nothing about whether they work.
 	if _, _, err := e.reconcile(); err != nil {
 		t.Fatal(err)
 	}
 
-	st := e.Status()
-	if st.ScanTotalFiles != 3 {
-		t.Errorf("ScanTotalFiles = %d, want 3 — the denominator is known once the source walk finishes", st.ScanTotalFiles)
+	// Sampled at each destination walk, which is the only seam a synchronous
+	// pass offers — and enough, because a phase publishes its denominator
+	// before its walk begins.
+	var samples []Status
+	e.backend = &statusSpy{Backend: e.backend, e: e, samples: &samples}
+	if _, _, err := e.reconcile(); err != nil {
+		t.Fatal(err)
 	}
-	if st.ScannedFiles != 3 {
-		t.Errorf("ScannedFiles = %d, want 3", st.ScannedFiles)
+
+	found := false
+	for _, st := range samples {
+		if st.Phase == "tidying" && st.ScanTotalFiles == 3 {
+			found = true
+		}
 	}
+	if !found {
+		t.Errorf("no phase reported a denominator of 3 (the destination's own file count); samples: %v", phasesOf(samples))
+	}
+}
+
+type statusSpy struct {
+	Backend
+	e       *Engine
+	samples *[]Status
+}
+
+func (s *statusSpy) WalkDir(root string, fn fs.WalkDirFunc) error {
+	*s.samples = append(*s.samples, s.e.Status())
+	return s.Backend.WalkDir(root, fn)
+}
+
+func phasesOf(ss []Status) []string {
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, s.Phase)
+	}
+	return out
 }
 
 // Before the source walk finishes there is genuinely no denominator, and the

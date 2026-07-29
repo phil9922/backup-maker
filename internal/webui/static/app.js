@@ -188,12 +188,23 @@ function updateRow(tr, r, folder, first) {
   // A scan with a denominator drives a real bar. Stripes are only for the part
   // before the source walk has finished, when there genuinely is no number.
   const scanning = r.state === 'scanning';
-  c.fill.classList.toggle('indeterminate', scanning && !r.total_bytes && !r.scan_total);
+  // A phase with no denominator gets stripes rather than a full bar: a solid
+  // 100% that sits still for minutes is what made this look stalled.
+  c.fill.classList.toggle('indeterminate',
+    (scanning && !r.total_bytes && !r.scan_total) || r.phase === 'tidying');
   if (scanning && !r.total_bytes && r.scan_total > 0) {
     c.fill.style.width = Math.min(100, ((r.scanned_files || 0) / r.scan_total) * 100) + '%';
   }
 
-  if (r.total_bytes > 0) {
+  if (r.phase === 'tidying') {
+    // The tail of a pass: looking for things deleted from the source. It has
+    // no denominator and it is where the minutes go on a network destination,
+    // so it says what it is doing rather than leaving a full amber bar to be
+    // read as a stall.
+    setText(c.label, r.scanned_files
+      ? `checking for deleted files: ${r.scanned_files.toLocaleString()}`
+      : 'checking for deleted files…');
+  } else if (r.total_bytes > 0) {
     setText(c.label, `${humanBytes(r.transferred_bytes || 0)} of ${humanBytes(r.total_bytes)}`);
   } else if (r.need_items > 0) {
     setText(c.label, `${r.need_items} left`);

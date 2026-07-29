@@ -272,6 +272,9 @@ func rowProgress(r status.Row) string {
 		if r.FirstBackup {
 			what = "working out what to copy"
 		}
+		if r.Phase == "tidying" {
+			what = "checking for deleted files"
+		}
 		if r.Phase == "source" && r.ScannedFiles == 0 {
 			return what
 		}

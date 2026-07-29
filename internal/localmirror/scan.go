@@ -142,6 +142,17 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 
 	// Anything mirrored that's gone from (or now ignored in) the source gets
 	// versioned away; stale temp files from interrupted copies are dropped.
+	//
+	// SAID OUT LOUD, because this is where the time goes. Measured against a
+	// Raspberry Pi: listing took 20 seconds and copying 40, then this walk and
+	// the empty-directory sweep below took nearly four minutes — during which
+	// the row read "syncing", pending 0, bar full and amber, with nothing
+	// changing. Indistinguishable from a stall, and reported as one. No
+	// Counted against what the destination held when this pass started, which
+	// this walk visits all of. It can be nudged past 100% by a file that
+	// appeared since; the display clamps, and a denominator that is right to
+	// within a handful of files beats none at all.
+	e.beginScanPhase("tidying", int64(len(idx.byRel)))
 	err = e.backend.WalkDir(e.destRoot, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -172,6 +183,7 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 		if d.IsDir() {
 			return nil
 		}
+		e.scanned.Add(1)
 		if _, ok := sourceFiles[rel]; ok {
 			return nil
 		}
@@ -186,6 +198,12 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 		return copied, removed, err
 	}
 
+	// A THIRD walk, and it was the last silent stretch: the tidying counter
+	// reached its total and then sat there while this ran. Same phase name —
+	// from outside it is one activity, "clearing up after the copy", and
+	// splitting it into two words would describe the implementation rather than
+	// the wait. The counter is reset so it does not read as finished-and-stuck.
+	e.beginScanPhase("tidying", 0)
 	e.removeEmptyDestDirs()
 	e.prevScanStart = now // only read/written from the sync goroutine
 	// Past every failure return above: this pass reached the end, so what it
@@ -295,6 +313,7 @@ func (e *Engine) removeEmptyDestDirs() {
 		if d.Name() == VersionsDirName {
 			return fs.SkipDir
 		}
+		e.scanned.Add(1)
 		dirs = append(dirs, p)
 		return nil
 	})
