@@ -281,10 +281,36 @@ func (e *Engine) removeEmptyDestDirs(idx *destIndex) {
 	// child gets taken too, and why the error is ignored. A directory created
 	// during this pass is absent from the index, but it holds the file that was
 	// just copied into it, so it is not empty and would not be removed anyway.
+	// ONLY THE ONES THAT COULD BE EMPTY. This asked the destination to remove
+	// every directory it had, deepest first, and relied on the failures: a
+	// directory holding files cannot be removed, so the error was ignored. On a
+	// local drive that is thousands of cheap syscalls. Over SMB it is thousands
+	// of round trips per pass, all of them refusals — and once the two extra
+	// walks were gone, it was what the tidy phase spent its time on.
+	//
+	// A directory that holds a file, or that contains one further down, is not
+	// empty and never will be during this pass. The index knows every file, so
+	// their parents are known too, and everything else is a candidate.
+	occupied := make(map[string]bool, len(idx.byRel))
+	for rel := range idx.byRel {
+		for d := path.Dir(rel); d != "." && d != "/" && d != ""; d = path.Dir(d) {
+			if occupied[d] {
+				break // this ancestor and all above it are already marked
+			}
+			occupied[d] = true
+		}
+	}
 	dirs := append([]string(nil), idx.dirs...)
 	sort.Strings(dirs)
 	for i := len(dirs) - 1; i >= 0; i-- { // deepest first
+		if occupied[dirs[i]] {
+			continue
+		}
 		e.scanned.Add(1)
+		// Still expected to fail sometimes — a directory holding only a temp
+		// file looks empty from here — and the error is still ignored. A
+		// directory emptied by THIS pass keeps its files in the index, so it is
+		// cleared on the next one rather than this one.
 		_ = e.backend.Remove(path.Join(e.destRoot, dirs[i]))
 	}
 }

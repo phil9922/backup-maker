@@ -249,3 +249,57 @@ func TestAFileThatAppearsMidPassIsNotRemoved(t *testing.T) {
 		t.Errorf("nothing was kept in version history: %v", err)
 	}
 }
+
+// THE GUARANTEE: the tidy phase does not ask the destination to remove
+// directories it can see are occupied.
+//
+// It used to attempt every directory, deepest first, and lean on the failures —
+// a directory holding files cannot be removed. On a local drive that is
+// thousands of cheap syscalls; over SMB it is thousands of round trips per
+// pass, every one of them a refusal, and it was what the phase spent its time
+// on once the redundant walks were gone.
+func TestOccupiedDirectoriesAreNotEvenAttempted(t *testing.T) {
+	e, _, _, _ := tidyTree(t)
+
+	counting := &removeCounter{Backend: e.backend}
+	e.backend = counting
+	if _, _, err := e.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	// The tree is sub/ holding a file, and the mirror root holding two more.
+	// Neither can be removed, so neither should be asked.
+	if counting.removes != 0 {
+		t.Errorf("asked the destination to remove %d directories, all of which hold files", counting.removes)
+	}
+}
+
+// And the saving must not cost the behaviour: a directory that really is empty
+// is still cleared.
+func TestAnEmptyDirectoryIsStillRemovedAfterTheSaving(t *testing.T) {
+	e, src, mirror, _ := tidyTree(t)
+
+	if err := os.Remove(filepath.Join(src, "sub", "nested.txt")); err != nil {
+		t.Fatal(err)
+	}
+	// Two passes: the first versions the file away — the directory still counts
+	// as occupied because the index was built before that — and the second
+	// indexes it as empty and clears it.
+	for i := 0; i < 2; i++ {
+		if _, _, err := e.reconcile(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(mirror, "sub")); !os.IsNotExist(err) {
+		t.Error("an emptied directory was left behind")
+	}
+}
+
+type removeCounter struct {
+	Backend
+	removes int
+}
+
+func (r *removeCounter) Remove(p string) error {
+	r.removes++
+	return r.Backend.Remove(p)
+}
