@@ -23,7 +23,8 @@
          somebody who already knew it existed. Present only while the network
          view is actually listening: an address nothing answers on is worse than
          none, and this one is a promise that a phone can open it. -->
-    <a id="lan-address" class="header-link" hidden></a>
+    <div class="header-right">
+      <a id="lan-address" class="header-link" hidden></a>
     <!-- The manual, served from this binary. Deliberately reachable without an
          internet connection: the machines most likely to need instructions are
          the ones that cannot go and look them up. Hidden on the read-only
@@ -33,7 +34,8 @@
          means losing sight of the thing the instruction is about.
          rel="noopener" because target="_blank" otherwise hands the new tab a
          window.opener handle back to this page. -->
-    <a id="docs-link" href="/docs" class="header-link" target="_blank" rel="noopener">Docs</a>
+      <a id="docs-link" href="/docs" class="header-link" target="_blank" rel="noopener">Docs</a>
+    </div>
   </header>
 
   <!-- Setup wizard. Takes over the page on a fresh install, and is reopened by

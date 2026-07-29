@@ -976,8 +976,19 @@ select {
    The manual, served from the binary so it reads the same with or without an
    internet connection. Shares this stylesheet with the dashboard on purpose:
    the docs should look like part of the program, not a Markdown dump. */
+/* The right-hand end of the header, as one group. Both links carry
+   .header-link, and that class used to set margin-left:auto on each of them —
+   with two such items flex splits the free space BETWEEN them, which is why the
+   address floated into the middle of the bar instead of sitting beside Docs.
+   The group takes the margin now; the links just line up inside it. */
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
 .header-link {
-  margin-left: auto; color: var(--accent); text-decoration: none;
+  color: var(--accent); text-decoration: none;
   font-size: 0.9rem; border: 1px solid #2b3542; border-radius: 6px;
   padding: 0.25rem 0.7rem;
 }
@@ -1095,3 +1106,15 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
   button:active:not(:disabled) { transform: none; }
 }
+
+/* The standard exclude list, shown read-only above the box where you add your
+   own. It is a fact about the backup, not a control, so it is set apart rather
+   than made to look editable. */
+.std-ignores {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: var(--s2) var(--s3);
+}
+.std-ignores strong { display: block; margin-bottom: var(--s1); }
+.std-ignores .mono { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }

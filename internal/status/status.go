@@ -38,7 +38,13 @@ type Model struct {
 	// dashboard open the setup wizard instead of an empty table.
 	SetupComplete bool         `json:"setup_complete"`
 	Folders       []FolderInfo `json:"folders"`
-	Targets       []TargetInfo `json:"targets"`
+	// DefaultIgnores is the standard exclude list every folder gets unless it
+	// opts out. Published because the exclude editor could not show it: the box
+	// was empty while fifteen patterns were quietly stripping hundreds of
+	// thousands of files, so it read as "nothing is excluded here" — the exact
+	// opposite of the truth.
+	DefaultIgnores []string     `json:"default_ignores,omitempty"`
+	Targets        []TargetInfo `json:"targets"`
 	// Retired are folders that were stopped and whose backups are still on the
 	// destinations. Stripped from the network view: the paths of things
 	// somebody stopped backing up, and where those copies live, is exactly the
@@ -890,6 +896,7 @@ func (col *Collector) Collect() Model {
 	// over a dashboard they were using. See daemon.applyConfig.
 	flagged := col.SetupDone != nil && col.SetupDone()
 	m.SetupComplete = cfg.Configured() || flagged
+	m.DefaultIgnores = cfg.Defaults.Ignore
 
 	// Scheduled archive jobs.
 	if col.Archives != nil && len(cfg.Archives) > 0 {

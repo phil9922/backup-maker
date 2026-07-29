@@ -360,7 +360,7 @@ function renderRowActions(cell, folder, tr) {
   if (!want) return;
   const edit = el('button', 'small-btn', 'Edit');
   edit.title = 'Change what this folder excludes';
-  edit.onclick = () => openIgnoreEditor(tr, folder);
+  edit.onclick = () => openIgnoreEditor(tr, folder, lastModel);
   cell.appendChild(edit);
   const stop = el('button', 'small-btn danger', 'Stop');
   stop.title = folder.snapshotted
@@ -618,31 +618,77 @@ async function reportAndRefresh(resp) {
 
 // Inline editor for one folder's excludes. Comma-separated, matching the
 // wizard, so the same list can be typed the same way in either place.
-function openIgnoreEditor(tr, f) {
+// What to leave out of a folder's backup.
+//
+// This used to be a bare text box with a placeholder and a paragraph of pattern
+// syntax, opened by a button labelled only "Edit". Nothing said what was being
+// edited. Worse, the box was EMPTY for every folder that had added no patterns
+// of its own — while fifteen standard ones were quietly stripping hundreds of
+// thousands of files from the backup. So it read as "nothing is excluded here",
+// which was the opposite of the truth, and the one fact somebody opening this
+// panel actually wants was the one thing missing from it.
+function openIgnoreEditor(tr, f, st) {
   // The table is frozen while an editor is open, so the other rows' buttons
   // are still live: only ever show one box, or it isn't clear which folder
   // Save applies to.
   for (const open of tr.parentElement.querySelectorAll('tr.ignore-row')) open.remove();
   editingIgnoresFor = f.id;
+
   const row = el('tr', 'ignore-row');
   const cell = el('td');
   cell.colSpan = 6;
   row.appendChild(cell);
-  const box = el('div', 'ignore-editor');
 
+  const form = el('div', 'share-form');
+  form.appendChild(el('h3', null, 'What to leave out of ' + (f.label || 'this folder')));
+
+  // The standard list, named. It is doing most of the work on a typical
+  // folder, and it was invisible.
+  const std = (st && st.default_ignores) || [];
+  if (std.length) {
+    const box = el('div', 'std-ignores');
+    box.appendChild(el('strong', null, 'Always skipped'));
+    box.appendChild(el('div', 'muted mono small', std.join(', ')));
+    form.appendChild(box);
+  }
+
+  // Whether that list applies at all — the same choice the wizard offers, in
+  // the same words, and previously changeable only by hand-editing config.toml.
+  const everythingLabel = el('label', 'muted');
+  const everything = el('input');
+  everything.type = 'checkbox';
+  everything.checked = !!f.no_default_ignores;
+  everythingLabel.append(everything, document.createTextNode(
+    ' Include everything, even node_modules and build output'));
+  form.appendChild(everythingLabel);
+  form.appendChild(el('p', 'muted small',
+    'Off by default. Ticking it backs up dependency and build folders too, ' +
+    'which on a development folder is usually many times more data.'));
+
+  form.appendChild(el('label', 'muted', 'Also leave out'));
   const input = el('input');
   input.type = 'text';
   input.value = (f.ignores || []).join(', ');
   input.placeholder = 'scratch, *.iso, assets/raw';
+  form.appendChild(input);
+  form.appendChild(el('p', 'muted small',
+    'Separate patterns with commas. A name matches anywhere ("scratch", ' +
+    '"*.iso"); a path matches that subfolder ("assets/raw"). Leave it empty to ' +
+    'add nothing of your own.'));
+  form.appendChild(el('p', 'muted small',
+    'Changes take effect within a few seconds. Files that start matching stop ' +
+    'being copied, and the copies already on your destinations are moved into ' +
+    'version history — not deleted.'));
+
+  const actions = el('div', 'card-actions');
   const save = el('button', 'small-btn primary', 'Save');
   const cancel = el('button', 'small-btn', 'Cancel');
-  box.append(input, save, cancel);
-  box.appendChild(el('span', 'muted hint',
-    'Separate patterns with commas: a name matches anywhere ("scratch", "*.iso"), ' +
-    'a path matches that subfolder ("assets/raw"). Empty excludes nothing. ' +
-    'Changes take effect within a few seconds — files that start matching stop ' +
-    'being copied, and the copies already on your destinations are moved into ' +
-    'version history, not deleted.'));
+  actions.append(save, cancel);
+  form.appendChild(actions);
+
+  const err = el('p', 'bad');
+  err.hidden = true;
+  form.appendChild(err);
 
   // Reopening on the next poll would be surprising, so closing always hands the
   // panel back to the normal render.
@@ -654,19 +700,18 @@ function openIgnoreEditor(tr, f) {
     const resp = await mutate('/api/folders/' + encodeURIComponent(f.id) + '/ignores', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // Sent back as read: this editor changes the patterns, not whether the
-      // standard exclusions apply.
-      body: JSON.stringify({ ignores, no_default_ignores: !!f.no_default_ignores }),
+      body: JSON.stringify({ ignores, no_default_ignores: everything.checked }),
     });
     if (!resp.ok) {
-      alert(await resp.text());
+      err.hidden = false;
+      setText(err, await resp.text());
       save.disabled = false;
       return;
     }
     close();
   };
 
-  cell.appendChild(box);
+  cell.appendChild(form);
   // After the folder's LAST destination row, so the editor sits under the
   // whole group rather than splitting it.
   let after = tr;
@@ -1442,7 +1487,9 @@ function renderLANAddress(st) {
   el2.rel = 'noopener';
   // Host and port only: the scheme is noise on a chip this small, and it is
   // what somebody types into a phone.
-  setText(el2, String(url).replace(/^https?:\/\//, ''));
+  // Labelled, because a bare IP in a header is a riddle: it could be this
+  // machine, a destination, or a device waiting to pair.
+  setText(el2, 'Status: ' + String(url).replace(/^https?:\/\//, ''));
   el2.title = 'Open this page from another device on your network at ' + url;
 }
 
