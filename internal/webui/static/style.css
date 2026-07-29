@@ -156,9 +156,15 @@ tr.ignore-row td { border-top: none; padding-top: 0; }
 tr.ignore-row .ignore-editor { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 tr.ignore-row .ignore-editor input { flex: 1 1 22rem; }
 tr.ignore-row .hint { flex-basis: 100%; white-space: normal; }
-td.ok { color: var(--ok); }
-td.busy { color: var(--busy); }
-td.bad { color: var(--bad); }
+/* THE CELL OR A SPAN INSIDE IT. The state word lives in a child span so the
+   phone card layout can put a label beside it, and the class goes on that span
+   — matching only td.ok left every state in the backup table drawn in the
+   body colour. Green going missing is a cosmetic loss; red going missing is
+   not, because an offline or full destination then looks exactly like a
+   healthy one, which is the one thing this table exists to distinguish. */
+td.ok, td .ok { color: var(--ok); }
+td.busy, td .busy { color: var(--busy); }
+td.bad, td .bad { color: var(--bad); }
 code { background: #1c2430; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85rem; }
 h2 {
   font-size: 0.85rem; font-weight: 600; margin-bottom: var(--s3);
@@ -413,6 +419,13 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
   flex-wrap: wrap; min-width: 0;
 }
 .card-meta .mono { overflow-wrap: anywhere; }
+/* The destinations panel says the same states as the backup table and has to
+   say them in the same colours. It is a card rather than a row, so the td
+   rules never reached it and every destination here read as plain text —
+   including an offline one. */
+.card-meta .ok { color: var(--ok); }
+.card-meta .busy { color: var(--busy); }
+.card-meta .bad { color: var(--bad); }
 .card-actions { display: flex; align-items: center; gap: var(--s2); justify-self: end; }
 .card .mono { font-size: 0.85rem; }
 /* Anything that needs the full width of the card — the storage bar, the
@@ -1098,7 +1111,7 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
 /* A paused schedule is neither working nor broken, so it gets neither colour.
    Muted says "deliberately not running" where green would imply it is about to
    and red would imply something went wrong. */
-#archive-rows td.paused { color: var(--muted); }
+#archive-rows td.paused, #archive-rows td .paused { color: var(--muted); }
 
 /* Somebody who has asked their system not to animate things has asked for a
    reason. The press still registers — it just stops sliding. */
