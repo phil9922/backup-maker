@@ -94,11 +94,31 @@ func runAdopt(dest string) error {
 		}
 	}
 
+	// A destination describes itself and only NAMES the others, so say up front
+	// which ones this one cannot rebuild. Learning it afterwards, from a config
+	// with fewer destinations than the summary promised, reads as a bug.
+	elsewhere := map[string]bool{}
+	var named []string
+	for _, t := range insp.Targets {
+		if t.NeedsReadding {
+			elsewhere[t.Name] = true
+			named = append(named, fmt.Sprintf("%s (%s)", t.Name, t.Type))
+		}
+	}
+
 	fmt.Println()
 	fmt.Printf("This destination holds backups from machine %q.\n", insp.MachineName)
 	fmt.Printf("  Folders being backed up: %d\n", len(insp.Folders))
 	fmt.Printf("  Destinations configured: %d\n", len(insp.Targets))
 	fmt.Printf("  Timed snapshots:         %d\n", len(insp.Archives))
+	if len(named) > 0 {
+		fmt.Println()
+		fmt.Println("  This drive does not record how to reach the other destinations,")
+		fmt.Println("  so they are not restored — add them again once this is done:")
+		for _, n := range named {
+			fmt.Println("    -", n)
+		}
+	}
 	fmt.Println()
 
 	dec := setup.AdoptDecisions{
@@ -146,6 +166,12 @@ func runAdopt(dest string) error {
 		if t.Type != "share" || t.PointedAt {
 			continue // the pointed-at share reuses the credentials just entered
 		}
+		if t.NeedsReadding {
+			// Asking for the password to a share whose address this drive does
+			// not hold collects something nothing can use, next to an empty
+			// location. It is asked again when the share is re-added.
+			continue
+		}
 		fmt.Println()
 		fmt.Printf("Network share %q (%s) needs its password", t.Name, t.Location)
 		if t.Username != "" {
@@ -161,6 +187,9 @@ func runAdopt(dest string) error {
 		}
 	}
 	for _, a := range insp.Archives {
+		if elsewhere[a.Target] {
+			continue // its destination is not being restored, so nor is it
+		}
 		fmt.Println()
 		fmt.Printf("Timed snapshot %q is an encrypted zip — enter its password:\n", a.Name)
 		p, err := promptPasswordVia(in, "  Password (Enter to skip for now): ")
@@ -186,6 +215,18 @@ func runAdopt(dest string) error {
 	if len(res.SharesNeedingPassword) > 0 {
 		fmt.Println("  No password entered for:", strings.Join(res.SharesNeedingPassword, ", "))
 		fmt.Println("  They stay idle until: backup-maker set-password <name>")
+	}
+	if len(res.NeedReadding) > 0 {
+		var names []string
+		for _, t := range res.NeedReadding {
+			names = append(names, fmt.Sprintf("%s (%s)", t.Name, t.Type))
+		}
+		fmt.Println("  Not described by this destination, add again:", strings.Join(names, ", "))
+		fmt.Println("  Use: backup-maker add-target <type> ... , or the dashboard")
+	}
+	if len(res.SkippedArchives) > 0 {
+		fmt.Println("  Timed snapshots not restored, because the destination they")
+		fmt.Println("  wrote to was not either:", strings.Join(res.SkippedArchives, ", "))
 	}
 	fmt.Println("A running daemon applies this within seconds; check with: backup-maker status")
 	return nil

@@ -639,16 +639,19 @@ func (d *daemon) prepareTargets(cfg *config.Config, uuids, creds map[string]stri
 //
 // Best-effort: an unwritable destination just keeps its older copy until the
 // next apply reaches it. Storage we do not recognize gets nothing at all — the
-// manifest names this machine, its source folder paths and every destination it
-// backs up to, and mayWrite is what keeps that off a drive we would refuse to
-// back up to.
+// manifest names this machine and its source folder paths, and mayWrite is what
+// keeps that off a drive we would refuse to back up to.
+//
+// t.Name is passed through so the manifest describes THIS destination and
+// summarises the others; without it every drive would carry the addresses of
+// all of them. See setup.BuildManifest.
 func (d *daemon) refreshManifest(t config.Target, b localmirror.Backend, cfg *config.Config, uuid string) {
 	// mayWriteAs, not mayWrite: the manifest lives inside this machine's own
 	// directory now, so "may we write here" includes "is that directory ours".
 	if !d.mayWriteAs(t.Name, status.TargetLocation(t), b, uuid, config.MachineDir(cfg.General.MachineName)) {
 		return
 	}
-	if err := setup.WriteManifest(b, cfg, d.state.DriveTargetUUIDs, d.state.InstallID); err != nil {
+	if err := setup.WriteManifest(b, cfg, d.state.DriveTargetUUIDs, d.state.InstallID, t.Name); err != nil {
 		d.log.Warn("could not write adoption manifest", "target", t.Name, "err", err)
 	}
 }

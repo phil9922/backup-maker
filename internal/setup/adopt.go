@@ -5,6 +5,7 @@ package setup
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/phil9922/backup-maker/internal/config"
 )
@@ -33,6 +34,13 @@ type AdoptDecisions struct {
 	ArchivePasswords map[string]string
 }
 
+// NamedTarget is a destination a manifest mentions but does not describe:
+// enough to tell somebody what they are missing, not enough to rebuild it.
+type NamedTarget struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 // AdoptResult summarizes what adoption created and what still needs a hand.
 type AdoptResult struct {
 	MachineName string
@@ -45,6 +53,17 @@ type AdoptResult struct {
 	// SharesNeedingPassword names share targets left without a stored password;
 	// they stay idle until `backup-maker set-password <name>` is run.
 	SharesNeedingPassword []string
+	// NeedReadding names the other destinations this machine used, which a
+	// manifest deliberately does not say how to reach (see ManifestTarget).
+	// They are not restored; the user re-adds them, which they can do because
+	// they own the hardware. Reporting them is the whole reason the summaries
+	// are kept at all.
+	NeedReadding []NamedTarget
+	// SkippedArchives names snapshot schedules dropped because the destination
+	// they wrote to is in NeedReadding. Keeping one would have pointed a
+	// schedule at a target that does not exist, which config validation refuses
+	// — so the choice is reporting them here or failing the whole adoption.
+	SkippedArchives []string
 }
 
 // AdoptAllowed reports whether this machine may adopt: either no config file
@@ -141,10 +160,22 @@ func Adopt(m *Manifest, d AdoptDecisions) (*AdoptResult, error) {
 	}
 
 	var missingUUID, needPass []string
+	var needReadding []NamedTarget
+	restored := map[string]bool{}
 	for _, mt := range m.Targets {
+		// A destination this manifest only names cannot be rebuilt from it, and
+		// must not be half-rebuilt either: a drive entry with no path or a share
+		// with no url fails config validation, and one whose Folders list came
+		// out empty would mean EVERY folder rather than none. Report it and
+		// leave it to the user, who has the hardware in front of them.
+		if !mt.Locatable() {
+			needReadding = append(needReadding, NamedTarget{Name: mt.Name, Type: mt.Type})
+			continue
+		}
 		t := mt.Target
 		t.Folders = remapFolderIDs(t.Folders, idFor)
 		cfg.Targets = append(cfg.Targets, t)
+		restored[strings.ToLower(t.Name)] = true
 
 		if t.Type == "drive" || t.Type == "share" {
 			if mt.UUID != "" {
@@ -165,7 +196,17 @@ func Adopt(m *Manifest, d AdoptDecisions) (*AdoptResult, error) {
 		}
 	}
 
+	var skippedArchives []string
 	for _, a := range m.Archives {
+		// A schedule whose destination was not restored has nowhere to write.
+		// config.Validate refuses an archive naming an unknown target, so
+		// carrying it would fail the entire adoption rather than lose one
+		// schedule — and losing it silently is the other thing not to do, hence
+		// SkippedArchives.
+		if !restored[strings.ToLower(a.Target)] {
+			skippedArchives = append(skippedArchives, a.Name)
+			continue
+		}
 		na := a
 		na.Folders = remapFolderIDs(a.Folders, idFor)
 		cfg.Archives = append(cfg.Archives, na)
@@ -210,6 +251,8 @@ func Adopt(m *Manifest, d AdoptDecisions) (*AdoptResult, error) {
 		Archives:              len(cfg.Archives),
 		MissingUUIDs:          missingUUID,
 		SharesNeedingPassword: needPass,
+		NeedReadding:          needReadding,
+		SkippedArchives:       skippedArchives,
 	}, nil
 }
 

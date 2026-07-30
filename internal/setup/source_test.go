@@ -24,7 +24,8 @@ func writeSampleDest(t *testing.T, folderExists bool) string {
 		cfg.Folders[0].Path = filepath.Join(string(os.PathSeparator), "no", "such", "dir")
 	}
 	b := localmirror.NewLocalFS(dest)
-	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, "install-oldbox"); err != nil {
+	// The drive's own manifest: usb in full, nas by name only.
+	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, "install-oldbox", "usb"); err != nil {
 		t.Fatal(err)
 	}
 	if err := localmirror.WriteMarker(b, "uuid-usb", "oldbox"); err != nil {
@@ -60,8 +61,14 @@ func TestInspectSourceReportsManifestAndPointedTarget(t *testing.T) {
 	if nas == nil || nas.PointedAt {
 		t.Errorf("nas should NOT be pointed-at: %+v", nas)
 	}
-	if nas.Location != "//nas/backups" || usb.Location != "/mnt/usb" {
-		t.Errorf("locations: usb=%q nas=%q", usb.Location, nas.Location)
+	if usb.Location != "/mnt/usb" || usb.NeedsReadding {
+		t.Errorf("the drive being inspected should be described in full: %+v", usb)
+	}
+	// The preview has to SAY the other destination cannot be restored from
+	// here. Showing it with a blank location and no flag would read as a
+	// destination with no address, which is a fault rather than a decision.
+	if nas.Location != "" || !nas.NeedsReadding {
+		t.Errorf("nas should be reported as needing re-adding, with no address: %+v", nas)
 	}
 	if len(insp.Archives) != 1 || insp.Archives[0].Name != "weekly" {
 		t.Errorf("archives = %+v", insp.Archives)
@@ -96,7 +103,8 @@ func TestAdoptFromSourceStoresPointedShareCredentials(t *testing.T) {
 	// target is matched by URL instead — but a local path carries no URL, so
 	// exercise pointedTargetName's URL branch directly plus the storage path
 	// via AdoptFromSource on a marker-matched local dir.
-	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, "install-oldbox"); err != nil {
+	// Written for the share, so the share is the entry carrying a URL to match.
+	if err := WriteManifest(b, cfg, map[string]string{"usb": "uuid-usb", "nas": "uuid-nas"}, "install-oldbox", "nas"); err != nil {
 		t.Fatal(err)
 	}
 	m, err := ReadManifest(b)

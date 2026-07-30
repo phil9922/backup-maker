@@ -125,12 +125,26 @@ const AdoptWizard = (() => {
     return "";
   }
 
+  // A destination describes itself and only NAMES the others, so some entries
+  // cannot be restored from here at all. Nothing should ask for their password
+  // or count them as being set up.
+  function elsewhereNames() {
+    return new Set((inspection?.targets || []).filter((t) => t.needs_readding).map((t) => t.name));
+  }
+
+  function restorableArchives() {
+    const elsewhere = elsewhereNames();
+    return (inspection?.archives || []).filter((a) => !elsewhere.has(a.target));
+  }
+
   // The password step only exists when there is something to unlock: a share
   // whose credentials aren't already in hand, or an encrypted snapshot.
   function hasPasswordStep() {
     if (!inspection) return false;
-    const shares = (inspection.targets || []).filter((t) => t.type === "share" && !t.pointed_at);
-    return shares.length > 0 || (inspection.archives || []).length > 0;
+    const shares = (inspection.targets || []).filter(
+      (t) => t.type === "share" && !t.pointed_at && !t.needs_readding,
+    );
+    return shares.length > 0 || restorableArchives().length > 0;
   }
 
   function rebuildOrder() {
@@ -333,10 +347,10 @@ const AdoptWizard = (() => {
   function buildPasswords() {
     const box = $("adopt-passwords");
     box.replaceChildren();
-    for (const t of (inspection.targets || []).filter((t) => t.type === "share")) {
+    for (const t of (inspection.targets || []).filter((t) => t.type === "share" && !t.needs_readding)) {
       box.appendChild(t.pointed_at ? pointedShareRow(t) : sharePasswordRow(t));
     }
-    for (const a of inspection.archives || []) {
+    for (const a of restorableArchives()) {
       box.appendChild(archivePasswordRow(a));
     }
   }
@@ -509,13 +523,37 @@ const AdoptWizard = (() => {
     add("Folders", `${folders.length}${waiting ? ` (${waiting} waiting for a location)` : ""}`);
 
     const targets = inspection.targets || [];
-    const needPw = targets.filter((t) => t.type === "share" && !t.pointed_at && !sharePasswords.has(t.name)).length;
-    add("Destinations", `${targets.length}${needPw ? ` (${needPw} without a password yet)` : ""}`);
+    const restorable = targets.filter((t) => !t.needs_readding);
+    const readd = targets.length - restorable.length;
+    const needPw = restorable.filter(
+      (t) => t.type === "share" && !t.pointed_at && !sharePasswords.has(t.name),
+    ).length;
+    // Counted on what will actually be restored, not on what the manifest
+    // mentions: saying "2 destinations" and producing one reads as a fault.
+    add(
+      "Destinations",
+      `${restorable.length}${needPw ? ` (${needPw} without a password yet)` : ""}` +
+        (readd ? ` — ${readd} to add again` : ""),
+    );
+    if (readd) {
+      add(
+        "To add again",
+        targets
+          .filter((t) => t.needs_readding)
+          .map((t) => `${t.name} (${t.type})`)
+          .join(", "),
+      );
+    }
 
-    const archives = inspection.archives || [];
-    if (archives.length) {
+    const archives = restorableArchives();
+    const dropped = (inspection.archives || []).length - archives.length;
+    if (archives.length || dropped) {
       const noPw = archives.filter((a) => !archivePasswords.has(a.name)).length;
-      add("Snapshots", `${archives.length}${noPw ? ` (${noPw} without a password)` : ""}`);
+      add(
+        "Snapshots",
+        `${archives.length}${noPw ? ` (${noPw} without a password)` : ""}` +
+          (dropped ? ` — ${dropped} not restored, their destination is not either` : ""),
+      );
     }
   }
 

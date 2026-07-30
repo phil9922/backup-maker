@@ -33,6 +33,14 @@ import (
 // destination; adoption re-collects them from the user, who already holds them.
 // This is the same split that keeps passwords out of the shareable config.toml
 // and in the private state.json.
+//
+// IT ALSO DESCRIBES ONLY THE DESTINATION IT SITS ON. No secrets is not the same
+// as nothing private: until this was scoped, every drive carried every OTHER
+// destination's //host/share address, SMB username, MAC and paired DeviceID —
+// so one card lost, stolen or resold handed over a map of the whole household's
+// machines. Other destinations now appear by name and type alone, enough to tell
+// somebody rebuilding a machine what is missing and nothing more. See
+// BuildManifest.
 const ManifestName = ".backup-maker-manifest.json"
 
 // ManifestVersion is the on-disk format version, so a later field change can be
@@ -48,9 +56,14 @@ func ManifestPathFor(machineName string) string {
 }
 
 // Manifest is the destination-side snapshot of a machine's backup
-// configuration. Every field is drawn from the shareable config.toml (plus each
-// target's anti-collision UUID, which already sits in plaintext in that
-// target's marker), so by construction it carries nothing private.
+// configuration. Every field is drawn from the shareable config.toml (plus this
+// destination's own anti-collision UUID, which already sits in plaintext in its
+// marker), so by construction it carries no secret.
+//
+// It carries this machine's source paths deliberately: they name the same
+// machine whose files are already on the destination in the clear, and adoption
+// needs them to put a rebuilt machine's folders back where they were. What it
+// does NOT carry is how to reach anywhere else — see ManifestTarget.
 type Manifest struct {
 	Version     int    `json:"version"`
 	MachineName string `json:"machine_name"`
@@ -67,24 +80,73 @@ type Manifest struct {
 	Archives  []config.Archive `json:"archives"`
 }
 
-// ManifestTarget is a configured destination plus the UUID that identifies its
-// on-disk marker. Recording the UUID lets adoption match a plugged-in drive to
-// the exact target entry, and lets every OTHER destination resume the moment it
-// is reconnected — the daemon recognizes a target only when the recorded UUID
-// matches the marker it finds. Device targets carry no UUID (a paired machine
-// is identified by its DeviceID); the field is then omitted.
+// ManifestTarget is a configured destination as one manifest describes it.
+//
+// EXACTLY ONE ENTRY IS FULLY DESCRIBED: the destination this manifest is
+// written to. It carries its address, its username, its UUID and the rest, and
+// the UUID is what lets adoption match a plugged-in drive to the right entry —
+// the daemon recognizes a target only when the recorded UUID matches the marker
+// it finds. Every other entry is a summary: name and type, nothing that locates
+// it. Device targets carry no UUID (a paired machine is identified by its
+// DeviceID); the field is then omitted.
 type ManifestTarget struct {
 	config.Target
 	UUID string `json:"uuid,omitempty"`
 }
 
-// BuildManifest snapshots a config into a manifest stamped at the given time.
+// Locatable reports whether this entry says where the destination actually is,
+// which is the only question a reader has to answer about one.
+//
+// DERIVED FROM THE DATA RATHER THAN FLAGGED. A "this one is a summary" boolean
+// would be a second statement of the same fact, free to disagree with the
+// fields beside it; asking whether the locator is present cannot. It also gives
+// the right answer for a manifest written before scoping existed (every entry
+// full, everything restorable, exactly as before) and for a truncated or
+// hand-edited one, where the safe reading of a missing address is "I cannot
+// rebuild this", not "rebuild it from nothing".
+func (mt ManifestTarget) Locatable() bool {
+	switch mt.Type {
+	case "drive":
+		return mt.Path != ""
+	case "share":
+		return mt.URL != ""
+	case "device":
+		return mt.DeviceID != ""
+	}
+	return false
+}
+
+// summarise reduces a destination to what a manifest sitting on a DIFFERENT
+// destination may say about it: that it exists, what kind of thing it is, and
+// nothing else.
+//
+// Built by naming the two fields to keep rather than by blanking the ones to
+// drop, so a field added to config.Target later is excluded by default. The
+// other order leaks the next field somebody adds.
+func summarise(t config.Target) config.Target {
+	return config.Target{Type: t.Type, Name: t.Name}
+}
+
+// BuildManifest snapshots a config into a manifest stamped at the given time,
+// scoped to the destination it is about to be written to.
+//
+// writtenFor names that destination. Every other target is reduced to name and
+// type by summarise. An EMPTY writtenFor summarises everything: a caller that
+// has not said which destination this is for gets the private answer, because
+// the cost of that mistake is an adoption that has to be told where its
+// destinations are, and the cost of the other one is on a drive somebody else
+// may end up holding.
+//
 // uuids maps target name to the UUID recorded for it in the private state
 // (drive and share targets only); missing entries leave UUID empty. installID
 // identifies the installation writing it and may be empty.
-func BuildManifest(cfg *config.Config, uuids map[string]string, installID string, now time.Time) Manifest {
+func BuildManifest(cfg *config.Config, uuids map[string]string, installID string, now time.Time, writtenFor string) Manifest {
 	targets := make([]ManifestTarget, len(cfg.Targets))
 	for i, t := range cfg.Targets {
+		if writtenFor == "" || !config.SameDest(t.Name, writtenFor) {
+			targets[i] = ManifestTarget{Target: summarise(t)}
+			continue
+		}
 		targets[i] = ManifestTarget{Target: t, UUID: uuids[t.Name]}
 	}
 	return Manifest{
@@ -103,8 +165,13 @@ func BuildManifest(cfg *config.Config, uuids map[string]string, installID string
 // treat failure as non-fatal: an offline drive or an unreachable share just
 // keeps an older manifest until it is next reachable. uuids is the target-name
 // to marker-UUID map from the private state (config.State.DriveTargetUUIDs).
-func WriteManifest(b localmirror.Backend, cfg *config.Config, uuids map[string]string, installID string) error {
-	m := BuildManifest(cfg, uuids, installID, time.Now())
+//
+// writtenFor is the name of the target b points at, and is what scopes the
+// manifest to it — see BuildManifest. It is a separate argument rather than
+// something inferred from b because a backend knows where it writes, not which
+// configured destination that is.
+func WriteManifest(b localmirror.Backend, cfg *config.Config, uuids map[string]string, installID, writtenFor string) error {
+	m := BuildManifest(cfg, uuids, installID, time.Now(), writtenFor)
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

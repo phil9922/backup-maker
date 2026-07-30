@@ -28,6 +28,17 @@ wondering what it will and won't do on its own.
   (nothing is ever deleted from a destination on your behalf) and change the
   passwords it held.
 - A target unseen for 7 days shows a stale warning (`!!`) in status.
+- **A destination describes itself and only names the others.** Each machine
+  leaves a manifest (`<machine>/.backup-maker-manifest.json`) so the machine can
+  be rebuilt from the storage alone. It holds no password, and since v0.1.15 it
+  holds the address, username and marker id of **that destination only** — your
+  other destinations appear as a name and a type. A drive can be lost, stolen or
+  resold, and one carrying every share address, SMB username, MAC and paired
+  device id in the house is a map of it. It does carry this machine's source
+  folder paths, which include your username on Linux and macOS: they describe
+  the same machine whose files are already on the drive in the clear, and adopt
+  needs them to put folders back where they were. See
+  [Restoring](../guide/6-restoring.md).
 
 ## Credentials & security notes
 

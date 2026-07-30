@@ -97,6 +97,12 @@ type AdoptTargetInfo struct {
 	// HasUUID is false for a drive/share the manifest carries no UUID for —
 	// the daemon won't recognize it until it is re-added.
 	HasUUID bool `json:"has_uuid"`
+	// NeedsReadding marks a destination this manifest only NAMES: a manifest
+	// describes the destination it sits on and summarises the rest, so this one
+	// cannot be restored from here and Location is empty. The user re-adds it.
+	// Shown rather than hidden so a preview says what is missing instead of
+	// quietly restoring less than the reader expects.
+	NeedsReadding bool `json:"needs_readding,omitempty"`
 }
 
 type AdoptArchiveInfo struct {
@@ -146,8 +152,9 @@ func InspectSource(src AdoptSource) (*AdoptInspection, error) {
 		}
 		insp.Targets = append(insp.Targets, AdoptTargetInfo{
 			Name: mt.Name, Type: mt.Type, Location: loc, Username: mt.Username,
-			PointedAt: mt.Name == pointed,
-			HasUUID:   mt.Type == "device" || mt.UUID != "",
+			PointedAt:     mt.Name == pointed,
+			HasUUID:       mt.Type == "device" || mt.UUID != "",
+			NeedsReadding: !mt.Locatable(),
 		})
 	}
 	for _, a := range m.Archives {

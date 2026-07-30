@@ -35,10 +35,10 @@ func TestTwoMachinesOnOneDriveKeepBothManifests(t *testing.T) {
 	root := t.TempDir()
 	b := localmirror.NewLocalFS(root)
 
-	if err := WriteManifest(b, configFor("oldbox", "Documents"), nil, "install-oldbox"); err != nil {
+	if err := WriteManifest(b, configFor("oldbox", "Documents"), nil, "install-oldbox", "card"); err != nil {
 		t.Fatalf("writing oldbox's manifest: %v", err)
 	}
-	if err := WriteManifest(b, configFor("attic-pi", "Photos", "Music"), nil, "install-pi"); err != nil {
+	if err := WriteManifest(b, configFor("attic-pi", "Photos", "Music"), nil, "install-pi", "card"); err != nil {
 		t.Fatalf("writing attic-pi's manifest: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestAPerMachineManifestHidesTheStaleRootOne(t *testing.T) {
 	writeLegacyManifest(t, root, stale)
 
 	current := configFor("oldbox", "Documents", "Photos", "Music")
-	if err := WriteManifest(b, current, nil, "install-oldbox"); err != nil {
+	if err := WriteManifest(b, current, nil, "install-oldbox", "card"); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
@@ -142,12 +142,12 @@ func TestAPerMachineManifestHidesTheStaleRootOne(t *testing.T) {
 func TestAdoptingAsharedDriveAsksWhichComputer(t *testing.T) {
 	root := t.TempDir()
 	b := localmirror.NewLocalFS(root)
-	if err := WriteManifest(b, configFor("oldbox", "Documents"), nil, "install-oldbox"); err != nil {
+	if err := WriteManifest(b, configFor("oldbox", "Documents"), nil, "install-oldbox", "card"); err != nil {
 		t.Fatal(err)
 	}
 	// Written second, so "newest wins" would choose this one.
 	time.Sleep(2 * time.Millisecond)
-	if err := WriteManifest(b, configFor("attic-pi", "Photos", "Music"), nil, "install-pi"); err != nil {
+	if err := WriteManifest(b, configFor("attic-pi", "Photos", "Music"), nil, "install-pi", "card"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,10 +179,10 @@ func TestAdoptingAsharedDriveAsksWhichComputer(t *testing.T) {
 func TestScanRootsFindsEveryMachineOnADrive(t *testing.T) {
 	root := t.TempDir()
 	b := localmirror.NewLocalFS(root)
-	if err := WriteManifest(b, configFor("oldbox", "Documents"), nil, "install-oldbox"); err != nil {
+	if err := WriteManifest(b, configFor("oldbox", "Documents"), nil, "install-oldbox", "card"); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteManifest(b, configFor("attic-pi", "Photos"), nil, "install-pi"); err != nil {
+	if err := WriteManifest(b, configFor("attic-pi", "Photos"), nil, "install-pi", "card"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -206,7 +206,7 @@ func TestScanRootsFindsEveryMachineOnADrive(t *testing.T) {
 // way every backup-maker before this change did.
 func writeLegacyManifest(t *testing.T, root string, cfg *config.Config) {
 	t.Helper()
-	m := BuildManifest(cfg, nil, "", time.Now().Add(-time.Hour))
+	m := BuildManifest(cfg, nil, "", time.Now().Add(-time.Hour), "card")
 	m.Version = 1
 	m.InstallID = ""
 	data, err := jsonIndent(m)

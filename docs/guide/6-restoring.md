@@ -38,11 +38,29 @@ backup-maker adopt //NAS/backups            # or a network share
 ```
 
 Every computer that uses a destination leaves a small non-secret manifest
-(`<machine>/.backup-maker-manifest.json`) listing your folders, excludes, **all**
-your destinations and schedules, and the machine name — so adopting *one*
-reachable destination recovers the *whole* setup, including the destinations
-that aren't plugged in right now. Passwords are the one thing never written to a
+(`<machine>/.backup-maker-manifest.json`) listing your folders, their excludes,
+your machine name, and **the destination it is sitting on** — its address, its
+username, everything needed to reconnect it. Passwords are never written to a
 destination; adopt asks you for the ones you already hold.
+
+**Your other destinations appear by name and type only.** A drive can be lost,
+stolen or sold on, and one that listed every share address, username and MAC in
+your house would hand over a map of it. So adopting a drive rebuilds this
+machine and reconnects *that* drive, then tells you what else there was:
+
+```
+  Not described by this destination, add again: backup-pi (share)
+```
+
+Adding it back is the same step as adding it the first time, and you are the
+only one who needs to know where it is. A timed snapshot that wrote to a
+destination you have not restored yet is reported the same way and re-created
+once its destination is back.
+
+Destinations written by a backup-maker older than v0.1.15 still carry the full
+list, and adopting one of those restores everything exactly as it used to —
+nothing on a drive already in service stops working. The scoped version is
+written the next time that destination is updated.
 
 If the destination holds backups from more than one computer, adopt asks which
 one you are restoring before anything else — restoring the wrong machine's

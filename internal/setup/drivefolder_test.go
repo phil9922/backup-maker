@@ -151,7 +151,7 @@ func TestAdoptFindsBackupsInAFolderOnADrive(t *testing.T) {
 	if _, err := AppendDriveTargetIn(cfg, target, "card", true, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteManifest(localmirror.NewLocalFS(target), cfg, nil, "install-laptop"); err != nil {
+	if err := WriteManifest(localmirror.NewLocalFS(target), cfg, nil, "install-laptop", "card"); err != nil {
 		t.Fatal(err)
 	}
 
