@@ -102,6 +102,18 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 	final := path.Join(dir, sanitize(job.Name)+"-"+stamp+".zip")
 	tmp := final + ".bmtmp"
 
+	// BEFORE WRITING, NOT AFTER. Stranded temps were already swept — but by
+	// prune(), which runs at the END of a successful run. The failure mode is a
+	// run that never finishes: every restart abandons a part-written zip, and
+	// nothing ever reaches the sweep, so they pile up unbounded. Three reached
+	// 8.4GB on one SD card with not a single completed snapshot to show for it,
+	// and two more totalling 2.6GB turned up on the Pi a day later.
+	//
+	// Sweeping here bounds it at one, whatever happens. A destination that is
+	// filling up with the leftovers of a snapshot that cannot complete is the
+	// worst possible place to be spending the space.
+	sweepStrandedTemps(b, dir, tmp, log)
+
 	w, err := b.OpenWrite(tmp)
 	if err != nil {
 		return fail(err)
@@ -396,6 +408,33 @@ func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int, o
 		}
 	}
 	return nil
+}
+
+// sweepStrandedTemps removes part-written zips left by runs that never finished,
+// except the one this run is about to write.
+//
+// WHY EVERY OTHER TEMP IN HERE IS SAFE TO DELETE. Snapshot jobs are run from one
+// goroutine, one at a time (daemon.archiveLoop → runDueArchives → runArchive, all
+// synchronous, and archive.Run has no other caller), so no second run of this job
+// can be writing while this one starts. The directory is per machine AND per job,
+// and a machine name is claimed exclusively on a destination, so nothing else
+// writes here either. If a second concurrent caller is ever added, this stops
+// being true and has to grow an age test like the mirror's staleTempAge.
+//
+// Failures are logged and ignored: a snapshot must still run on a destination
+// that will not let go of an old temp.
+func sweepStrandedTemps(b localmirror.Backend, dir, keep string, log *slog.Logger) {
+	_ = b.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || p == keep || !strings.HasSuffix(p, ".bmtmp") {
+			return nil
+		}
+		if err := b.Remove(p); err != nil {
+			log.Debug("could not remove an abandoned snapshot temp file", "path", p, "err", err)
+			return nil
+		}
+		log.Info("removed an abandoned snapshot temp file left by an interrupted run", "path", p)
+		return nil
+	})
 }
 
 // prune keeps the newest keep archives in dir (stamps sort lexically).
