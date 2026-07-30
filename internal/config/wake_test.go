@@ -2,14 +2,18 @@
 
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/phil9922/backup-maker/internal/testpath"
+)
 
 // baseConfig is a minimal valid config a test can then break in one specific
 // way, so a validation failure can only be the thing under test.
 func baseConfig(t *testing.T, target Target) *Config {
 	t.Helper()
 	c := New()
-	c.Folders = []Folder{{ID: "f1", Path: "/tmp/src", Label: "src"}}
+	c.Folders = []Folder{{ID: "f1", Path: testpath.Abs("/tmp/src"), Label: "src"}}
 	c.Targets = []Target{target}
 	return c
 }
@@ -17,7 +21,7 @@ func baseConfig(t *testing.T, target Target) *Config {
 func TestWakeValidation(t *testing.T) {
 	share := Target{Type: "share", Name: "nas", URL: "//NAS/backups", Folders: []string{}}
 	device := Target{Type: "device", Name: "pc", DeviceID: "ID", Folders: []string{}}
-	drive := Target{Type: "drive", Name: "sd", Path: "/media/sd", Folders: []string{}}
+	drive := Target{Type: "drive", Name: "sd", Path: testpath.Abs("/media/sd"), Folders: []string{}}
 
 	t.Run("valid MAC on a share", func(t *testing.T) {
 		tgt := share

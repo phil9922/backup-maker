@@ -9,6 +9,7 @@ import (
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
+	"github.com/phil9922/backup-maker/internal/testpath"
 )
 
 // driveWith builds a real directory standing in for a mounted drive, marked as
@@ -58,7 +59,7 @@ func seedForDelete(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	cfg.General.MachineName = "my-laptop"
-	cfg.Folders = []config.Folder{{ID: "f1", Path: "/home/pk/Development", Label: "development"}}
+	cfg.Folders = []config.Folder{{ID: "f1", Path: testpath.Abs("/home/pk/Development"), Label: "development"}}
 	cfg.Targets = []config.Target{{Type: "drive", Name: "laptocard", Path: root}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
@@ -151,7 +152,7 @@ func TestDeletingRetiredBackupsRefusesWhenALiveFolderUsesTheSameDestination(t *t
 	root := driveWith(t, "my-laptop", "development")
 	seedForDelete(t, root)
 	cfg, _ := config.Load()
-	cfg.Folders = []config.Folder{{ID: "f2", Path: "/home/pk/Elsewhere", Label: "development"}}
+	cfg.Folders = []config.Folder{{ID: "f2", Path: testpath.Abs("/home/pk/Elsewhere"), Label: "development"}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}

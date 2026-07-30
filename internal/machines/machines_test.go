@@ -14,6 +14,7 @@ import (
 	"github.com/phil9922/backup-maker/internal/browse"
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/discover"
+	"github.com/phil9922/backup-maker/internal/testpath"
 )
 
 // testConfig builds a config literal rather than config.New(), whose
@@ -61,7 +62,7 @@ func ids(ms []Machine) []string {
 func TestListWithoutScanSkipsTheNetwork(t *testing.T) {
 	cfg := testConfig("laptop",
 		deviceTarget("omen", "DEV-OMEN"),
-		config.Target{Type: "drive", Name: "sd-card", Path: "/media/sd"},
+		config.Target{Type: "drive", Name: "sd-card", Path: testpath.Abs("/media/sd")},
 		config.Target{Type: "share", Name: "nas", URL: "//nas/backups"},
 	)
 
@@ -224,10 +225,10 @@ func TestListBrowsable(t *testing.T) {
 // config already knows how to reach.
 func TestADriveIsNeverAMachineButAConfiguredShareHostIs(t *testing.T) {
 	cfg := testConfig("laptop",
-		config.Target{Type: "drive", Name: "sd-card", Path: "/media/sd"},
+		config.Target{Type: "drive", Name: "sd-card", Path: testpath.Abs("/media/sd")},
 		config.Target{Type: "share", Name: "nas-backups", URL: "//nas/backups"},
 		deviceTarget("omen", "DEV-OMEN"),
-		config.Target{Type: "drive", Name: "usb", Path: "/media/usb"},
+		config.Target{Type: "drive", Name: "usb", Path: testpath.Abs("/media/usb")},
 	)
 
 	got, err := List(context.Background(), cfg, nil)
@@ -424,7 +425,7 @@ func TestStorageForPairedDeviceRefusesToBrowse(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			cfg := testConfig("laptop",
-				config.Target{Type: "drive", Name: "sd-card", Path: "/media/sd"},
+				config.Target{Type: "drive", Name: "sd-card", Path: testpath.Abs("/media/sd")},
 				deviceTarget(c.targetName, c.machineID),
 			)
 
@@ -517,15 +518,15 @@ func TestStorageForSMBErrorHintsAtCredentials(t *testing.T) {
 // the real ones asserts nothing at all.
 func TestStorageForLocalDrives(t *testing.T) {
 	cfg := testConfig("laptop",
-		config.Target{Type: "drive", Name: "sd-card", Path: "/media/sd"},
+		config.Target{Type: "drive", Name: "sd-card", Path: testpath.Abs("/media/sd")},
 		// Neither of these should claim a drive: wrong type, and a share.
-		config.Target{Type: "share", Name: "usb-lookalike", URL: "/media/usb"},
-		config.Target{Type: "device", Name: "omen", Path: "/media/usb"},
+		config.Target{Type: "share", Name: "usb-lookalike", URL: testpath.Abs("/media/usb")},
+		config.Target{Type: "device", Name: "omen", Path: testpath.Abs("/media/usb")},
 	)
 
 	got, err := StorageFor(context.Background(), cfg, KindThis, "", "", attached(
-		browse.Drive{Path: "/media/sd", Label: "SD Card", Free: 4 << 30, Total: 16 << 30},
-		browse.Drive{Path: "/media/usb", Label: "USB stick", Free: 1 << 30, Total: 8 << 30},
+		browse.Drive{Path: testpath.Abs("/media/sd"), Label: "SD Card", Free: 4 << 30, Total: 16 << 30},
+		browse.Drive{Path: testpath.Abs("/media/usb"), Label: "USB stick", Free: 1 << 30, Total: 8 << 30},
 	), nil, nil)
 	if err != nil {
 		t.Fatalf("StorageFor(%s): %v", KindThis, err)
@@ -533,8 +534,8 @@ func TestStorageForLocalDrives(t *testing.T) {
 
 	// A drive carries Path and no URL; capacity comes straight from the drive.
 	want := []Storage{
-		{Kind: "drive", Label: "SD Card", Path: "/media/sd", Free: 4 << 30, Total: 16 << 30, ExistingTarget: "sd-card"},
-		{Kind: "drive", Label: "USB stick", Path: "/media/usb", Free: 1 << 30, Total: 8 << 30},
+		{Kind: "drive", Label: "SD Card", Path: testpath.Abs("/media/sd"), Free: 4 << 30, Total: 16 << 30, ExistingTarget: "sd-card"},
+		{Kind: "drive", Label: "USB stick", Path: testpath.Abs("/media/usb"), Free: 1 << 30, Total: 8 << 30},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("storage = %+v, want %+v", got, want)

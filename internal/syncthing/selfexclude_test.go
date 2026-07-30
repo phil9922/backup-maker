@@ -18,6 +18,7 @@ func homeWithConfigDirInside(t *testing.T) (config.Folder, string) {
 	t.Helper()
 	src := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(src, ".config")) // linux
+	t.Setenv("AppData", filepath.Join(src, ".config"))         // windows
 	t.Setenv("HOME", src)                                      // macOS
 	dir, err := config.Dir()
 	if err != nil {
@@ -84,6 +85,7 @@ func TestIgnoreLinesKeepTheConfigDirWithoutDefaultIgnores(t *testing.T) {
 func TestIgnoreLinesLeaveOtherFoldersAlone(t *testing.T) {
 	src := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), ".config"))
+	t.Setenv("AppData", filepath.Join(t.TempDir(), ".config")) // windows
 	t.Setenv("HOME", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(src, "backup-maker"), 0o755); err != nil {
 		t.Fatal(err)

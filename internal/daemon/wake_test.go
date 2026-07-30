@@ -10,6 +10,7 @@ import (
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/status"
+	"github.com/phil9922/backup-maker/internal/testpath"
 	"github.com/phil9922/backup-maker/internal/wol"
 )
 
@@ -102,7 +103,7 @@ func TestWakeOfflineTargetsSkipsTargetsWithoutMAC(t *testing.T) {
 func TestWakeOfflineTargetsSkipsLocalDrives(t *testing.T) {
 	pinPortsToLoopback(t)
 	d := newTestDaemon(t, []config.Target{
-		{Type: "drive", Name: "sd", Path: "/media/sd", MAC: testMAC, WakeBroadcast: "127.0.0.1"},
+		{Type: "drive", Name: "sd", Path: testpath.Abs("/media/sd"), MAC: testMAC, WakeBroadcast: "127.0.0.1"},
 	})
 	m := status.Model{Rows: []status.Row{{TargetName: "sd", State: "offline"}}}
 
@@ -141,7 +142,7 @@ func TestWakeOfflineTargetsRateLimitsAcrossRows(t *testing.T) {
 func TestWakeNowRejectsUnwakeableTargets(t *testing.T) {
 	pinPortsToLoopback(t)
 	d := newTestDaemon(t, []config.Target{
-		{Type: "drive", Name: "sd", Path: "/media/sd"},
+		{Type: "drive", Name: "sd", Path: testpath.Abs("/media/sd")},
 		{Type: "share", Name: "nas", URL: "//host/share"}, // no MAC
 		wakeableTarget("omen", "device"),
 	})

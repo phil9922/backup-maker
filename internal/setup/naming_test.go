@@ -10,6 +10,7 @@ import (
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
+	"github.com/phil9922/backup-maker/internal/testpath"
 )
 
 // THE GUARANTEE: two drives on one server get two names.
@@ -75,7 +76,7 @@ func TestADefaultNameThatIsTakenIsMovedAlong(t *testing.T) {
 func TestATypedNameThatCollidesIsRefusedWithOneThatWouldWork(t *testing.T) {
 	cfg := config.New()
 	cfg.Targets = []config.Target{
-		{Type: "drive", Name: "card", Path: "/mnt/card", Folders: []string{}},
+		{Type: "drive", Name: "card", Path: testpath.Abs("/mnt/card"), Folders: []string{}},
 	}
 	err := CheckNameFree(cfg, "card")
 	if err == nil {
@@ -151,16 +152,16 @@ func TestRenamingADestinationLeavesNothingBehindUnderTheOldName(t *testing.T) {
 	isolate(t)
 	cfg := config.New()
 	cfg.General.MachineName = "laptop"
-	cfg.Folders = []config.Folder{{ID: "fold1", Path: "/home/p/code", Label: "code"}}
+	cfg.Folders = []config.Folder{{ID: "fold1", Path: testpath.Abs("/home/p/code"), Label: "code"}}
 	cfg.Targets = []config.Target{
 		{Type: "share", Name: "backups", URL: "//pi/backups", Username: "pk", Folders: []string{}},
-		{Type: "drive", Name: "card", Path: "/mnt/card", Folders: []string{}},
+		{Type: "drive", Name: "card", Path: testpath.Abs("/mnt/card"), Folders: []string{}},
 	}
 	cfg.Archives = []config.Archive{
 		{Name: "nightly", Every: "daily", Target: "backups", Keep: 3},
 	}
 	cfg.Retired = []config.Retired{{
-		ID: "gone", Label: "old", Path: "/home/p/old",
+		ID: "gone", Label: "old", Path: testpath.Abs("/home/p/old"),
 		Copies: []config.RetiredCopy{
 			{Target: "backups", Type: "share", DestPath: "laptop/old"},
 			{Target: "card", Type: "drive", DestPath: "laptop/old"},
@@ -294,8 +295,8 @@ func TestRenamingRefusesWhatWouldBreakTheConfig(t *testing.T) {
 	isolate(t)
 	cfg := config.New()
 	cfg.Targets = []config.Target{
-		{Type: "drive", Name: "card", Path: "/mnt/card", Folders: []string{}},
-		{Type: "drive", Name: "usb", Path: "/mnt/usb", Folders: []string{}},
+		{Type: "drive", Name: "card", Path: testpath.Abs("/mnt/card"), Folders: []string{}},
+		{Type: "drive", Name: "usb", Path: testpath.Abs("/mnt/usb"), Folders: []string{}},
 	}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)

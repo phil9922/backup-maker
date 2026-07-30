@@ -16,6 +16,7 @@ func isolate(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir) // linux
+	t.Setenv("AppData", dir)         // windows
 	t.Setenv("HOME", dir)            // macOS (and Roots())
 	cfg := config.New()
 	if err := cfg.Save(); err != nil {

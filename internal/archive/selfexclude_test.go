@@ -30,6 +30,7 @@ func snapshotWithConfigDirInside(t *testing.T) (*config.Config, config.Archive, 
 	dst := t.TempDir()
 
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(src, ".config")) // linux
+	t.Setenv("AppData", filepath.Join(src, ".config"))         // windows
 	t.Setenv("HOME", src)                                      // macOS
 	dir, err := config.Dir()
 	if err != nil {

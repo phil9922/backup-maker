@@ -14,6 +14,7 @@ import (
 func pointConfigDirInto(t *testing.T, base string) string {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(base, ".config")) // linux
+	t.Setenv("AppData", filepath.Join(base, ".config"))         // windows
 	t.Setenv("HOME", base)                                      // macOS
 	dir, err := Dir()
 	if err != nil {

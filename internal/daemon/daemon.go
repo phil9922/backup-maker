@@ -617,7 +617,7 @@ type preparedTarget struct {
 	// would be a round trip a minute for a sentence that changes when somebody
 	// types one.
 	description string
-	folders       []preparedFolder
+	folders     []preparedFolder
 }
 
 // preparedFolder is one folder→destination pair with its own open connection,

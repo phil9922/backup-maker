@@ -9,6 +9,7 @@ import (
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
+	"github.com/phil9922/backup-maker/internal/testpath"
 )
 
 // writeSampleDest stamps a temp dir as the "usb" target: manifest + marker,
@@ -61,7 +62,7 @@ func TestInspectSourceReportsManifestAndPointedTarget(t *testing.T) {
 	if nas == nil || nas.PointedAt {
 		t.Errorf("nas should NOT be pointed-at: %+v", nas)
 	}
-	if usb.Location != "/mnt/usb" || usb.NeedsReadding {
+	if usb.Location != testpath.Abs("/mnt/usb") || usb.NeedsReadding {
 		t.Errorf("the drive being inspected should be described in full: %+v", usb)
 	}
 	// The preview has to SAY the other destination cannot be restored from

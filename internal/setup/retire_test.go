@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phil9922/backup-maker/internal/config"
+	"github.com/phil9922/backup-maker/internal/testpath"
 )
 
 // retireCfg is one folder backed up to one drive, with the target's folder list
@@ -15,9 +16,9 @@ import (
 func retireCfg(targetFolders []string) *config.Config {
 	return &config.Config{
 		General: config.General{MachineName: "my-laptop"},
-		Folders: []config.Folder{{ID: "f1", Path: "/home/pk/Development", Label: "development"}},
+		Folders: []config.Folder{{ID: "f1", Path: testpath.Abs("/home/pk/Development"), Label: "development"}},
 		Targets: []config.Target{{
-			Type: "drive", Name: "laptocard", Path: "/media/card", Folders: targetFolders,
+			Type: "drive", Name: "laptocard", Path: testpath.Abs("/media/card"), Folders: targetFolders,
 		}},
 	}
 }
@@ -100,8 +101,8 @@ func TestRetiredEntriesSurviveASaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.General.MachineName = "my-laptop"
-	cfg.Folders = []config.Folder{{ID: "f1", Path: "/home/pk/Development", Label: "development"}}
-	cfg.Targets = []config.Target{{Type: "drive", Name: "laptocard", Path: "/media/card"}}
+	cfg.Folders = []config.Folder{{ID: "f1", Path: testpath.Abs("/home/pk/Development"), Label: "development"}}
+	cfg.Targets = []config.Target{{Type: "drive", Name: "laptocard", Path: testpath.Abs("/media/card")}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +119,7 @@ func TestRetiredEntriesSurviveASaveAndLoad(t *testing.T) {
 		t.Fatalf("got %d retired records after a save/load, want 1", len(loaded.Retired))
 	}
 	r := loaded.Retired[0]
-	if r.ID != "f1" || r.Label != "development" || r.Path != "/home/pk/Development" {
+	if r.ID != "f1" || r.Label != "development" || r.Path != testpath.Abs("/home/pk/Development") {
 		t.Errorf("the record did not survive intact: %+v", r)
 	}
 	if len(r.Copies) != 1 || r.Copies[0].Target != "laptocard" {
@@ -223,7 +224,7 @@ func TestReenableRefusesWhenTheLabelWouldCollideWithALiveFolder(t *testing.T) {
 	isolate(t)
 	seedAndStop(t, nil)
 	cfg, _ := config.Load()
-	cfg.Folders = append(cfg.Folders, config.Folder{ID: "f2", Path: "/home/pk/Other", Label: "development"})
+	cfg.Folders = append(cfg.Folders, config.Folder{ID: "f2", Path: testpath.Abs("/home/pk/Other"), Label: "development"})
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +245,7 @@ func TestReenableRefusesWhenThatPathIsProtectedAgain(t *testing.T) {
 	isolate(t)
 	seedAndStop(t, nil)
 	cfg, _ := config.Load()
-	cfg.Folders = append(cfg.Folders, config.Folder{ID: "f2", Path: "/home/pk/Development", Label: "dev-again"})
+	cfg.Folders = append(cfg.Folders, config.Folder{ID: "f2", Path: testpath.Abs("/home/pk/Development"), Label: "dev-again"})
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -300,9 +301,9 @@ func seedAndStop(t *testing.T, targetFolders []string) {
 		t.Fatal(err)
 	}
 	cfg.General.MachineName = "my-laptop"
-	cfg.Folders = []config.Folder{{ID: "f1", Path: "/home/pk/Development", Label: "development"}}
+	cfg.Folders = []config.Folder{{ID: "f1", Path: testpath.Abs("/home/pk/Development"), Label: "development"}}
 	cfg.Targets = []config.Target{{
-		Type: "drive", Name: "laptocard", Path: "/media/card", Folders: targetFolders,
+		Type: "drive", Name: "laptocard", Path: testpath.Abs("/media/card"), Folders: targetFolders,
 	}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)

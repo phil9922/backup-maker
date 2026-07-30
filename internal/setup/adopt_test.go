@@ -11,6 +11,7 @@ import (
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
+	"github.com/phil9922/backup-maker/internal/testpath"
 )
 
 // isolateNoConfig sandboxes config at a throwaway dir WITHOUT creating a
@@ -20,6 +21,7 @@ func isolateNoConfig(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir) // linux
+	t.Setenv("AppData", dir)         // windows
 	t.Setenv("HOME", dir)            // macOS
 }
 
@@ -29,10 +31,10 @@ func sampleConfig() *config.Config {
 	cfg := config.New()
 	cfg.General.MachineName = "oldbox"
 	cfg.Folders = []config.Folder{
-		{ID: "aaaaa-bbbbb", Path: "/home/old/docs", Label: "docs"},
+		{ID: "aaaaa-bbbbb", Path: testpath.Abs("/home/old/docs"), Label: "docs"},
 	}
 	cfg.Targets = []config.Target{
-		{Type: "drive", Name: "usb", Path: "/mnt/usb", Folders: []string{"aaaaa-bbbbb"}},
+		{Type: "drive", Name: "usb", Path: testpath.Abs("/mnt/usb"), Folders: []string{"aaaaa-bbbbb"}},
 		{Type: "share", Name: "nas", URL: "//nas/backups", Username: "phil", Folders: []string{}},
 	}
 	cfg.Archives = []config.Archive{
@@ -86,7 +88,7 @@ func TestManifestRoundTrip(t *testing.T) {
 		t.Fatalf("counts: %d folders, %d targets, %d archives", len(m.Folders), len(m.Targets), len(m.Archives))
 	}
 	// The destination this manifest is on, in full.
-	if m.Targets[0].UUID != "uuid-usb" || m.Targets[0].Path != "/mnt/usb" || !m.Targets[0].Locatable() {
+	if m.Targets[0].UUID != "uuid-usb" || m.Targets[0].Path != testpath.Abs("/mnt/usb") || !m.Targets[0].Locatable() {
 		t.Errorf("the drive's own entry did not round-trip: %+v", m.Targets[0])
 	}
 	// The other one, by name and type alone. Its UUID is as private as its
@@ -141,7 +143,7 @@ func TestAManifestNeverCarriesAnotherDestinationsAddress(t *testing.T) {
 	}
 	// And this destination's own details must survive, or nothing can be
 	// adopted from it at all.
-	for _, own := range []string{"/mnt/usb", "uuid-usb"} {
+	for _, own := range []string{testpath.Abs("/mnt/usb"), "uuid-usb"} {
 		if !strings.Contains(got, own) {
 			t.Errorf("the manifest lost its OWN %q:\n%s", own, got)
 		}
@@ -355,12 +357,12 @@ func TestAdoptPathRemap(t *testing.T) {
 	isolateNoConfig(t)
 	if _, err := Adopt(sampleManifest(), AdoptDecisions{
 		ContinueAsMachine: true,
-		PathRemap:         map[string]string{"aaaaa-bbbbb": "/home/new/docs"},
+		PathRemap:         map[string]string{"aaaaa-bbbbb": testpath.Abs("/home/new/docs")},
 	}); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
 	cfg := load(t)
-	if cfg.Folders[0].Path != "/home/new/docs" {
+	if cfg.Folders[0].Path != testpath.Abs("/home/new/docs") {
 		t.Errorf("path = %q, want remapped /home/new/docs", cfg.Folders[0].Path)
 	}
 }

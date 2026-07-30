@@ -27,6 +27,7 @@ const (
 func plantConfigDir(t *testing.T, src string) string {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(src, ".config")) // linux
+	t.Setenv("AppData", filepath.Join(src, ".config"))         // windows
 	t.Setenv("HOME", src)                                      // macOS
 	dir, err := config.Dir()
 	if err != nil {

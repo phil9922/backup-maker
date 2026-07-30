@@ -5,6 +5,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/phil9922/backup-maker/internal/testpath"
 )
 
 // THE GUARANTEE: two destinations cannot share a name.
@@ -20,7 +22,7 @@ func TestTwoDestinationsCannotShareAName(t *testing.T) {
 	cfg := New()
 	cfg.General.MachineName = "laptop"
 	cfg.Targets = []Target{
-		{Type: "drive", Name: "backups", Path: "/mnt/a", Folders: []string{}},
+		{Type: "drive", Name: "backups", Path: testpath.Abs("/mnt/a"), Folders: []string{}},
 		{Type: "share", Name: "backups", URL: "//pi/backups", Folders: []string{}},
 	}
 	err := cfg.Validate()
@@ -37,7 +39,7 @@ func TestTwoDestinationsCannotShareAName(t *testing.T) {
 
 func TestADestinationWithNoNameIsRefused(t *testing.T) {
 	cfg := New()
-	cfg.Targets = []Target{{Type: "drive", Name: "", Path: "/mnt/a", Folders: []string{}}}
+	cfg.Targets = []Target{{Type: "drive", Name: "", Path: testpath.Abs("/mnt/a"), Folders: []string{}}}
 	if err := cfg.Validate(); err == nil {
 		t.Error("a destination with no name was accepted; nothing could refer to it")
 	}
@@ -53,8 +55,8 @@ func TestACaseOnlyDifferenceStillLoads(t *testing.T) {
 	cfg := New()
 	cfg.General.MachineName = "laptop"
 	cfg.Targets = []Target{
-		{Type: "drive", Name: "backups", Path: "/mnt/a", Folders: []string{}},
-		{Type: "drive", Name: "Backups", Path: "/mnt/b", Folders: []string{}},
+		{Type: "drive", Name: "backups", Path: testpath.Abs("/mnt/a"), Folders: []string{}},
+		{Type: "drive", Name: "Backups", Path: testpath.Abs("/mnt/b"), Folders: []string{}},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("a config that has been working was refused on load: %v", err)
