@@ -135,8 +135,8 @@ func TestTheMasterSwitchOverridesEveryCategory(t *testing.T) {
 		t.Errorf("alerts were off and it still produced: %s", titles(got))
 	}
 	// Including the two that do not go through pending() at all.
-	a.foreignStorage("card", "/media/pk/CARD")
-	a.storageRecognized("card", "/media/pk/CARD")
+	a.foreignStorage("card", "/media/alex/CARD")
+	a.storageRecognized("card", "/media/alex/CARD")
 }
 
 // The unrecognised-storage pair is announced from mayWrite rather than from the
@@ -146,8 +146,8 @@ func TestSwitchingOffUnrecognisedStorageSilencesBothHalves(t *testing.T) {
 	a := kindsAlerter(config.AlertKinds{UnrecognisedStorage: off()})
 	a.notifier = sent
 
-	a.foreignStorage("card", "/media/pk/CARD")
-	a.storageRecognized("card", "/media/pk/CARD")
+	a.foreignStorage("card", "/media/alex/CARD")
+	a.storageRecognized("card", "/media/alex/CARD")
 	// Delivery is asynchronous; the gate is not. If the gate were missing these
 	// would have been queued, which is what the counter would eventually show.
 	time.Sleep(50 * time.Millisecond)

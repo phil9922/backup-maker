@@ -24,7 +24,7 @@ func TestUnderRootStopsAtASeparator(t *testing.T) {
 		{"a sibling starting with the root's name", "/mnt/backups-old", false},
 		{"a sibling with content under it", "/mnt/backups-old/code", false},
 		{"a sibling differing by one character", "/mnt/backups2", false},
-		{"an unrelated path", "/home/pk/code", false},
+		{"an unrelated path", "/home/alex/code", false},
 		{"the parent", "/mnt", false},
 	}
 

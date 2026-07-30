@@ -59,7 +59,7 @@ func seedForDelete(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	cfg.General.MachineName = "my-laptop"
-	cfg.Folders = []config.Folder{{ID: "f1", Path: testpath.Abs("/home/pk/Development"), Label: "development"}}
+	cfg.Folders = []config.Folder{{ID: "f1", Path: testpath.Abs("/home/alex/Development"), Label: "development"}}
 	cfg.Targets = []config.Target{{Type: "drive", Name: "laptocard", Path: root}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestDeletingRetiredBackupsRefusesWhenALiveFolderUsesTheSameDestination(t *t
 	root := driveWith(t, "my-laptop", "development")
 	seedForDelete(t, root)
 	cfg, _ := config.Load()
-	cfg.Folders = []config.Folder{{ID: "f2", Path: testpath.Abs("/home/pk/Elsewhere"), Label: "development"}}
+	cfg.Folders = []config.Folder{{ID: "f2", Path: testpath.Abs("/home/alex/Elsewhere"), Label: "development"}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}

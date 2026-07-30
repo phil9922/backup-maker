@@ -13,8 +13,8 @@ import (
 func liveConfig() *Config {
 	return &Config{
 		Folders: []Folder{
-			{ID: "f1", Label: "Development", Path: "/home/pk/Desktop/Development"},
-			{ID: "f2", Label: "Desktop", Path: "/home/pk/Desktop", SnapshotOnly: true},
+			{ID: "f1", Label: "Development", Path: "/home/alex/Desktop/Development"},
+			{ID: "f2", Label: "Desktop", Path: "/home/alex/Desktop", SnapshotOnly: true},
 		},
 		Targets: []Target{
 			{Name: "laptopcard", Type: "drive"}, // no Folders → every folder

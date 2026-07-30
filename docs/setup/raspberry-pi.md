@@ -561,7 +561,7 @@ sudo nano /etc/samba/smb.conf
 
 Replace `YOURUSER` with your username and `192.168.1.0/24` with your own
 network — `ip -o -4 addr show` prints the Pi's address and prefix, so
-`192.168.5.141/22` means `192.168.4.0/22`. Then check the file parses, give
+`192.168.1.42/22` means `192.168.0.0/22`. Then check the file parses, give
 yourself an SMB password — which is **separate from your login password** —
 and restart:
 

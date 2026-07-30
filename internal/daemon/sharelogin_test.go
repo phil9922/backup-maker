@@ -36,12 +36,12 @@ func loginDaemon(t *testing.T, targets []config.Target, creds map[string]string)
 // using, every time.
 func TestBrowsingAConfiguredShareUsesTheStoredPassword(t *testing.T) {
 	d, cfg := loginDaemon(t,
-		[]config.Target{{Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups", Username: "pk"}},
+		[]config.Target{{Type: "share", Name: "backup-pi", URL: "//192.168.1.50/backups", Username: "alex"}},
 		map[string]string{"backup-pi": "stored-secret"},
 	)
 
-	user, pass := d.storedShareLogin(cfg, "192.168.5.141")
-	if user != "pk" || pass != "stored-secret" {
+	user, pass := d.storedShareLogin(cfg, "192.168.1.50")
+	if user != "alex" || pass != "stored-secret" {
 		t.Errorf("storedShareLogin = %q/%q, want the credentials already on file", user, pass)
 	}
 }
@@ -65,11 +65,11 @@ func TestAGuestShareReturnsItsUsernameWithNoPassword(t *testing.T) {
 // else's credentials.
 func TestAnUnknownHostGetsNoCredentials(t *testing.T) {
 	d, cfg := loginDaemon(t,
-		[]config.Target{{Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups", Username: "pk"}},
+		[]config.Target{{Type: "share", Name: "backup-pi", URL: "//192.168.1.50/backups", Username: "alex"}},
 		map[string]string{"backup-pi": "stored-secret"},
 	)
 
-	if user, pass := d.storedShareLogin(cfg, "192.168.5.99"); user != "" || pass != "" {
+	if user, pass := d.storedShareLogin(cfg, "192.168.1.99"); user != "" || pass != "" {
 		t.Errorf("a stranger was given %q/%q", user, pass)
 	}
 	if user, pass := d.storedShareLogin(cfg, "this"); user != "" || pass != "" {
@@ -83,7 +83,7 @@ func TestAnUnknownHostGetsNoCredentials(t *testing.T) {
 // A drive target has no credentials to lend, and must not be matched by host.
 func TestADriveTargetIsNeverUsedAsAShareLogin(t *testing.T) {
 	d, cfg := loginDaemon(t,
-		[]config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/pk/BACKUPCARD"}},
+		[]config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/alex/BACKUPCARD"}},
 		map[string]string{"laptopcard": "not-a-share-password"},
 	)
 

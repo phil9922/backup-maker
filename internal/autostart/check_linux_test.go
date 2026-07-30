@@ -48,7 +48,7 @@ Description=backup-maker continuous backups
 After=network.target
 
 [Service]
-ExecStart=/home/pk/.local/bin/backup-maker daemon
+ExecStart=/home/alex/.local/bin/backup-maker daemon
 Restart=on-failure
 RestartSec=5
 
@@ -73,7 +73,7 @@ WantedBy=default.target
 // The healthy case: what this binary writes must read as current, or the
 // warning fires on every machine for ever and stops meaning anything.
 func TestTheUnitThisVersionWritesIsUpToDate(t *testing.T) {
-	install(t, unitText("/home/pk/.local/bin/backup-maker"))
+	install(t, unitText("/home/alex/.local/bin/backup-maker"))
 
 	r, err := Check()
 	if err != nil {
@@ -92,7 +92,7 @@ func TestTheUnitThisVersionWritesIsUpToDate(t *testing.T) {
 // the message becomes noise and gets ignored — which costs more than it saves,
 // because this warning has to be believed on the one day it matters.
 func TestRunningTheBinaryFromElsewhereIsNotStaleness(t *testing.T) {
-	install(t, unitText("/home/pk/.local/bin/backup-maker"))
+	install(t, unitText("/home/alex/.local/bin/backup-maker"))
 
 	r, err := Check()
 	if err != nil {
@@ -107,7 +107,7 @@ func TestRunningTheBinaryFromElsewhereIsNotStaleness(t *testing.T) {
 // changes nothing about what systemd does, and must not tell every user in the
 // world to reinstall their service.
 func TestRewordingACommentIsNotAChange(t *testing.T) {
-	unit := unitText("/home/pk/.local/bin/backup-maker")
+	unit := unitText("/home/alex/.local/bin/backup-maker")
 	reworded := strings.Replace(unit,
 		"# always, not on-failure: a backup daemon that exits cleanly for any reason —",
 		"# Some entirely different explanation of the same directive.",
@@ -129,7 +129,7 @@ func TestRewordingACommentIsNotAChange(t *testing.T) {
 // Changing what systemd is actually told, however, must be caught — this is the
 // half that makes the test above safe to have.
 func TestChangingADirectiveIsReported(t *testing.T) {
-	unit := unitText("/home/pk/.local/bin/backup-maker")
+	unit := unitText("/home/alex/.local/bin/backup-maker")
 	weakened := strings.Replace(unit, "WatchdogSec=180", "WatchdogSec=6000", 1)
 	if weakened == unit {
 		t.Fatal("WatchdogSec is no longer in the unit")

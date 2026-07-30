@@ -117,7 +117,7 @@ it whenever you like.
 A network drive is named after the machine and the folder on it, so
 `//pi/backups/drive1` becomes `pi-drive1` — the name says which box the disk
 hangs off and which disk it is, which is what you are actually telling apart. An
-address instead of a hostname is left out of the name (`//192.168.5.141/backups`
+address instead of a hostname is left out of the name (`//192.168.1.50/backups`
 is just `backups`): it would be longer, harder to read, and wrong the day your
 router hands out a different lease.
 

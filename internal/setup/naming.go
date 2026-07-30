@@ -23,11 +23,11 @@ import (
 // the same default, and the second was refused outright. `//pi/backups/drive1`
 // is `pi-drive1` — the machine it hangs off, and which drive.
 //
-// A BARE IP CONTRIBUTES NOTHING AND IS LEFT OUT. `192.168.5.141-backups` is
+// A BARE IP CONTRIBUTES NOTHING AND IS LEFT OUT. `192.168.1.50-backups` is
 // longer, harder to read, and stops being true the day the DHCP lease moves —
 // and this is a label somebody reads on a dashboard, not an address anything
 // resolves. An address-addressed share falls back to naming the share and the
-// drive: `//192.168.5.141/backups/drive1` is `backups-drive1`.
+// drive: `//192.168.1.50/backups/drive1` is `backups-drive1`.
 //
 // Returns "" for an address it cannot parse; the caller is about to report that
 // properly.

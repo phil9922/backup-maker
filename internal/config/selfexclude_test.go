@@ -77,7 +77,7 @@ func TestSelfExcludesLeavesADirectoryMerelyNamedBackupMakerAlone(t *testing.T) {
 // Nested well below the folder root, which is where a home directory keeps it.
 func TestSelfExcludesFindsADeeplyNestedConfigDir(t *testing.T) {
 	root := t.TempDir()
-	deep := filepath.Join(root, "users", "pk", "profile")
+	deep := filepath.Join(root, "users", "alex", "profile")
 	if err := os.MkdirAll(deep, 0o755); err != nil {
 		t.Fatal(err)
 	}

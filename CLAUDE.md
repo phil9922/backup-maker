@@ -40,6 +40,13 @@ Existing guards that enforce this, and must not be weakened:
 
 ## Other standing rules
 
+- **Nothing in this repository describes the machine you are working on.** It is
+  public. Test fixtures, doc examples and screenshots use one invented identity —
+  `alex`, `192.168.1.x`, `SDCARD`, `my-laptop` — never a real username, home
+  directory, LAN address, hostname or drive label.
+  `tools/screenshots/checks.py` enforces it for screenshots, asking the OS for
+  the home directory rather than naming it.
+
 - **Removing a folder, a destination or a schedule never deletes backups.**
   Those are changes of intent. The only action in the program that deletes a
   backup on purpose is "Delete backups…" under *No longer protected*, which

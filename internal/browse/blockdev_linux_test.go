@@ -229,9 +229,9 @@ func TestADiskWithNoProductNameFallsBackToVendorAndModel(t *testing.T) {
 
 func TestMountPointsWithAwkwardNamesAreReadCorrectly(t *testing.T) {
 	s := newSysfs(t)
-	s.mounted("8:1", `/media/pk/My\040Backup\040Drive`)
+	s.mounted("8:1", `/media/alex/My\040Backup\040Drive`)
 
-	if got := MountPoints()["8:1"]; got != "/media/pk/My Backup Drive" {
+	if got := MountPoints()["8:1"]; got != "/media/alex/My Backup Drive" {
 		t.Errorf("mount point = %q, want the spaces unescaped", got)
 	}
 }

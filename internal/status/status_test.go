@@ -321,7 +321,7 @@ func mirrorCollector(e *localmirror.Engine) *Collector {
 	cfg := &config.Config{
 		General:  config.General{MachineName: "workstation"},
 		Defaults: config.Defaults{StaleAfterDays: 7},
-		Folders:  []config.Folder{{ID: "photos", Label: "Photos", Path: "/home/pk/Photos"}},
+		Folders:  []config.Folder{{ID: "photos", Label: "Photos", Path: "/home/alex/Photos"}},
 		Targets:  []config.Target{{Type: "drive", Name: "sdcard", Path: "/mnt/sd"}},
 	}
 	return &Collector{
@@ -729,8 +729,8 @@ func TestAnEmptyFolderListStillMeansEveryFolder(t *testing.T) {
 	cfg := &config.Config{
 		General: config.General{MachineName: "my-laptop"},
 		Folders: []config.Folder{
-			{ID: "f1", Path: "/home/pk/one", Label: "one"},
-			{ID: "f2", Path: "/home/pk/two", Label: "two"},
+			{ID: "f1", Path: "/home/alex/one", Label: "one"},
+			{ID: "f2", Path: "/home/alex/two", Label: "two"},
 		},
 		Targets: []config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/card"}},
 	}
@@ -751,7 +751,7 @@ func TestAnEmptyFolderListStillMeansEveryFolder(t *testing.T) {
 func TestASnapshotOnlyDestinationDoesNotClaimEveryFolder(t *testing.T) {
 	cfg := &config.Config{
 		General: config.General{MachineName: "my-laptop"},
-		Folders: []config.Folder{{ID: "f1", Path: "/home/pk/one", Label: "one"}},
+		Folders: []config.Folder{{ID: "f1", Path: "/home/alex/one", Label: "one"}},
 		Targets: []config.Target{{Type: "drive", Name: "coldstore", Path: "/media/cold", ArchivesOnly: true}},
 	}
 
@@ -773,8 +773,8 @@ func TestASnapshotJobReportsTheFolderItCovers(t *testing.T) {
 	cfg := &config.Config{
 		General: config.General{MachineName: "my-laptop"},
 		Folders: []config.Folder{
-			{ID: "f1", Path: "/home/pk/Desktop", Label: "Desktop"},
-			{ID: "f2", Path: "/home/pk/Desktop/Development", Label: "Development"},
+			{ID: "f1", Path: "/home/alex/Desktop", Label: "Desktop"},
+			{ID: "f2", Path: "/home/alex/Desktop/Development", Label: "Development"},
 		},
 		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
 		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
@@ -800,7 +800,7 @@ func TestASnapshotJobReportsTheFolderItCovers(t *testing.T) {
 func TestAnEveryFolderSnapshotJobSaysSo(t *testing.T) {
 	cfg := &config.Config{
 		General:  config.General{MachineName: "my-laptop"},
-		Folders:  []config.Folder{{ID: "f1", Path: "/home/pk/a", Label: "a"}},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/alex/a", Label: "a"}},
 		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
 		Archives: []config.Archive{{Name: "all", Every: "daily", Target: "card"}},
 	}
@@ -821,8 +821,8 @@ func TestASnapshotOnlyFolderIsNotReportedAsContinuous(t *testing.T) {
 	cfg := &config.Config{
 		General: config.General{MachineName: "my-laptop"},
 		Folders: []config.Folder{
-			{ID: "f1", Path: "/home/pk/mirrored", Label: "mirrored"},
-			{ID: "f2", Path: "/home/pk/sealed", Label: "sealed"},
+			{ID: "f1", Path: "/home/alex/mirrored", Label: "mirrored"},
+			{ID: "f2", Path: "/home/alex/sealed", Label: "sealed"},
 		},
 		Targets: []config.Target{
 			{Type: "drive", Name: "card", Path: "/media/card", Folders: []string{"f1"}},
@@ -859,7 +859,7 @@ func TestASnapshotOnlyFolderIsNotReportedAsContinuous(t *testing.T) {
 func TestANewSnapshotJobSaysItIsPreparing(t *testing.T) {
 	cfg := &config.Config{
 		General:  config.General{MachineName: "my-laptop"},
-		Folders:  []config.Folder{{ID: "f1", Path: "/home/pk/Desktop", Label: "Desktop"}},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/alex/Desktop", Label: "Desktop"}},
 		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
 		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
 	}
@@ -883,7 +883,7 @@ func TestASnapshotJobCoveringNothingIsNotPreparing(t *testing.T) {
 		General:  config.General{MachineName: "my-laptop"},
 		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
 		Archives: []config.Archive{{Name: "nightly", Folders: []string{"gone"}, Every: "daily", Target: "card"}},
-		Retired:  []config.Retired{{ID: "gone", Label: "Desktop", Path: "/home/pk/Desktop"}},
+		Retired:  []config.Retired{{ID: "gone", Label: "Desktop", Path: "/home/alex/Desktop"}},
 	}
 	col := setupCollector(cfg, func() bool { return true })
 	col.Archives = func() ([]archive.Result, map[string]time.Time) { return nil, nil }
@@ -904,7 +904,7 @@ func TestASnapshotJobCoveringNothingIsNotPreparing(t *testing.T) {
 func TestARunningSnapshotDoesNotReportItselfAsNeverRun(t *testing.T) {
 	cfg := &config.Config{
 		General:  config.General{MachineName: "my-laptop"},
-		Folders:  []config.Folder{{ID: "f1", Path: "/home/pk/Desktop", Label: "Desktop"}},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/alex/Desktop", Label: "Desktop"}},
 		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
 		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
 	}
@@ -933,12 +933,12 @@ func TestAFolderBackedUpByNothingIsReportedAsUnprotected(t *testing.T) {
 	cfg := &config.Config{
 		General: config.General{MachineName: "my-laptop"},
 		Folders: []config.Folder{
-			{ID: "f1", Label: "Development", Path: "/home/pk/Desktop/Development"},
-			{ID: "f2", Label: "Desktop", Path: "/home/pk/Desktop", SnapshotOnly: true},
+			{ID: "f1", Label: "Development", Path: "/home/alex/Desktop/Development"},
+			{ID: "f2", Label: "Desktop", Path: "/home/alex/Desktop", SnapshotOnly: true},
 		},
 		Targets: []config.Target{
-			{Type: "drive", Name: "laptopcard", Path: "/media/pk/BACKUPCARD"},
-			{Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups"},
+			{Type: "drive", Name: "laptopcard", Path: "/media/alex/BACKUPCARD"},
+			{Type: "share", Name: "backup-pi", URL: "//192.168.1.50/backups"},
 		},
 	}
 	col := &Collector{
@@ -976,7 +976,7 @@ func TestAFolderWithOnlyASnapshotIsReportedAsProtected(t *testing.T) {
 	cfg := &config.Config{
 		General:  config.General{MachineName: "my-laptop"},
 		Folders:  []config.Folder{{ID: "f2", Label: "Desktop", SnapshotOnly: true}},
-		Targets:  []config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/pk/BACKUPCARD"}},
+		Targets:  []config.Target{{Type: "drive", Name: "laptopcard", Path: "/media/alex/BACKUPCARD"}},
 		Archives: []config.Archive{{Name: "desktop-daily", Target: "laptopcard", Folders: []string{"f2"}}},
 	}
 	col := &Collector{

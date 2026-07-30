@@ -210,7 +210,7 @@ func TestANewFolderDoesNotTakeAStoppedFoldersDestination(t *testing.T) {
 	cfg, _ := config.Load()
 	cfg.General.MachineName = "my-laptop"
 	cfg.Retired = []config.Retired{{
-		ID: "old", Path: "/home/pk/Development", Label: "development",
+		ID: "old", Path: "/home/alex/Development", Label: "development",
 	}}
 	elsewhere := t.TempDir()
 	mustDir(t, elsewhere, "development")

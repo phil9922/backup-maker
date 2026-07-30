@@ -272,7 +272,7 @@ func localStorage(cfg *config.Config, drives func() []browse.Drive) []Storage {
 // folder's name when it is one.
 //
 // A PREFIX MATCH, WITH THE SEPARATOR CHECKED. A bare strings.HasPrefix would
-// match "/media/pk/CARD" against a drive at "/media/pk/CARD-OLD" and report a
+// match "/media/alex/CARD" against a drive at "/media/alex/CARD-OLD" and report a
 // completely different drive as already set up. The exact match is preferred
 // over any subfolder, so a drive used both ways still names its root target.
 func targetOn(cfg *config.Config, drive string) (target, folder string) {

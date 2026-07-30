@@ -39,7 +39,7 @@ func newDestWriter(t *testing.T, root, recordedUUID string) *destWriter {
 	target := config.Target{Type: "drive", Name: "card", Path: root, Folders: []string{"dev"}}
 	cfg := &config.Config{
 		General: config.General{MachineName: "workstation"},
-		Folders: []config.Folder{{ID: "dev", Label: "Development", Path: "/home/pk/Desktop/Development"}},
+		Folders: []config.Folder{{ID: "dev", Label: "Development", Path: "/home/alex/Desktop/Development"}},
 		Targets: []config.Target{target},
 	}
 	logs := &bytes.Buffer{}

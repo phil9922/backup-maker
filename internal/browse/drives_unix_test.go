@@ -76,7 +76,7 @@ func TestAFolderWithNothingMountedOnItIsExplained(t *testing.T) {
 // learn to ignore warnings.
 func TestAMountParentIsNotReportedAsAnEmptyDrive(t *testing.T) {
 	dir := t.TempDir()
-	nested := filepath.Join(dir, "pk")
+	nested := filepath.Join(dir, "alex")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}

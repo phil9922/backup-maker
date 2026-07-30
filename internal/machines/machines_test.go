@@ -249,7 +249,7 @@ func TestADriveIsNeverAMachineButAConfiguredShareHostIs(t *testing.T) {
 // for a password the daemon had stored all along.
 func TestAConfiguredShareIsOfferedWithoutAScan(t *testing.T) {
 	cfg := testConfig("laptop", config.Target{
-		Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups", Username: "pk",
+		Type: "share", Name: "backup-pi", URL: "//192.168.1.50/backups", Username: "alex",
 	})
 
 	got, err := List(context.Background(), cfg, nil) // nil scan: no network at all
@@ -258,7 +258,7 @@ func TestAConfiguredShareIsOfferedWithoutAScan(t *testing.T) {
 	}
 	var found *Machine
 	for i := range got {
-		if got[i].Addr == "192.168.5.141" {
+		if got[i].Addr == "192.168.1.50" {
 			found = &got[i]
 		}
 	}
@@ -281,9 +281,9 @@ func TestAConfiguredShareIsOfferedWithoutAScan(t *testing.T) {
 // the password.
 func TestAShareThatIsBothConfiguredAndScannedAppearsOnce(t *testing.T) {
 	cfg := testConfig("laptop", config.Target{
-		Type: "share", Name: "backup-pi", URL: "//192.168.5.141/backups",
+		Type: "share", Name: "backup-pi", URL: "//192.168.1.50/backups",
 	})
-	scan := scanning([]discover.Host{{Addr: "192.168.5.141", Name: "raspberrypi"}}, nil)
+	scan := scanning([]discover.Host{{Addr: "192.168.1.50", Name: "raspberrypi"}}, nil)
 
 	got, err := List(context.Background(), cfg, scan)
 	if err != nil {
@@ -291,7 +291,7 @@ func TestAShareThatIsBothConfiguredAndScannedAppearsOnce(t *testing.T) {
 	}
 	n := 0
 	for _, m := range got {
-		if m.Addr == "192.168.5.141" {
+		if m.Addr == "192.168.1.50" {
 			n++
 		}
 	}

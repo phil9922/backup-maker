@@ -31,8 +31,8 @@ func TestTwoDrivesOnOneServerGetTwoNames(t *testing.T) {
 		{"smb://pi:4450/backups/d1", "pi-d1"},
 		// An address says nothing worth reading and stops being true when the
 		// lease moves, so it is left out entirely.
-		{"//192.168.5.141/backups", "backups"},
-		{"//192.168.5.141/backups/drive1", "backups-drive1"},
+		{"//192.168.1.50/backups", "backups"},
+		{"//192.168.1.50/backups/drive1", "backups-drive1"},
 		// A share name with a space in it is a name nobody typed, so it is
 		// tidied rather than refused.
 		{"//pi/My Backups", "pi-My-Backups"},
@@ -154,7 +154,7 @@ func TestRenamingADestinationLeavesNothingBehindUnderTheOldName(t *testing.T) {
 	cfg.General.MachineName = "laptop"
 	cfg.Folders = []config.Folder{{ID: "fold1", Path: testpath.Abs("/home/p/code"), Label: "code"}}
 	cfg.Targets = []config.Target{
-		{Type: "share", Name: "backups", URL: "//pi/backups", Username: "pk", Folders: []string{}},
+		{Type: "share", Name: "backups", URL: "//pi/backups", Username: "alex", Folders: []string{}},
 		{Type: "drive", Name: "card", Path: testpath.Abs("/mnt/card"), Folders: []string{}},
 	}
 	cfg.Archives = []config.Archive{

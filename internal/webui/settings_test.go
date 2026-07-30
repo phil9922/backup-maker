@@ -41,7 +41,7 @@ func TestNetworkStatusHidesTheSettings(t *testing.T) {
 			DesktopAlerts:  false,
 			BackupsStopped: false,
 			LANView:        true,
-			LANViewURL:     "http://192.168.5.151:8667",
+			LANViewURL:     "http://192.168.1.24:8667",
 		},
 	}
 	raw, err := json.Marshal(RedactForNetwork(m))
@@ -52,7 +52,7 @@ func TestNetworkStatusHidesTheSettings(t *testing.T) {
 	if strings.Contains(got, "settings") {
 		t.Errorf("the settings block was published to the network view:\n%s", got)
 	}
-	for _, leak := range []string{"desktop_alerts", "alert_backups_stopped", "192.168.5.151"} {
+	for _, leak := range []string{"desktop_alerts", "alert_backups_stopped", "192.168.1.24"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("%q reached the network view:\n%s", leak, got)
 		}

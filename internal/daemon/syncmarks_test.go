@@ -249,7 +249,7 @@ func TestARestartWithAStaleDestinationAlertsOnceNotEveryCycle(t *testing.T) {
 	d.cfg = &config.Config{
 		General:  config.General{MachineName: "workstation"},
 		Defaults: config.Defaults{StaleAfterDays: 7},
-		Folders:  []config.Folder{{ID: "photos", Label: "Photos", Path: "/home/pk/Photos"}},
+		Folders:  []config.Folder{{ID: "photos", Label: "Photos", Path: "/home/alex/Photos"}},
 		Targets:  []config.Target{{Type: "drive", Name: "sdcard", Path: "/mnt/sd"}},
 	}
 	e := localmirror.New(localmirror.Options{

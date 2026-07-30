@@ -49,7 +49,10 @@ def no_invisible_text(page, out):
 def nothing_local_leaked(page, out, repo):
     """No trace of the machine the harness runs on may reach a screenshot."""
     text = page.inner_text("body")
-    leaked = [s for s in ("/tmp/", "/home/pk", "claude", repo) if s in text]
+    # The real home directory is asked for rather than named: this is the guard
+    # that stops a screenshot shipping a real path, so hard-coding the username
+    # made the guard itself a disclosure — and wrong on anybody else's machine.
+    leaked = [s for s in ("/tmp/", os.path.expanduser("~"), "claude", repo) if s in text]
     if leaked:
         raise SystemExit(f"{out}: leaked {leaked} — do not publish this shot")
 

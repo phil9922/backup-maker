@@ -161,9 +161,9 @@ func TestNetworkViewIsNotToldAboutStoppedBackups(t *testing.T) {
 		Retired: []status.RetiredInfo{{
 			ID:    "f1",
 			Label: "development",
-			Path:  "/home/pk/Development",
+			Path:  "/home/alex/code",
 			Copies: []status.RetiredCopyInfo{{
-				Target: "laptocard", Type: "drive", Location: "/media/pk/BACKUPCARD",
+				Target: "laptocard", Type: "drive", Location: "/media/alex/SDCARD",
 				DestPath: "workstation/development",
 			}},
 		}},
@@ -177,7 +177,7 @@ func TestNetworkViewIsNotToldAboutStoppedBackups(t *testing.T) {
 	if strings.Contains(got, "retired") {
 		t.Errorf("the stopped-folder block was published to the network view:\n%s", got)
 	}
-	for _, leak := range []string{"/home/pk/Development", "/media/pk/BACKUPCARD", "workstation/development"} {
+	for _, leak := range []string{"/home/alex/code", "/media/alex/SDCARD", "workstation/development"} {
 		if strings.Contains(got, leak) {
 			t.Errorf("%q reached the network view:\n%s", leak, got)
 		}
