@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/phil9922/backup-maker/internal/browse"
@@ -313,13 +314,83 @@ func TestASymlinkedBinaryIsNeverNamedInTheRule(t *testing.T) {
 
 // Something genuinely root-owned and not group- or world-writable is accepted,
 // or the check would refuse every correct installation too.
+//
+// THE PREMISE IS VERIFIED, NOT ASSUMED. This used to name /usr/bin/env with a
+// comment claiming it "is root-owned and 755 on every system this runs on". That
+// is not true of a GitHub runner, where /usr can be owned by the build user — so
+// onlyRootCanReplace refused it, entirely correctly, and the test failed for
+// being wrong about the machine rather than about the code. A test cannot assert
+// what a filesystem it does not own looks like.
+//
+// So: find a candidate whose whole ancestor chain really is root-owned, checked
+// here with an independent walk rather than by asking the function under test,
+// and skip loudly if this machine has none. The refusal cases above own their
+// fixtures and run everywhere; this one cannot, because a test process that is
+// not root cannot create a root-owned file.
 func TestARootOwnedBinaryIsAccepted(t *testing.T) {
-	// /usr/bin/env is root-owned and 755 on every system this runs on.
-	const known = "/usr/bin/env"
-	if _, err := os.Stat(known); err != nil {
-		t.Skipf("%s is not present on this system", known)
+	var why string
+	for _, cand := range []string{"/usr/bin/env", "/bin/sh", "/usr/bin/true", "/sbin/init"} {
+		if _, err := os.Lstat(cand); err != nil {
+			continue
+		}
+		if bad := firstNonRootAncestor(cand); bad != "" {
+			if why == "" {
+				why = cand + ": " + bad + " is not root-owned or is writable by others"
+			}
+			continue
+		}
+		if err := onlyRootCanReplace(cand); err != nil {
+			t.Errorf("a properly installed root-owned binary was refused: %v", err)
+		}
+		return
 	}
-	if err := onlyRootCanReplace(known); err != nil {
-		t.Errorf("a properly installed root-owned binary was refused: %v", err)
+	t.Skipf("no root-owned executable on this machine to check the accept path "+
+		"against (%s)", why)
+}
+
+// The premise-checker above decides whether the accept path is exercised or
+// skipped, so it gets its own test: if it wrongly reported every chain as safe,
+// the test would go back to failing on machines whose /usr is not root-owned,
+// which is the flake it exists to prevent.
+func TestThePremiseCheckerSpotsANonRootAncestor(t *testing.T) {
+	dir := t.TempDir() // owned by whoever runs the test, which is not root
+	f := filepath.Join(dir, "prog")
+	if err := os.WriteFile(f, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := firstNonRootAncestor(f); got == "" {
+		t.Error("a file under a user-owned temp directory was reported as having " +
+			"an entirely root-owned ancestor chain")
+	}
+	if got := firstNonRootAncestor("/"); got != "" {
+		t.Errorf("/ was reported unsafe (%s); on a sane system it is root-owned "+
+			"and not world-writable, and if it is not, the skip message will say so", got)
+	}
+}
+
+// firstNonRootAncestor names the first path from p up to / that is a symlink, is
+// not owned by root, or is group- or world-writable — "" if every one of them is
+// safe. Deliberately a second implementation of onlyRootCanReplace's rule: a test
+// that decided the premise by calling the function under test would agree with
+// itself no matter what either of them did.
+func firstNonRootAncestor(p string) string {
+	for q := filepath.Clean(p); ; q = filepath.Dir(q) {
+		fi, err := os.Lstat(q)
+		if err != nil {
+			return q
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return q
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			return q
+		}
+		if st.Uid != 0 || fi.Mode().Perm()&0o022 != 0 {
+			return q
+		}
+		if q == "/" {
+			return ""
+		}
 	}
 }
