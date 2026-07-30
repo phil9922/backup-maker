@@ -331,6 +331,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		UpdateComparable:   d.updateComparable,
 		Delivery:           d.delivery.snapshot,
 		RecentAlerts:       d.alertHistory,
+		Refused:            d.refusedTargets,
 	}
 	// Wake-on-LAN for offline targets that opted in with a MAC address.
 	go d.wakeLoop(ctx, collector.Collect)

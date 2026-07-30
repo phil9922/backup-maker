@@ -618,3 +618,37 @@ func (d *daemon) spaceSamples() map[string]status.SpaceSample {
 	}
 	return out
 }
+
+// refusedTargets names the destinations this daemon is currently declining to
+// write to, and why, in the vocabulary the rest of the program already uses.
+//
+// THIS IS THE BRIDGE THE HEALTH MODEL WAS MISSING. mayWrite discovers refusal
+// once a minute while refreshing status pages; the mirror engine discovers the
+// same thing only when it next tries to write, which is the next save or the
+// hourly pass. Until this existed the knowledge went nowhere but an alert, so
+// the dashboard could say "Everything is backed up" for the best part of an hour
+// after the user had been told nothing was being written to a destination —
+// which is the one contradiction a page whose whole job is answering "are my
+// files safe" cannot afford.
+//
+// Its own lock, not d.mu: the status writer holds foreignMu while asking the
+// same question, and this is read from the status collector.
+func (d *daemon) refusedTargets() map[string]string {
+	d.foreignMu.Lock()
+	defer d.foreignMu.Unlock()
+	if len(d.foreign) == 0 && len(d.clashing) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(d.foreign)+len(d.clashing))
+	// Foreign storage first, then the claim: a destination can only be in one
+	// of the two states, but if both flags were somehow set the storage being
+	// wrong is the more fundamental fact, so it is the one that must not be
+	// overwritten.
+	for name := range d.clashing {
+		out[name] = "name-clash"
+	}
+	for name := range d.foreign {
+		out[name] = "wrong-drive"
+	}
+	return out
+}

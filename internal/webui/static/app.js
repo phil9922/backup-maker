@@ -24,6 +24,10 @@ function stateClass(state, row) {
   // Nothing is wrong here, so nothing should be red: this folder is waiting on
   // a decision, not reporting a fault.
   if (state === 'no destination yet') return 'muted';
+  // The mirror-side counterpart, and not a fault either: a target with no rows,
+  // which is the permanent and correct state of an archives_only destination.
+  // Keep in step with RowHealth in internal/status/vocabulary.go.
+  if (state === 'no folders assigned') return 'muted';
   if (state === 'syncing' || state === 'scanning') {
     // Green once there is a copy on the destination: the dot answers the same
     // question the label does, and amber next to "backed up" would take the
@@ -67,6 +71,16 @@ function stateHelp(state) {
   if (state === 'no destination yet') {
     return 'This folder is being watched but has nowhere to send copies yet. ' +
       'Add a destination and it starts backing up within seconds.';
+  }
+  // The other state nobody can act on from its name alone, and one that now
+  // reaches the screen within a minute of the storage changing rather than
+  // whenever the next pass happens to run. The alert says this too, but an
+  // alert is read once and this row is what somebody comes back to.
+  if (state === 'wrong-drive') {
+    return 'The storage at this location is not the storage this destination ' +
+      'was set up against — it has been replaced, reformatted, or something ' +
+      'else is mounted there. Nothing is being written to it, not even status ' +
+      'information. If you meant to replace it, set the destination up again.';
   }
   if (state !== 'name-clash') return '';
   return 'Another computer already backs up to this destination under the same ' +
@@ -846,10 +860,13 @@ function renderTargets(st) {
     // Deleting a user's backup history is never silent.
     if (t.reclaim_note) meta.appendChild(el('span', 'busy', t.reclaim_note));
     li.appendChild(meta);
-    // A name clash is data loss averted, not a detail: it gets a sentence under
+    // A refusal is data loss averted, not a detail: it gets a sentence under
     // the destination rather than only a tooltip, because the remedy is not
     // guessable and a red dot alone sends somebody hunting the wrong fault.
-    if (t.state === 'name-clash') {
+    // Both refusal states qualify — in each one backup-maker is deliberately
+    // writing nothing, and the reason is the only thing that makes that
+    // recoverable.
+    if (t.state === 'name-clash' || t.state === 'wrong-drive') {
       li.appendChild(el('p', 'hint bad', stateHelp(t.state)));
     }
     const actions = el('div', 'card-actions');
@@ -1680,8 +1697,26 @@ function renderVerdict(st) {
 
   const targets = st.targets || [];
   const rows = st.rows || [];
-  const broken = targets.filter((t) => t.state === 'stale' || t.state === 'full' ||
-    t.state === 'unrecognised' || t.state === 'error');
+  // DERIVED FROM stateClass, NOT FROM A LIST OF ITS OWN.
+  //
+  // This used to name the states it considered broken, and the list was wrong
+  // in both directions. It named a state the daemon has never produced, and it
+  // left out the two that mean backup-maker is REFUSING TO WRITE to a
+  // destination — the wrong storage at the mount point, and another computer
+  // already holding this machine's folder. A reformatted card therefore fell
+  // through every branch below and landed on "Everything is backed up", while
+  // the panel underneath said nothing was being written. The one line this page
+  // exists to get right was the line contradicting the rest of it.
+  //
+  // Asking stateClass is what stops that happening again: it is the same
+  // mapping the tables and the dot colours use, so a state added to the daemon
+  // is red here the moment it is red anywhere. See
+  // TestTheVerdictAsksTheSharedStateMappingInsteadOfItsOwnList.
+  //
+  // Offline is deliberately excluded and handled below. A card is unplugged
+  // several times a day and a NAS sleeps every night; that is not a fault, and
+  // treating it as one is how somebody learns to ignore a red headline.
+  const broken = targets.filter((t) => stateClass(t.state) === 'bad' && t.state !== 'offline');
   const working = rows.some((r) => r.state === 'syncing' || r.state === 'scanning');
   const offline = targets.filter((t) => t.state === 'offline');
 

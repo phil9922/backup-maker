@@ -543,6 +543,16 @@ type Collector struct {
 	Delivery func() []DeliveryInfo
 	// RecentAlerts reports what this machine has raised, newest first.
 	RecentAlerts func() []config.AlertRecord
+	// Refused names the destinations backup-maker is currently declining to
+	// write to, mapped to the state that says why: "wrong-drive" for storage
+	// that is not the one this target was set up against, "name-clash" for a
+	// machine directory another computer holds. nil is "nothing is refused".
+	//
+	// A separate seam because it is the one health fact the per-folder rows
+	// cannot carry: refusal is decided per destination, by the same check the
+	// status-page writer makes every cycle, and it is known long before the
+	// engine next tries to write.
+	Refused func() map[string]string
 }
 
 // shortCommit is the first seven characters of the build's git SHA, or "" when
@@ -767,10 +777,22 @@ func (col *Collector) Collect() Model {
 	}
 	// Applied to both row sources here rather than in the engine block, so a
 	// paired machine on its first sync gets the same honesty a share does.
+	var refused map[string]string
+	if col.Refused != nil {
+		refused = col.Refused()
+	}
 	for i := range m.Rows {
 		m.Rows[i].WakeEnabled = wakeable[m.Rows[i].TargetName]
 		m.Rows[i].FirstBackup = m.Rows[i].LastSeen.IsZero() &&
 			(m.Rows[i].State == "scanning" || m.Rows[i].State == "syncing")
+		// A REFUSED DESTINATION MAKES EVERY ROW POINTING AT IT UNTRUE, and the
+		// row is where somebody looks after the headline has told them
+		// something is wrong. The engine still says "in sync" until it next
+		// tries to write, so without this the page answered its own headline
+		// with a green "backed up" on the very folder that is not being copied.
+		// Same rule as the target-level fold: only ever worse, never for a
+		// destination that is merely absent. See applyRefusal.
+		m.Rows[i].State = applyRefusal(m.Rows[i].State, refused[m.Rows[i].TargetName])
 	}
 
 	// Space reclaimed per destination, so the dashboard can say what was
@@ -871,6 +893,7 @@ func (col *Collector) Collect() Model {
 			MinFreeBytes: cfg.MinFreeBytes(t),
 		}
 		info.State, info.LastSeen = rollUp(m.Rows, t.Name)
+		info.State = applyRefusal(info.State, refused[t.Name])
 		info.ReclaimNote = reclaimNotes[t.Name]
 		if s, ok := space[t.Name]; ok {
 			info.FreeBytes = s.Free
@@ -1110,11 +1133,49 @@ func TargetLocation(t config.Target) string { return config.TargetLocation(t) }
 // rollUp reduces a target's per-folder rows to one headline state. The worst
 // state wins: a target with one broken folder is not "in sync", and saying so
 // would be the kind of false reassurance a backup tool must never give.
-func rollUp(rows []Row, target string) (string, time.Time) {
-	rank := map[string]int{
-		"in sync": 0, "syncing": 1, "scanning": 1,
-		"offline": 2, "awaiting-pair": 2, "stale": 3, "full": 4, "wrong-drive": 5, "name-clash": 5, "error": 6,
+// stateRank orders destination states by how much they matter, so "the worst
+// one wins" means the same thing everywhere it is decided. Anything absent
+// ranks 0 and loses.
+var stateRank = map[string]int{
+	"in sync": 0, "syncing": 1, "scanning": 1,
+	"offline": 2, "awaiting-pair": 2, "stale": 3, "full": 4, "wrong-drive": 5, "name-clash": 5, "error": 6,
+}
+
+// applyRefusal folds a destination-level refusal into the state rolled up from
+// that destination's rows.
+//
+// A DESTINATION BEING REFUSED IS A FACT THE ROWS CANNOT CARRY. The mirror engine
+// only learns that the wrong storage is at a mount point, or that another
+// computer holds this machine's folder, when it next tries to write — the next
+// save, or the hourly pass. The daemon knows within the minute, because the
+// status-page writer asks the same question every cycle. That knowledge used to
+// reach an alert and nothing else, so the dashboard went on saying "Everything
+// is backed up" for the best part of an hour after telling the user that nothing
+// was being written to a destination.
+//
+// TWO RULES, AND BOTH MATTER.
+//
+// It only ever makes the answer worse. A refusal must never downgrade a fault
+// that is already more serious, and must never be the reason a healthy
+// destination changes state for any other purpose.
+//
+// It never speaks for a destination that is not there. The refusal flag
+// deliberately survives a foreign drive being unplugged, so the alert is not
+// raised a second time when it returns — which means the flag can outlive the
+// hardware. Reporting "the wrong storage is here" about an empty USB socket is a
+// fault report about something absent, so "offline" wins.
+func applyRefusal(state, refused string) string {
+	if refused == "" || state == "offline" {
+		return state
 	}
+	if stateRank[refused] > stateRank[state] {
+		return refused
+	}
+	return state
+}
+
+func rollUp(rows []Row, target string) (string, time.Time) {
+	rank := stateRank
 	state := ""
 	var last time.Time
 	for _, r := range rows {

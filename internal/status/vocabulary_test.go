@@ -60,6 +60,23 @@ func TestWaitingOnAPersonIsNotDrawnAsAFault(t *testing.T) {
 	}
 }
 
+// A DESTINATION THAT MIRRORS NOTHING IS NOT BROKEN. rollUp gives a target with
+// no rows the state "no folders assigned", and a snapshot-only destination —
+// `archives_only`, which FoldersForTarget deliberately gives no folders — is in
+// exactly that state while working perfectly. Drawing it red is the same
+// mistake as drawing "waiting to pair" red: it sends somebody hunting a fault
+// that does not exist, on a destination whose zips are arriving on schedule.
+//
+// It matters more than the dot: the dashboard's verdict counts every target the
+// shared mapping calls "bad", so a red one here puts "needs attention" at the
+// top of a healthy page.
+func TestADestinationThatMirrorsNothingIsNotDrawnAsAFault(t *testing.T) {
+	if got := RowHealth(Row{State: "no folders assigned"}); got != "muted" {
+		t.Errorf("no folders assigned is drawn %q, want \"muted\" — "+
+			"a snapshot-only destination is not a fault", got)
+	}
+}
+
 // THE GUARANTEE: a snapshot uses the same words as a mirror. The two tables sit
 // on one page describing two kinds of backup, and there is no reason one should
 // say "ok" where the other says "backed up".

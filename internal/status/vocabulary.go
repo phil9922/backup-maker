@@ -75,6 +75,15 @@ func RowHealth(r Row) string {
 		return "busy"
 	case "no destination yet":
 		return "muted"
+	case "no folders assigned":
+		// The mirror-side counterpart of "no destination yet", and not a fault
+		// either. rollUp gives this to a target with no rows, which is the
+		// permanent and correct state of an `archives_only` destination —
+		// FoldersForTarget gives those no folders on purpose. Red here reports a
+		// broken destination whose snapshots are arriving on schedule, and the
+		// dashboard's verdict counts every "bad" target, so it also puts "needs
+		// attention" at the top of a healthy page.
+		return "muted"
 	}
 	return "bad" // offline, stale, full, wrong-drive, name-clash, error
 }

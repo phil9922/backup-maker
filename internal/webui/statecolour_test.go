@@ -103,6 +103,90 @@ func TestEveryStateHasTheSameWordsInTheBrowser(t *testing.T) {
 	}
 }
 
+// THE VERDICT MUST NOT KEEP ITS OWN IDEA OF WHAT IS BROKEN.
+//
+// It used to, and the list was wrong in both directions: it named
+// 'unrecognised', which no Go code has ever produced, and it omitted
+// 'wrong-drive' and 'name-clash' — the two states that mean backup-maker is
+// REFUSING TO WRITE to a destination. So a reformatted card or another computer
+// holding this machine's folder produced "Everything is backed up" as the
+// headline, directly above a panel saying nothing was being written. The one
+// line this page exists to get right was the line contradicting the rest of it.
+//
+// The fix is that it asks stateClass, the same mapping the tables and dots use,
+// so a state added to the daemon is red in the headline the moment it is red
+// anywhere. This test fails if that derivation is replaced by a literal list
+// again.
+func TestTheVerdictAsksTheSharedStateMappingInsteadOfItsOwnList(t *testing.T) {
+	js := readAsset(t, "static/app.js")
+	start := strings.Index(js, "function renderVerdict(")
+	if start < 0 {
+		t.Fatal("renderVerdict is gone; this guard needs rewriting to match")
+	}
+	end := strings.Index(js[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("could not find the end of renderVerdict")
+	}
+	body := js[start : start+end]
+
+	if !strings.Contains(body, "stateClass(") {
+		t.Error("renderVerdict no longer asks stateClass: it has gone back to " +
+			"deciding for itself which states are broken, which is how " +
+			"'wrong-drive' and 'name-clash' were read as \"Everything is backed up\"")
+	}
+	// Every state the shared mapping calls a fault, other than the one the
+	// verdict handles separately. None may be named in here: naming one is the
+	// beginning of a second list.
+	for _, state := range []string{"stale", "full", "wrong-drive", "name-clash", "error"} {
+		if strings.Contains(body, "'"+state+"'") {
+			t.Errorf("renderVerdict names the %q state directly; it should be "+
+				"deriving that from stateClass so a new fault is covered "+
+				"automatically", state)
+		}
+	}
+	// The phantom that started it. A state name nothing produces is dead code
+	// that reads as coverage.
+	if strings.Contains(js, "'unrecognised'") {
+		t.Error("app.js branches on an 'unrecognised' state, which no Go code " +
+			"emits — the real refusal states are 'wrong-drive' and 'name-clash'")
+	}
+}
+
+// A REFUSAL MUST EXPLAIN ITSELF. These are the two states where backup-maker is
+// deliberately writing nothing, and neither name says what to do about it. They
+// now reach the screen within a minute of the storage changing rather than
+// whenever the next pass runs, so a red word with no remedy beside it is what
+// somebody would be left with.
+func TestBothRefusalStatesTellYouWhatToDo(t *testing.T) {
+	js := readAsset(t, "static/app.js")
+	help := js[strings.Index(js, "function stateHelp("):]
+	help = help[:strings.Index(help, "\n}\n")]
+	for _, state := range []string{"wrong-drive", "name-clash"} {
+		if !strings.Contains(help, "'"+state+"'") {
+			t.Errorf("stateHelp says nothing about %q, so the dashboard shows a "+
+				"red word for a destination it is refusing to write to and no "+
+				"way to act on it", state)
+		}
+	}
+}
+
+// The browser's copy of the mapping must agree with Go's on the states that are
+// NOT faults, or the dashboard reddens something the CLI and the destination
+// status page call fine.
+func TestTheBrowserAgreesOnWhatIsNotAFault(t *testing.T) {
+	js := readAsset(t, "static/app.js")
+	for _, state := range []string{"no destination yet", "no folders assigned"} {
+		if status.RowHealth(status.Row{State: state}) != "muted" {
+			t.Fatalf("this test assumes %q is muted in Go; it is not", state)
+		}
+		if !strings.Contains(js, "'"+state+"'") {
+			t.Errorf("app.js does not special-case %q, so stateClass falls through "+
+				"to 'bad' and the dashboard draws a destination red that Go calls "+
+				"muted — and the verdict then counts it as needing attention", state)
+		}
+	}
+}
+
 func readAsset(t *testing.T, name string) string {
 	t.Helper()
 	b, err := staticFS.ReadFile(name)
