@@ -66,3 +66,48 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath ./...
+
+  # WHAT THIS EXISTS FOR: macOS and Windows are release targets whose code had
+  # only ever been COMPILED. `internal/browse` has real per-OS files
+  # (mounts_darwin.go, drives_windows.go, blockdev_windows.go) that nothing had
+  # ever executed, and the whole suite had only ever run on Linux — so nothing
+  # had exercised a case-insensitive filesystem, a Windows path separator, or a
+  # config directory that is not under $XDG_CONFIG_HOME. Cross-compiling proves
+  # it builds, which is the smaller half.
+  #
+  # NON-BLOCKING ON PURPOSE, FOR NOW. The first run of a Linux-grown suite on
+  # two new platforms is expected to fail, and those failures are the point of
+  # adding this. Gating merges on them from day one would take a clean, released
+  # main and make every unrelated change wait on unrelated fallout. Turn
+  # continue-on-error off once the results are green — the value only becomes
+  # permanent when a regression can actually stop something.
+  #
+  # It cannot see UX: whether a Windows toast carries the right icon, or whether
+  # the firewall dialog is the one a user needs, still needs a person at a
+  # machine.
+  per-os:
+    name: test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 20
+    strategy:
+      # Both platforms report independently: one failing must not hide what the
+      # other would have said.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Vet
+        run: go vet ./...
+      # No -race here, unlike the Linux job: the point of this job is executing
+      # the per-OS paths at all, and a race detector on a fresh platform mixes
+      # "this code is wrong" with "this platform is new" in one exit code. Its
+      # own timeout, because a test harness that waits on a daemon lock hangs
+      # rather than failing, and a hung job is 6 hours of a runner.
+      - name: Test
+        run: go test -timeout 12m ./...
