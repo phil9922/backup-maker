@@ -21,6 +21,17 @@ var autostartCmd = &cobra.Command{
 				return err
 			}
 			fmt.Println("Autostart enabled — backups now run whenever you're logged in.")
+			// SAY THAT IT RESTARTED. On Linux and macOS, enabling restarts a
+			// daemon that was already running — deliberately, so it picks up the
+			// definition just written instead of keeping the old one. But the
+			// command reads as though it only records a preference, so somebody
+			// running it on a working machine had their backups stop and start
+			// with nothing on screen to say so. A brief interruption is fine; an
+			// unannounced one is not.
+			if autostart.RestartsRunningDaemon {
+				fmt.Println("The background service was restarted so it picks up this " +
+					"definition. Any copy in progress resumes where it left off.")
+			}
 			return nil
 		case "disable":
 			if err := autostart.Disable(); err != nil {

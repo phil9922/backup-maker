@@ -22,6 +22,11 @@ func plistPath() (string, error) {
 	return filepath.Join(home, "Library", "LaunchAgents", agentLabel+".plist"), nil
 }
 
+// RestartsRunningDaemon reports whether Enable interrupts a daemon that is
+// already running. It does here: bootout followed by bootstrap reloads the job,
+// which stops a running one on the way through.
+const RestartsRunningDaemon = true
+
 func Enable() error {
 	exe, err := exePath()
 	if err != nil {

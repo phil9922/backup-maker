@@ -13,6 +13,12 @@ import (
 
 const runValue = "backup-maker"
 
+// RestartsRunningDaemon reports whether Enable interrupts a daemon that is
+// already running. It does NOT here: Enable only writes an HKCU Run entry, which
+// takes effect at the next sign-in. A running daemon is left alone, so the CLI
+// must not claim it was restarted.
+const RestartsRunningDaemon = false
+
 // Enable adds an HKCU Run entry — the simplest no-admin autostart. The
 // --background flag makes the daemon detach without a console window.
 func Enable() error {

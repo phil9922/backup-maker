@@ -22,6 +22,13 @@ func unitPath() (string, error) {
 	return filepath.Join(home, ".config", "systemd", "user", unitName), nil
 }
 
+// RestartsRunningDaemon reports whether Enable interrupts a daemon that is
+// already running. It does here: Enable restarts the service deliberately, so a
+// running copy picks up the unit it just wrote rather than keeping the old one.
+// The CLI says so, because a command that sounds purely declarative should not
+// silently stop and start the thing protecting your files.
+const RestartsRunningDaemon = true
+
 // Enable installs and starts a systemd user unit. Headless machines
 // additionally need `loginctl enable-linger` (documented, not automated).
 func Enable() error {
