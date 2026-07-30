@@ -151,6 +151,16 @@ type daemon struct {
 	docsID    func() (string, error)
 	docsBuild func() ([]webui.DocsFile, error)
 
+	// startEngine starts the sync engine. nil means the real one — the same "nil
+	// is the real implementation" seam newBackend and newChecker use.
+	//
+	// It exists because ensureEngine DOWNLOADS a pinned binary and runs it as a
+	// child process, and a test asserting that a receive-only machine is recorded
+	// as set up needs neither: it was reaching the network on every run, and on
+	// Windows the running executable could not be deleted, so the temp directory
+	// cleanup failed and reported it as the test failing.
+	startEngine func(context.Context) error
+
 	// newChecker builds the release checker, and exists only so tests can point
 	// it at a recorder instead of github.com. nil means the real one.
 	newChecker func() update.Checker
@@ -221,6 +231,14 @@ func (d *daemon) ensureEngine(ctx context.Context) error {
 	d.sup = sup
 	go d.eventLoop(ctx)
 	return nil
+}
+
+// engineUp starts the sync engine through whatever implementation is in force.
+func (d *daemon) engineUp(ctx context.Context) error {
+	if d.startEngine != nil {
+		return d.startEngine(ctx)
+	}
+	return d.ensureEngine(ctx)
 }
 
 // engineClient returns the engine's REST client, or nil while the engine
@@ -307,7 +325,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	// Engine only when the config demands it; failure is fatal at startup
 	// (matching previous behavior) but tolerated on later config reloads.
 	if needsEngine(cfg) {
-		if err := d.ensureEngine(ctx); err != nil {
+		if err := d.engineUp(ctx); err != nil {
 			return err
 		}
 	} else {
@@ -418,7 +436,7 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 	d.alerts.setKinds(cfg.General.Alerts)
 	d.alerts.setNotifier(d.deliverySinks(cfg))
 	if needsEngine(cfg) {
-		if err := d.ensureEngine(ctx); err != nil {
+		if err := d.engineUp(ctx); err != nil {
 			d.log.Error("sync engine unavailable; machine targets/receiving paused", "err", err)
 		}
 	}

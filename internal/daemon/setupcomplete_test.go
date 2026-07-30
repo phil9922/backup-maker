@@ -84,22 +84,14 @@ func TestApplyConfigRecordsThatACLICreatedInstallIsSetUp(t *testing.T) {
 	cfg := configuredCfg(t)
 	d := setupDaemon(t, cfg)
 
-	// RECEIVING STARTS A REAL CHILD PROCESS, and it has to be stopped before the
-	// directory it was unpacked into is removed. Nothing cancelled
-	// context.Background(), so the engine ran for the rest of the test binary:
-	// on Linux the directory can be deleted from under a running executable, so
-	// the leak was invisible, while Windows refuses to unlink one and said so.
-	// Cleanups run in reverse order of registration, so this cancel happens
-	// before the temp directories go.
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(func() {
-		cancel()
-		// The supervisor stops asynchronously and there is nothing to join, so
-		// give the process a moment to go before its binary is deleted.
-		time.Sleep(250 * time.Millisecond)
-	})
+	// WHAT THIS TEST IS ABOUT is what applyConfig RECORDS, not that an engine
+	// starts. Letting the real one start downloaded a pinned binary over the
+	// network on every run and left a child process holding its own executable —
+	// which Linux happily deletes from under it, and Windows refuses to, so the
+	// temp-directory cleanup failed and was reported as this test failing.
+	d.startEngine = func(context.Context) error { return nil }
 
-	d.applyConfig(ctx, cfg)
+	d.applyConfig(context.Background(), cfg)
 
 	onDisk, err := config.LoadState()
 	if err != nil {

@@ -159,8 +159,12 @@ func TestArchiveCountsWhatLandedNotWhatWasRead(t *testing.T) {
 	}, true)
 
 	bytes, files, _ := d.totals()
-	if bytes != 3<<30 {
-		t.Errorf("odometer took %dB from the snapshot, want the %dB that landed", bytes, 3<<30)
+	// Typed, because an untyped 3<<30 handed to Errorf becomes an int — and on a
+	// 32-bit target (armv7 is one of ours) that overflows and the package does
+	// not compile at all. The odometer itself is uint64 and always was.
+	const want = uint64(3) << 30
+	if bytes != want {
+		t.Errorf("odometer took %dB from the snapshot, want the %dB that landed", bytes, want)
 	}
 	if files != 1 {
 		t.Errorf("odometer took %d files from one snapshot, want 1", files)
