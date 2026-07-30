@@ -24,7 +24,8 @@ func TestPageCarriesNoPathsOrAddresses(t *testing.T) {
 		Machine: "workstation",
 		Written: time.Now(),
 		Rows: []Row{{
-			Folder: "code", Destination: "nas", State: "in sync", Detail: "2 minutes ago",
+			Folder: "code", Destination: "nas", State: "backed up", Health: "ok",
+			Detail: "2 minutes ago",
 		}},
 	})
 	for _, secret := range []string{"/home/", "//192.168", "C:\\", "AAAAAAA-"} {
@@ -32,7 +33,7 @@ func TestPageCarriesNoPathsOrAddresses(t *testing.T) {
 			t.Errorf("page leaked %q", secret)
 		}
 	}
-	for _, want := range []string{"workstation", "code", "nas", "in sync"} {
+	for _, want := range []string{"workstation", "code", "nas", "backed up"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("page is missing %q; it still has to be useful", want)
 		}

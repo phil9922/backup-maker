@@ -269,13 +269,22 @@ func buildPage(m status.Model, now time.Time) (statuspage.Page, string) {
 			label = r.FolderID
 		}
 		detail, ticking := rowDetail(r, now)
+		// The words shown, not the engine's internal name: this page is read by
+		// somebody standing at a destination with the computer switched off, and
+		// it has to use the same vocabulary as everything else.
 		p.Rows = append(p.Rows, statuspage.Row{
 			Folder:      label,
 			Destination: r.TargetName,
-			State:       r.State,
+			State:       status.RowLabel(r),
+			Health:      status.RowHealth(r),
 			Detail:      detail,
 		})
-		add("row", label, r.TargetName, r.State)
+		// FINGERPRINTED ON WHAT IT SAYS, not on the state behind it. Several
+		// engine states share one word — "in sync" and a "scanning" pass over a
+		// folder already backed up both read "backed up" — and a page whose words
+		// have not changed is a page nobody would read differently, so it is not
+		// worth a write to a destination.
+		add("row", label, r.TargetName, status.RowLabel(r), status.RowHealth(r))
 		if !ticking {
 			add(detail)
 		}
@@ -315,9 +324,11 @@ func buildPage(m status.Model, now time.Time) (statuspage.Page, string) {
 			last, ticking = humanAgo(now.Sub(a.LastRun)), true
 		}
 		p.Snapshots = append(p.Snapshots, statuspage.Row{
-			Folder: a.Name, Destination: a.Target, State: a.State, Detail: last,
+			Folder: a.Name, Destination: a.Target, Detail: last,
+			State:  status.ArchiveLabel(a),
+			Health: status.ArchiveHealth(a),
 		})
-		add("snapshot", a.Name, a.Target, a.State)
+		add("snapshot", a.Name, a.Target, status.ArchiveLabel(a), status.ArchiveHealth(a))
 		if !ticking {
 			add(last) // "never" is a fact about the schedule, not about the clock
 		}

@@ -207,54 +207,13 @@ func humanBytes(n int64) string {
 	}
 }
 
-// rowState answers the only question this column is ever read for: are the
-// files safe.
-//
-// "scanning" and "syncing" answer a different one — what the program is doing —
-// and a destination holding a complete copy showed "scanning" for minutes at a
-// stretch, leaving the honest reading as "I cannot tell whether I have a
-// backup". That is the worst sentence a backup tool can produce, and it was
-// producing it while everything was fine. The activity moved to the PROGRESS
-// column, where it belongs.
-func rowState(r status.Row) string {
-	switch r.State {
-	case "scanning", "syncing":
-		if r.FirstBackup {
-			return "first backup"
-		}
-		return "backed up"
-	case "in sync":
-		return "backed up"
-	}
-	return r.State
-}
+// rowState and archiveState are the shared vocabulary, so the terminal cannot
+// come to disagree with the dashboard or with the status page written onto each
+// destination. The words and the reasoning live in internal/status/vocabulary.go;
+// they were duplicated here once and drifted.
+func rowState(r status.Row) string { return status.RowLabel(r) }
 
-// archiveState answers the same question rowState answers for a mirror: are
-// the files safe. It uses the same words, because the two tables sit on one
-// page describing two kinds of backup, and there is no reason a snapshot should
-// report "ok" where a mirror reports "backed up".
-//
-// "ok" and "due" both mean a snapshot exists and was written successfully — a
-// job being due says the NEXT one is owed, not that the last one is missing.
-// A job packing its very first zip has nothing on the destination yet and must
-// not claim otherwise; one packing its second has last time's zip sitting there
-// the whole time, so it is backed up while it works.
-func archiveState(a status.ArchiveRow) string {
-	switch a.State {
-	case "ok", "due":
-		return "backed up"
-	case "running", "preparing":
-		if a.LastRun.IsZero() {
-			return "first backup"
-		}
-		return "backed up"
-	case "never run":
-		// No zip exists. Naming it plainly, rather than "never run", says what
-		// it means for the person's files rather than for the schedule.
-		return "not backed up yet"
-	}
-	return a.State // failed, needs password, paused: faults and deliberate stops
-}
+func archiveState(a status.ArchiveRow) string { return status.ArchiveLabel(a) }
 
 // rowProgress says what a destination is doing right now, in the unit that
 // matters for the phase it is in.

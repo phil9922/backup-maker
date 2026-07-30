@@ -63,7 +63,7 @@ macOS gets a LaunchAgent; Windows gets a Startup entry. Check it took:
 
 ```sh
 systemctl --user status backup-maker.service    # Linux: should say "active (running)"
-backup-maker status                             # and your folders should be in sync
+backup-maker status                             # and your folders should say "backed up"
 ```
 
 **A normal desktop or laptop needs nothing further.** The service starts when

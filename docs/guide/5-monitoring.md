@@ -366,7 +366,7 @@ stops presenting itself as status at all:
 
 ![The status page written to a destination, shown three days stale: a red banner reading "This page is out of date — treat it as history, not status"](../screenshots/11-status-page.png)
 
-That warning is the whole point. A page cheerfully reporting "all in sync" from
+That warning is the whole point. A page cheerfully reporting "backed up" from
 a machine that died last week is worse than no page: it is false reassurance,
 and it would be discovered during a restore. Knowing a machine **stopped**
 backing up three days ago is the single most valuable thing this can tell you.
@@ -396,7 +396,7 @@ every request, so the page stays current as backup-maker rewrites it.)
 
 **Tradeoffs:** this is plain HTTP with no authentication, so any device on your
 network can read your backup's health — which folders you protect, and whether
-they're in sync. `python3 -m http.server` is single-threaded and written for
+they're backed up. `python3 -m http.server` is single-threaded and written for
 development, not hostile networks; it's fine on a home LAN and that's the scope
 here. The page is only as fresh as the last write: if your computer hasn't run
 in a while, the page says so itself rather than looking current.

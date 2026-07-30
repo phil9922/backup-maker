@@ -55,8 +55,18 @@ const StaleAfter = time.Hour
 type Row struct {
 	Folder      string
 	Destination string
-	State       string
-	Detail      string
+	// State is the WORD SHOWN, not the engine's internal name — translated by
+	// status.RowLabel or status.ArchiveLabel before it gets here, so this page
+	// says "backed up" like every other surface rather than "in sync".
+	State string
+	// Health is the colour that goes with it: "ok", "busy", "bad" or "muted",
+	// from status.RowHealth or status.ArchiveHealth.
+	//
+	// Decided in Go rather than by comparing strings in the template, which is
+	// how this page came to paint a scanning mirror and a merely-due snapshot
+	// red. A template that branches on state is a second copy of the mapping.
+	Health string
+	Detail string
 }
 
 // StorageLine is one destination's capacity, pre-formatted so the template
@@ -156,7 +166,7 @@ var tmpl = template.Must(template.New("status").Parse(`<!doctype html>
 <tbody>
 {{range .Rows}}<tr>
  <td>{{.Folder}}</td><td>{{.Destination}}</td>
- <td class="{{if eq .State "in sync"}}ok{{else if eq .State "syncing"}}busy{{else if eq .State "awaiting-pair"}}busy{{else}}bad{{end}}">{{.State}}</td>
+ <td class="{{.Health}}">{{.State}}</td>
  <td class="muted">{{.Detail}}</td>
 </tr>{{end}}
 </tbody></table>
@@ -182,7 +192,7 @@ var tmpl = template.Must(template.New("status").Parse(`<!doctype html>
 <tbody>
 {{range .Snapshots}}<tr>
  <td>{{.Folder}}</td><td>{{.Destination}}</td>
- <td class="{{if eq .State "ok"}}ok{{else}}bad{{end}}">{{.State}}</td>
+ <td class="{{.Health}}">{{.State}}</td>
  <td class="muted">{{.Detail}}</td>
 </tr>{{end}}
 </tbody></table>

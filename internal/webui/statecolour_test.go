@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/phil9922/backup-maker/internal/status"
 )
 
 // The dashboard puts the state word in a <span> inside its cell and hangs the
@@ -63,6 +65,41 @@ func TestTheStateDotFollowsTheStateColour(t *testing.T) {
 	if !strings.Contains(dot, "currentColor") {
 		t.Errorf(".dot::before no longer uses currentColor for its background, so "+
 			"it no longer follows the state colour beside it:\n%s", dot)
+	}
+}
+
+// THE GUARANTEE: the browser says the same words the Go surfaces say.
+//
+// internal/status/vocabulary.go is the one copy for the CLI and for the page
+// written onto each destination, but the dashboard is JavaScript and cannot share
+// it. This is the seam where the vocabulary can still drift — and it has, twice:
+// "scheduled" versus "timed", and then "in sync" versus "backed up", which
+// survived two releases on the status page.
+//
+// So the words are asserted from the Go side against the file that renders them.
+// If a state is renamed, this fails until app.js is brought along.
+func TestEveryStateHasTheSameWordsInTheBrowser(t *testing.T) {
+	js := readAsset(t, "static/app.js")
+	// Every distinct word the Go vocabulary can produce for a healthy or
+	// in-progress state. Faults keep their engine names on both sides.
+	for _, phrase := range []string{
+		status.RowLabel(status.Row{State: "in sync"}),                     // backed up
+		status.RowLabel(status.Row{State: "scanning", FirstBackup: true}), // first backup
+		status.ArchiveLabel(status.ArchiveRow{State: "never run"}),        // not backed up yet
+	} {
+		if !strings.Contains(js, phrase) {
+			t.Errorf("app.js never says %q, but the CLI and the destination status "+
+				"page do: the dashboard has drifted from internal/status/vocabulary.go",
+				phrase)
+		}
+	}
+	// And the state names it branches on must still be states the Go side emits,
+	// or a rename leaves the browser matching a string nothing produces.
+	for _, state := range []string{"in sync", "scanning", "syncing", "awaiting-pair"} {
+		if !strings.Contains(js, "'"+state+"'") {
+			t.Errorf("app.js no longer mentions the %q state; if it was renamed, "+
+				"rename it in internal/status too", state)
+		}
 	}
 }
 

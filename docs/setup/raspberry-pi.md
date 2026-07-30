@@ -653,7 +653,7 @@ the page it links to doesn't exist yet.
 
 **Know what you're publishing:** this is plain HTTP with no authentication,
 so anyone on your network can read which folders you protect and whether
-they're in sync. It never exposes file contents or paths inside them, and
+they're backed up. It never exposes file contents or paths inside them, and
 the page says so itself when it's stale.
 
 ## Step 7 — Point backup-maker at it, and prove it works
