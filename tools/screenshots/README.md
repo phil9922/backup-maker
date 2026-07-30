@@ -1,15 +1,19 @@
 # Screenshot harness
 
-Regenerates the dashboard screenshots in `docs/screenshots`.
+Regenerates every screenshot in `docs/screenshots`.
 
 ```sh
 pip install playwright && playwright install chromium   # once
 
-python3 tools/screenshots/shoot.py       # 07, 08, 09, mobile-dashboard
-python3 tools/screenshots/lanview.py     # 10-network-view
+python3 tools/screenshots/shoot.py        # 07, 08, 09, mobile-dashboard
+python3 tools/screenshots/shootwizard.py  # 01-06, 12, 13, mobile-wizard
+python3 tools/screenshots/shootstatus.py  # 11-status-page
+python3 tools/screenshots/lanview.py      # 10-network-view
 ```
 
-Both write straight into `docs/screenshots`. Pass `--out <dir>` to look at the
+That is every screenshot in `docs/screenshots`. Nothing is taken by hand.
+
+They all write straight into `docs/screenshots`. Pass `--out <dir>` to look at the
 results before replacing anything, which is the sensible way to run them.
 
 ## Why this exists
@@ -72,20 +76,41 @@ daemon will correctly refuse to write to its own destinations.
   ones to just below the running-total line, measured rather than hard-coded so a
   scenario with an extra row does not lose its last line.
 
-## What is not covered
+## The wizard is driven, not faked
 
-The wizard screenshots (`01`–`06`, `12`, `13`, `mobile-wizard`) are still taken by
-hand and are dated by v0.1.10's button work. They need a script that drives the
-wizard through its steps against a sandbox daemon — `lanview.py` is most of the
-scaffolding for that. `11-status-page.png` is a separate template and is not shot
-by either script.
+`shootwizard.py` clicks through the wizard the way somebody setting up a backup
+would — kind, folder, destinations — against `wizardmock.py`, which serves the
+endpoints those steps need: browse, machines, per-machine storage, and the adopt
+scan and inspect. **`POST /api/backups` and `POST /api/adopt` are deliberately
+absent**, so a script that ever pressed the final button gets a 404 rather than a
+screenshot of something it claims to have done.
+
+## The status page is rendered by the real Go code
+
+`11-status-page.png` has no API to mock: it is one self-contained file produced by
+`internal/statuspage`. So `statuspagehtml/main.go` calls the real `Render` with
+invented data, and `shootstatus.py` opens the result over `file://` — which is
+exactly how somebody reads it, off a share with no web server. If it ever needs a
+server to look right, that is a bug in the page.
+
+It is rendered **three days old on purpose**. The point of that shot is not "here
+is a status page", it is the staleness banner: a page cheerfully reporting "backed
+up" from a machine that died last week is false reassurance, and the script waits
+for the banner to appear rather than assuming the markup is enough.
 
 ## Adding a scenario
 
 Add a function to `mockdash.py`, register it in `SCENARIOS`, and add an entry to
 `SHOTS` in `shoot.py`.
 
-`shoot.py` refuses to save a shot whose status table is empty, or in which any
+The shared guards are in `checks.py` and every script runs them: nothing local
+leaked, the page really is showing the step the shot is for, and **no text is the
+same colour as what is behind it**. That last one is there because all three of the
+rendering faults found in one week were invisible to `go test` — dashboard states
+drawn in the body colour, the wizard's question drawn as its own muted label, and
+"Protect this folder" drawn as accent text on an accent background.
+
+`shoot.py` additionally refuses to save a shot whose status table is empty, or in which any
 state's computed colour is not the one its class promises — it reads `--ok`,
 `--busy` and `--bad` out of the stylesheet's own variables and compares each
 rendered state against them. That check exists because v0.1.10 shipped a dashboard

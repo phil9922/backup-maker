@@ -364,7 +364,7 @@ a day, whether or not anything had happened.
 minutes ago"*, recomputed in your browser each time you open it. Past an hour it
 stops presenting itself as status at all:
 
-![The status page written to a destination, shown three days stale: a red banner reading "This page is out of date — treat it as history, not status"](../screenshots/11-status-page.png)
+![The status page written to a destination, shown three days stale: a red banner reading "This page is out of date — treat it as history, not status", explaining that nothing has been reported for 3 days and that the backups themselves are still on the drive. Beneath it every folder still reads "backed up" in green as of when it was written, a destination that could not report its capacity says "free space unavailable — reserve not enforced" in red, and a footer notes that paths and addresses are deliberately omitted](../screenshots/11-status-page.png)
 
 That warning is the whole point. A page cheerfully reporting "backed up" from
 a machine that died last week is worse than no page: it is false reassurance,
