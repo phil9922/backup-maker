@@ -28,7 +28,7 @@ starting fresh, lets you point each folder at its new location if usernames or
 the OS changed, and collects the passwords you already hold — testing share
 passwords with a real connection before anything is saved.
 
-![The adopt identity step asking: is this the same machine? Continue as "oldbox" — backups keep building exactly where they are — or start fresh under a new name](../screenshots/13-adopt-identity.png)
+![The adopt identity step asking: is this the same machine? Continue as "old-laptop" — backups keep building exactly where they are, best for a reinstall or a replacement machine — or start fresh under a new name, keeping the old machine's backups untouched](../screenshots/13-adopt-identity.png)
 
 The same flow works from the terminal:
 

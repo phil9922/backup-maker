@@ -27,6 +27,7 @@ import argparse
 import os
 import sys
 
+import checks
 import mockdash
 from playwright.sync_api import sync_playwright
 
@@ -87,6 +88,9 @@ def shoot(page, out, width, clip):
                 f"{s['colour']} but --{s['cls']} is {expected}. The stylesheet is "
                 "not reaching the element the class is on — refusing to publish a "
                 "shot in which a fault and a healthy destination look alike.")
+
+    checks.no_invisible_text(page, out)
+    checks.nothing_local_leaked(page, out, REPO)
 
     height = clip
     if clip == "totals":

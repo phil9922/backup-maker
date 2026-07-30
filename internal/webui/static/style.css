@@ -166,23 +166,28 @@ td.ok, td .ok { color: var(--ok); }
 td.busy, td .busy { color: var(--busy); }
 td.bad, td .bad { color: var(--bad); }
 code { background: #1c2430; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85rem; }
-h2 {
-  font-size: 0.85rem; font-weight: 600; margin-bottom: var(--s3);
-  text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+h2 { font-weight: 600; margin-bottom: var(--s3); }
+/* THE SECTION-HEADING LOOK IS A DASHBOARD CONCERN, and now all of it says so.
+ *
+ * Small, uppercase, letter-spaced and muted is right for a label sitting above a
+ * table — it names the section without competing with it — and the gutter lines
+ * it up with the cells underneath. Every one of those is worth having, and every
+ * one of them is meaningless anywhere else.
+ *
+ * As rules on bare `h2` they followed the element into every other context. The
+ * gutter half was scoped out in 2a3d9ff, because the wizard's step question and
+ * the adopt title sat 0.9rem right of their own eyebrow. THE TYPOGRAPHY HALF WAS
+ * LEFT BEHIND, and it was the worse half: those headings are the question being
+ * asked, and they rendered in the same muted uppercase as the eyebrow directly
+ * above them — so the question was no more prominent than its own label, at
+ * 1.3rem of grey. That is the first thing somebody setting up a backup reads.
+ *
+ * Scoped rather than reset a fourth time. `.docs-body h2` had already had to undo
+ * this by hand, which was the warning nobody acted on. */
+#dashboard h2 {
+  font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); padding-left: var(--gutter);
 }
-/* The gutter is a DASHBOARD concern, and now says so.
- *
- * It exists so a section heading lines up with the table cells and card
- * contents underneath it, which share the same inset — worth having, and only
- * meaningful where those tables and cards are. As a rule on bare `h2` it
- * followed the element into every other context: the wizard's step question
- * and the adopt flow's title both sat 0.9rem right of their own eyebrow, lede
- * and panels, which is what somebody setting up their first backup sees. The
- * docs page had already had to undo it by hand, which was the warning.
- *
- * Scoped rather than reset a third time, so the next thing built outside the
- * dashboard inherits nothing it has to remember to cancel. */
-#dashboard h2 { padding-left: var(--gutter); }
 
 /* SECTIONS HAVE TO READ AS SECTIONS.
  *
@@ -654,7 +659,17 @@ button.link:active:not(:disabled) { transform: none; box-shadow: none; }
    Pushed to the far end so it is nowhere near the row buttons below. */
 .pick-bar { flex-wrap: wrap; }
 .pick-bar #pick-path { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.pick-bar #pick-here { margin-left: auto; color: var(--accent); border-color: var(--accent); }
+/* POSITION ONLY. This used to set `color` and `border-color` to the accent as
+   well, from when the button was an OUTLINE one: accent text and border on a
+   transparent face. v0.1.10 made `.primary` a FILLED button — accent background,
+   near-black text — and this rule was left behind. Being an id selector it won
+   over `button.primary`, so "Protect this folder" was drawn as accent text on an
+   accent background: a 1:1 contrast ratio, an invisible label on the primary
+   action of the step, and no error anywhere.
+   Found by re-shooting the wizard screenshots, which is the only reason anybody
+   looked at it. Restyle a shared class and the id rules that lean on the old look
+   have to be checked with it. */
+.pick-bar #pick-here { margin-left: auto; }
 
 /* machine list */
 .machines { list-style: none; margin: 0.6rem 0; padding: 0; display: grid; gap: 0.5rem; }

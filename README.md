@@ -103,7 +103,7 @@ Each run sets up a single backup, and each step asks one question.
 things, so this is asked first: it changes what the rest of the wizard needs
 to know.
 
-![Wizard step 1: two options. "Incremental — only changed files are copied, continuously, within seconds of you saving; the destination holds a normal browsable copy plus about 30 days of previous versions." and "Timed — a full encrypted snapshot on a schedule; everything packed into one password-protected zip per run, nothing copied in between."](docs/screenshots/01-wizard-kind.png)
+![Wizard step 1: three options. "Incremental — only changed files are copied, continuously, within seconds of you saving; the destination holds a normal browsable copy plus about 30 days of previous versions.", "Timed — a full encrypted snapshot on a schedule; everything packed into one password-protected zip per run, nothing copied in between.", and "Restore this machine — I already have backups on a drive or network share; rebuild this computer's setup from them." Each says what it is best for.](docs/screenshots/01-wizard-kind.png)
 
 - **Incremental** — a live copy. Save a file and it's on the destination within
   seconds. What lands there is an ordinary, browsable copy of your files, plus
@@ -126,7 +126,7 @@ you can navigate into the thing you want and choose it there.
 and any on your network sharing storage. Click one to see what it offers, and
 tick as many destinations as you like, across as many machines as you like.
 
-![Wizard step 3: a list of computers — workstation, NAS, PHILS-WINDOWS-PC, ROUTER. The workstation is expanded showing an SD card and a backup SSD, both ticked, with free space beside each. The Windows PC is marked as needing a password](docs/screenshots/03-wizard-destinations.png)
+![Wizard step 3: a list of computers — my-laptop, NAS, STUDIO-PC, ROUTER. This computer is expanded showing an SD card and a backup SSD, both ticked, with free space beside each; the NAS is expanded showing two shares with one ticked, and explains that backup-maker is not running there so it can only offer folders that computer already shares. STUDIO-PC is marked as needing a password. "3 destinations chosen" beneath](docs/screenshots/03-wizard-destinations.png)
 
 A locked computer asks for credentials right there — nothing to install on it.
 And a second internal disk, or any folder at all, works just as well: "Or
@@ -136,7 +136,7 @@ choose any folder on this computer".
 any destination can't be reached, *nothing* is saved — you never end up half
 protected while believing otherwise.
 
-![Wizard step 4: a review listing the kind of backup, the folder, and "Copies kept on (3)" naming workstation to SDCARD, workstation to BackupSSD, and NAS to backups](docs/screenshots/04-wizard-review.png)
+![Wizard step 4: a review listing the kind of backup, the folder, and "Copies kept on (3)" naming my-laptop to SDCARD, my-laptop to BackupSSD, and NAS to backups, above a "Start backing up" button and a note that nothing has been saved yet](docs/screenshots/04-wizard-review.png)
 
 **Timed backups get one extra step** — how often, the password, and whether to
 **include everything**. Snapshots normally skip the same junk as the mirror;
@@ -144,7 +144,7 @@ ticking that option seals `node_modules` and build output into the archive while
 the live mirror stays lean. There is no recovery path if the password is lost,
 and the wizard says so rather than burying it.
 
-![An extra wizard step for timed backups: a schedule dropdown set to every week, how many snapshots to keep, password and repeat-password fields, and a red warning that there is no way to recover the password](docs/screenshots/05-wizard-schedule.png)
+![An extra wizard step for timed backups: a schedule dropdown set to every week, how many snapshots to keep, an "include everything, even node_modules" option that is off by default, password and repeat-password fields, and a red warning that there is no way to recover the password](docs/screenshots/05-wizard-schedule.png)
 
 ### Adding a second backup to the same folder
 
