@@ -500,6 +500,19 @@ A pass that changed nothing is logged only if it was slow, so a quiet machine
 stays quiet in the log. If you want to see every pass, including the fast
 uneventful ones, they are there at debug level.
 
+**Most saves never wait for a pass at all.** When you change a handful of files,
+backup-maker copies them straight over rather than re-checking the whole
+destination first, and says so:
+
+```
+msg="copied a change without a full pass" target=backup-pi copied=1 considered=2
+```
+
+That is the normal case and it takes a second or two. The full pass above still
+runs — at startup, once an hour, and whenever a destination comes back — and it is
+the one that notices files you deleted and clears up after them. So a deletion can
+take up to an hour to reach a destination, while a save takes seconds.
+
 **When it really is stuck**, the log says that instead — `sync interrupted`, with
 how long the pass lasted before it died. A destination that has genuinely stopped
 being written to also stops being **backed up** on the dashboard, which is the
