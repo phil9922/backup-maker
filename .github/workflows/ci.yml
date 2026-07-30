@@ -66,6 +66,17 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath ./...
+      # `go build ./...` does not compile TEST files, so a per-OS test file that
+      # names something the platform's syscall package does not export builds
+      # here and fails on the real runner — which costs a whole round trip to
+      # learn, and did. Vet typechecks tests, and cross-compiles, so the answer
+      # is available in seconds on this machine.
+      - name: Typecheck tests for ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go vet ./...
 
   # WHAT THIS EXISTS FOR: macOS and Windows are release targets whose code had
   # only ever been COMPILED. `internal/browse` has real per-OS files
