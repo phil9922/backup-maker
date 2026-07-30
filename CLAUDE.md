@@ -52,7 +52,13 @@ Existing guards that enforce this, and must not be weakened:
   than everything. **This has been violated twice** — once by a snapshot
   schedule re-aiming itself at another folder, and once (found 2026-07-28) by
   tidying up a stopped folder, which handed a destination scoped to that one
-  folder every folder on the machine.
+  folder every folder on the machine. **A third near-miss on 2026-07-30**:
+  scoping the on-destination manifest left summarised targets with no `Folders`
+  list, and restoring one during `adopt` would have widened it to every folder.
+  Caught before shipping, and `setup.Adopt` now refuses to restore a target it
+  cannot locate at all. The pattern to watch for is not "somebody emptied a
+  list" — it is **any path that constructs a `Target` without deliberately
+  setting `Folders`**.
 
 - **A folder that only wants scheduled snapshots must say so on the folder.**
   `Target.ArchivesOnly` keeps a snapshot-only *destination* out of the mirror
