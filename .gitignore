@@ -32,3 +32,6 @@ Thumbs.db
 # (~/.config/backup-maker-signing/) but guard against a stray copy.
 *signing.key
 release-signing.key
+
+# Screenshot harness leaves these behind
+__pycache__/
