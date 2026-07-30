@@ -193,7 +193,11 @@ func readAsset(t *testing.T, name string) string {
 	if err != nil {
 		t.Fatalf("read %s: %v", name, err)
 	}
-	return string(b)
+	// Normalised, because these tests look for "\n}\n" and similar to find the
+	// end of a function. .gitattributes pins these files to LF; this makes the
+	// test independent of whether that pinning is in place, which is what the
+	// first Windows CI run needed and did not have.
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 // cssHasSelector reports whether sel appears as a selector in its own right,

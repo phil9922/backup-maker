@@ -3,6 +3,7 @@
 package setup
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,8 +145,15 @@ func TestAManifestNeverCarriesAnotherDestinationsAddress(t *testing.T) {
 	// And this destination's own details must survive, or nothing can be
 	// adopted from it at all.
 	for _, own := range []string{testpath.Abs("/mnt/usb"), "uuid-usb"} {
-		if !strings.Contains(got, own) {
-			t.Errorf("the manifest lost its OWN %q:\n%s", own, got)
+		// Compared AS JSON WRITES IT, not as Go holds it: a Windows path
+		// carries backslashes and JSON escapes each one, so a raw comparison
+		// looks for C:\mnt\usb in a file that correctly contains C:\\mnt\\usb.
+		quoted, err := json.Marshal(own)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, string(quoted)) {
+			t.Errorf("the manifest lost its OWN %s:\n%s", quoted, got)
 		}
 	}
 }
@@ -370,7 +378,7 @@ func TestAdoptPathRemap(t *testing.T) {
 func TestAdoptRefusesWhenAlreadyConfigured(t *testing.T) {
 	isolate(t) // creates a config.toml
 	cfg := load(t)
-	cfg.Folders = []config.Folder{{ID: "zzzzz-zzzzz", Path: "/tmp", Label: "x"}}
+	cfg.Folders = []config.Folder{{ID: "zzzzz-zzzzz", Path: testpath.Abs("/tmp"), Label: "x"}}
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}

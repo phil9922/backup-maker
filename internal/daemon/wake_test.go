@@ -172,6 +172,14 @@ func TestWakeNowBypassesRateLimit(t *testing.T) {
 	}
 	first := d.waker.LastSent("omen")
 
+	// THE CLOCK HAS TO TICK BETWEEN THE TWO, or this cannot tell the answers
+	// apart. A suppressed wake leaves LastSent exactly as it was; an allowed one
+	// sets it to time.Now() — which is the SAME value if both calls land inside
+	// one tick of the system clock. Linux resolves nanoseconds and hid the
+	// assumption; Windows ticks about every 15ms and failed this test while the
+	// bypass was working perfectly.
+	time.Sleep(30 * time.Millisecond)
+
 	if err := d.WakeNow("omen"); err != nil {
 		t.Fatal(err)
 	}

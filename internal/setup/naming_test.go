@@ -388,7 +388,7 @@ func TestDescribingADestinationThatIsNotThereFails(t *testing.T) {
 	isolate(t)
 	cfg := config.New()
 	cfg.Targets = []config.Target{
-		{Type: "drive", Name: "card", Path: "/definitely/not/mounted", Folders: []string{}},
+		{Type: "drive", Name: "card", Path: testpath.Abs("/definitely/not/mounted"), Folders: []string{}},
 		{Type: "device", Name: "laptop2", DeviceID: "AAAA-BBBB", Folders: []string{}},
 	}
 	if err := cfg.Save(); err != nil {

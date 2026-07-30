@@ -1,0 +1,19 @@
+# Text files check out with LF on every platform.
+#
+# WHY THIS MATTERS HERE MORE THAN USUALLY. The dashboard's JavaScript, CSS and
+# HTML are EMBEDDED IN THE BINARY with go:embed, and their bytes are what the
+# ETag is computed from (see staticAssets in internal/webui/server.go). A Windows
+# checkout without this converts them to CRLF, so the same source produces a
+# different binary and a different validator — and a test that looks for "\n}\n"
+# in app.js to prove the verdict still derives its colours from the shared
+# mapping simply stops finding it. That test failed on the first Windows CI run
+# for exactly this reason, having nothing to do with what it was guarding.
+#
+# The documentation is embedded too, and the exported manual is written from it.
+* text=auto eol=lf
+
+# Binary assets: never touched.
+*.png binary
+*.ico binary
+*.gz binary
+*.zip binary

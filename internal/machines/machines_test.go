@@ -8,7 +8,6 @@ import (
 	"net"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/phil9922/backup-maker/internal/browse"
@@ -492,8 +491,8 @@ func TestStorageForSMBErrorHintsAtCredentials(t *testing.T) {
 		if !errors.As(err, &opErr) {
 			t.Errorf("errors.As could not reach the *net.OpError through %q", err)
 		}
-		if !errors.Is(err, syscall.ECONNREFUSED) {
-			t.Errorf("errors.Is could not reach ECONNREFUSED through %q", err)
+		if !errors.Is(err, connRefused()) {
+			t.Errorf("errors.Is could not reach %v through %q", connRefused(), err)
 		}
 	})
 
@@ -506,8 +505,8 @@ func TestStorageForSMBErrorHintsAtCredentials(t *testing.T) {
 		if strings.Contains(err.Error(), "needs a username and password") {
 			t.Errorf("error %q suggests credentials that were already supplied", err)
 		}
-		if !errors.Is(err, syscall.ECONNREFUSED) {
-			t.Errorf("errors.Is could not reach ECONNREFUSED through %q", err)
+		if !errors.Is(err, connRefused()) {
+			t.Errorf("errors.Is could not reach %v through %q", connRefused(), err)
 		}
 	})
 }
