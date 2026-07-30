@@ -86,12 +86,23 @@ jobs:
   # config directory that is not under $XDG_CONFIG_HOME. Cross-compiling proves
   # it builds, which is the smaller half.
   #
-  # NON-BLOCKING ON PURPOSE, FOR NOW. The first run of a Linux-grown suite on
-  # two new platforms is expected to fail, and those failures are the point of
-  # adding this. Gating merges on them from day one would take a clean, released
-  # main and make every unrelated change wait on unrelated fallout. Turn
-  # continue-on-error off once the results are green — the value only becomes
-  # permanent when a regression can actually stop something.
+  # NON-BLOCKING, AND STAYING THAT WAY — asked and answered 2026-07-30, so do not
+  # "finish the job" by deleting continue-on-error below.
+  #
+  # It was added non-blocking because a Linux-grown suite meeting two new
+  # platforms was expected to fail, and it did: 57 failures, all of them the tests
+  # being Linux-shaped rather than the program being wrong. Once those were fixed
+  # the question was whether to let these jobs gate merges. They do not, on
+  # purpose: these are hosted runners for platforms nobody here can reproduce a
+  # failure on, and one of the tests they run was downloading a binary from GitHub
+  # until b441c63. A flake on a machine we cannot inspect must not be able to stop
+  # work on the machine this program actually protects.
+  #
+  # What that costs, stated plainly: a genuine per-OS regression will be REPORTED
+  # and not enforced, so somebody has to look. The per-job conclusion is where it
+  # shows — the run's overall conclusion is "success" even when this fails, which
+  # is exactly what continue-on-error means and it hid a real failure from me
+  # once. `gh run view <id> --json jobs` is the check.
   #
   # It cannot see UX: whether a Windows toast carries the right icon, or whether
   # the firewall dialog is the one a user needs, still needs a person at a
