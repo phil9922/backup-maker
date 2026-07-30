@@ -122,6 +122,11 @@ type Engine struct {
 	stageName  string
 	stageStart time.Time
 	stages     []stageTime
+	// dirsListed is how many directories the destination index visited. Logged
+	// with the timings because "listing took 26s" is not actionable without it:
+	// the useful number is the cost per directory, and that is what says whether
+	// the concurrency is working or the tree is simply enormous.
+	dirsListed int
 }
 
 // stageTime is how long one stretch of a pass took.
@@ -657,6 +662,9 @@ func (e *Engine) logPass(copied, removed int) {
 	e.beginStage("") // close the last stage
 	took := time.Since(e.passStart)
 	args := []any{"took", took.Round(time.Millisecond), "copied", copied, "versioned_away", removed}
+	if e.dirsListed > 0 {
+		args = append(args, "dirs_listed", e.dirsListed)
+	}
 	for _, s := range e.stages {
 		args = append(args, s.name, s.took.Round(time.Millisecond))
 	}

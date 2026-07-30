@@ -114,7 +114,11 @@ func (e *Engine) buildDestIndex() (*destIndex, error) {
 	// parallelism buys nothing and only adds scheduling to an engine that is
 	// already the CPU cost on this machine.
 	if dl, ok := e.backend.(DirLister); ok && e.TargetType == "share" {
-		return e.buildDestIndexParallel(dl, idx, dirListWorkers)
+		out, err := e.buildDestIndexParallel(dl, idx, dirListWorkers)
+		if out != nil {
+			e.dirsListed = len(out.dirs) + 1 // +1 for the root itself
+		}
+		return out, err
 	}
 
 	var walkErr error
@@ -171,11 +175,44 @@ func (e *Engine) buildDestIndex() (*destIndex, error) {
 
 // dirListWorkers is how many directory listings a share is asked for at once.
 //
-// Eight, because a listing over wifi is a few milliseconds of pure latency and
-// go-smb2 multiplexes concurrent requests over the one session with a 128-credit
-// balance — eight listings in flight use a small fraction of it, so nothing
-// queues on credits and no second connection is needed. Higher would mostly buy
-// contention; lower leaves the link idle between round trips.
+// EIGHT, AND IT IS A CEILING, NOT A GUESS. Measured against the real Pi over wifi,
+// listing the same 4,178 directories at each level
+// (TestReadDirConcurrencyScaling in internal/smbfs):
+//
+//	workers=1   1m1.9s   14.81ms/dir   failed=0
+//	workers=4    23.0s    5.50ms/dir   failed=0     2.7x
+//	workers=8    11.8s    2.81ms/dir   failed=0     5.3x
+//	workers=12    7.2s    1.73ms/dir   failed=57    ← refused
+//	workers=16    5.7s    1.35ms/dir   failed=106   ← refused
+//	workers=24    4.1s    0.98ms/dir   failed=332   ← refused
+//	workers=32    3.4s    0.80ms/dir   failed=188   ← refused
+//
+// Past eight the server starts answering "An invalid parameter was passed to a
+// service or function" (STATUS_INVALID_PARAMETER), and a refused listing does not
+// degrade the pass — it FAILS it, because a directory missing from the index reads
+// as "not on the destination" and would recopy the tree. Backing up to that machine
+// stops until the number comes back down. Verified the hard way: setting this to 32
+// on the strength of a benchmark that discarded errors took the Pi's backups down
+// until it was reverted.
+//
+// So this is the fastest safe value, and 12 is already past the edge. DO NOT RAISE
+// IT without re-running that test against a real destination and reading the
+// failed= column — the timings alone look like an argument for 32.
+//
+// It matters because the index is where a pass spends its time: 26s of a 27.5s pass
+// over 9,399 directories, at ~2.8ms each, which is exactly the 8-worker rate above.
+// The parallelism is working; that cost is what eight concurrent round trips to
+// this destination buys.
+//
+// WHERE THE REMAINING TIME COULD GO, since concurrency cannot take it: list fewer
+// directories, by not re-enumerating an unchanged tree every pass. That is a real
+// change with a real hazard — this index decides what gets versioned away, so a
+// stale one could remove a file that is actually there. It needs an invalidation
+// story before a line of it is written, not an optimisation bolted on.
+//
+// The level-by-level barrier below was measured and left alone: with eight workers
+// it costs about 1% against a perfect work queue on this tree, because nearly every
+// level is far wider than the worker count.
 const dirListWorkers = 8
 
 // buildDestIndexParallel lists the tree a level at a time, several directories
