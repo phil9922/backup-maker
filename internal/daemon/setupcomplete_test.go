@@ -32,6 +32,14 @@ func setupDaemon(t *testing.T, cfg *config.Config) *daemon {
 	d.newBackend = func(config.Target, map[string]string) (localmirror.Backend, time.Duration, bool, error) {
 		return localmirror.NewLocalFS(root), 5 * time.Second, false, nil
 	}
+	// NO REAL SYNC ENGINE. Every test in this file is about what applyConfig
+	// RECORDS, and letting the real one start downloads a pinned binary over the
+	// network on every run and leaves a child process holding its own
+	// executable — which Linux deletes from under it happily, so the leak was
+	// invisible, while Windows refuses to unlink a running executable and failed
+	// the temp-directory cleanup instead. A test that wants the real engine can
+	// set this back to nil.
+	d.startEngine = func(context.Context) error { return nil }
 	return d
 }
 
@@ -83,13 +91,6 @@ func TestApplyConfigRecordsThatACLICreatedInstallIsSetUp(t *testing.T) {
 	isolateState(t)
 	cfg := configuredCfg(t)
 	d := setupDaemon(t, cfg)
-
-	// WHAT THIS TEST IS ABOUT is what applyConfig RECORDS, not that an engine
-	// starts. Letting the real one start downloaded a pinned binary over the
-	// network on every run and left a child process holding its own executable —
-	// which Linux happily deletes from under it, and Windows refuses to, so the
-	// temp-directory cleanup failed and was reported as this test failing.
-	d.startEngine = func(context.Context) error { return nil }
 
 	d.applyConfig(context.Background(), cfg)
 
