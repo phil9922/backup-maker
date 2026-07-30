@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -43,12 +44,41 @@ func (e *Engine) watch(ctx context.Context) {
 	}
 	addTree(e.sourcePath)
 
-	// Debounce: fire one kick 1s after the last event in a burst.
-	var timer *time.Timer
+	// Debounce: fire one kick 1s after the last event in a burst, carrying the
+	// paths seen during it.
+	//
+	// THE PATHS ARE THE POINT. They used to be thrown away, so a save could only
+	// say "something changed" and the engine answered by enumerating the entire
+	// destination — 26 seconds on a real share before the file went anywhere. With
+	// the paths, a save can be copied in the time it takes to copy it.
+	//
+	// Under its own lock because fsnotify delivers on this goroutine while the
+	// timer fires on another.
+	var (
+		timer   *time.Timer
+		mu      sync.Mutex
+		pending = map[string]bool{}
+	)
 	fire := func() {
+		mu.Lock()
+		paths := make([]string, 0, len(pending))
+		for rel := range pending {
+			paths = append(paths, rel)
+		}
+		pending = map[string]bool{}
+		mu.Unlock()
 		select {
-		case e.kick <- struct{}{}:
-		default: // a kick is already pending
+		case e.kick <- paths:
+		default:
+			// A kick is already queued and will be served with its own paths.
+			// Put these back rather than dropping them: the receiver may already
+			// be past reading, and a lost path here is a file that waits for the
+			// hourly pass.
+			mu.Lock()
+			for _, rel := range paths {
+				pending[rel] = true
+			}
+			mu.Unlock()
 		}
 	}
 
@@ -69,6 +99,9 @@ func (e *Engine) watch(ctx context.Context) {
 					addTree(ev.Name)
 				}
 			}
+			mu.Lock()
+			pending[filepath.ToSlash(rel)] = true
+			mu.Unlock()
 			if timer != nil {
 				timer.Stop()
 			}

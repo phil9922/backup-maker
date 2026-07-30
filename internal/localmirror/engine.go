@@ -49,7 +49,11 @@ type Engine struct {
 	destFileHint int64
 	log          *slog.Logger
 
-	kick chan struct{} // watcher → sync loop nudges
+	// kick carries the source-relative paths the watcher saw in a burst, not just
+	// a nudge. The paths are what let a save be propagated without enumerating
+	// the whole destination first; an empty slice still means "something changed,
+	// go and look properly".
+	kick chan []string
 
 	mu           sync.Mutex
 	state        string // scanning | in sync | syncing | offline | wrong-drive | name-clash
@@ -255,7 +259,7 @@ func New(o Options) *Engine {
 		destFileHint: o.DestFileCount,
 		log: o.Log.With("sub", "localmirror", "folder", o.FolderID,
 			"target", o.TargetName, "type", o.TargetType),
-		kick:       make(chan struct{}, 1),
+		kick:       make(chan []string, 1),
 		state:      "scanning",
 		lastSync:   o.LastSync,
 		fileErrors: map[string]string{},
@@ -287,7 +291,15 @@ func (e *Engine) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-e.kick:
+		case changed := <-e.kick:
+			// A handful of changed files gets copied straight over; anything else
+			// — a burst, or a folder that has never completed a pass — gets the
+			// full pass. The full pass still runs on the hourly ticker either way,
+			// so nothing here is load-bearing for correctness.
+			if e.fastPathUsable(changed) {
+				e.propagate(changed)
+				continue
+			}
 			e.sync()
 		case <-rescan.C:
 			e.sync()
@@ -309,15 +321,21 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-func (e *Engine) sync() {
+// readyToWrite answers the questions that must be settled before anything is
+// written to this destination, and is the ONE place they are asked.
+//
+// Every one of them is a refusal, so a second copy of this sequence is a second
+// chance to write somebody else's files. Both the full pass and the fast path
+// call it; do not inline it into a third caller.
+func (e *Engine) readyToWrite() bool {
 	switch checkPresence(e.backend, e.uuid) {
 	case wrongDrive:
 		e.setState("wrong-drive")
 		e.log.Warn("different storage at target location; refusing to write")
-		return
+		return false
 	case absent:
 		e.setState("offline")
-		return
+		return false
 	}
 
 	// The second question, and the storage being right does not answer it: this
@@ -326,12 +344,19 @@ func (e *Engine) sync() {
 	// machines reconcile the same tree against different sources, and each
 	// versions the other's files away on every pass.
 	if !e.claimMachineDir() {
-		return
+		return false
 	}
 
 	if !e.calibrated {
 		e.calibrateMtime()
 		e.calibrated = true
+	}
+	return true
+}
+
+func (e *Engine) sync() {
+	if !e.readyToWrite() {
+		return
 	}
 
 	// Make room before copying rather than discovering the problem mid-file.

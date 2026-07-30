@@ -110,33 +110,15 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 	defer e.endTransfer()
 
 	for _, rel := range pending {
-		destPath := path.Join(e.destRoot, rel)
-		src := filepath.Join(e.sourcePath, filepath.FromSlash(rel))
-		written, err := copyFile(e.backend, src, destPath, now, e.verify, e.reportInFlight)
+		err := e.copyOne(rel, sourceFiles[rel].Size(), now)
 		if IsNoSpace(err) {
-			// The destination filled up mid-pass. Free room for this file
-			// specifically, then give it one more go.
-			if e.ensureHeadroom(uint64(sourceFiles[rel].Size())) {
-				written, err = copyFile(e.backend, src, destPath, now, e.verify, e.reportInFlight)
-			}
-			if IsNoSpace(err) {
-				// Still full: stop the pass rather than grinding through
-				// every remaining file failing identically.
-				e.advanceTransfer(sourceFiles[rel].Size())
-				return copied, removed, err
-			}
+			// Still full after making room: stop the pass rather than grinding
+			// through every remaining file failing identically.
+			return copied, removed, err
 		}
 		if err != nil {
-			e.addFileError(rel, err)
-			// Still count it as handled, or a failing file would freeze the
-			// bar short of 100% for the rest of the pass.
-			e.advanceTransfer(sourceFiles[rel].Size())
-			continue
+			continue // already recorded against the file
 		}
-		e.advanceTransfer(sourceFiles[rel].Size())
-		// Only here, past every failure branch above: the file is on the
-		// destination and the odometer may claim it.
-		e.noteCopied(written)
 		copied++
 	}
 
@@ -193,6 +175,44 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 		DestFiles:    int64(len(idx.byRel)),
 	})
 	return copied, removed, nil
+}
+
+// copyOne puts one file on the destination, with everything that has to happen
+// around a copy: room made if the destination is full, the displaced version kept,
+// the failure recorded against the file, the progress bar advanced either way, and
+// the odometer credited only on success.
+//
+// SHARED WITH THE FAST PATH ON PURPOSE. Every one of those steps is a rule somebody
+// learned the hard way — a file that fails must still advance the bar or it freezes
+// short of 100%, and the odometer must be credited only past every failure branch or
+// it claims bytes that never landed. A second copy of this loop would drift from
+// those rules quietly, and it is the step that actually writes to somebody's backup.
+//
+// Versioning of the file being replaced is inside copyFile, so it is inherited here
+// rather than repeated: an overwrite keeps the previous copy in the version store.
+func (e *Engine) copyOne(rel string, size int64, now time.Time) error {
+	destPath := path.Join(e.destRoot, rel)
+	src := filepath.Join(e.sourcePath, filepath.FromSlash(rel))
+	written, err := copyFile(e.backend, src, destPath, now, e.verify, e.reportInFlight)
+	if IsNoSpace(err) {
+		// The destination filled up. Free room for this file specifically, then
+		// give it one more go.
+		if e.ensureHeadroom(uint64(size)) {
+			written, err = copyFile(e.backend, src, destPath, now, e.verify, e.reportInFlight)
+		}
+	}
+	if err != nil {
+		if !IsNoSpace(err) {
+			e.addFileError(rel, err)
+		}
+		e.advanceTransfer(size)
+		return err
+	}
+	e.advanceTransfer(size)
+	// Only here, past every failure branch above: the file is on the destination
+	// and the odometer may claim it.
+	e.noteCopied(written)
+	return nil
 }
 
 // warnAboutCopiedConfig reports a copy of backup-maker's own configuration
