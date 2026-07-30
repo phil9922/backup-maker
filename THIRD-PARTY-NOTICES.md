@@ -16,8 +16,10 @@ inside each module (see the Go module cache or each project's repository).
 |---|---|
 | github.com/cloudsoda/go-smb2 | BSD-2-Clause |
 | github.com/cloudsoda/sddl | **LGPL-3.0** (see note below) |
+| github.com/danieljoos/wincred (Windows builds) | MIT |
 | github.com/fsnotify/fsnotify | BSD-3-Clause |
 | github.com/geoffgarside/ber | BSD-3-Clause |
+| github.com/godbus/dbus/v5 (Linux/BSD builds) | BSD-2-Clause |
 | github.com/gofrs/flock | BSD-3-Clause |
 | github.com/hashicorp/go-uuid | MPL-2.0 |
 | github.com/inconshreveable/mousetrap (Windows builds) | Apache-2.0 |
@@ -33,6 +35,7 @@ inside each module (see the Go module cache or each project's repository).
 | github.com/spf13/pflag | BSD-3-Clause |
 | github.com/yeka/zip | MIT (derived from the Go standard library's archive/zip, BSD-3-Clause) |
 | github.com/yuin/goldmark | MIT |
+| github.com/zalando/go-keyring | MIT |
 | golang.org/x/crypto, /net, /sys, /term | BSD-3-Clause |
 | Go standard library | BSD-3-Clause |
 

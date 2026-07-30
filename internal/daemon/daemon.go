@@ -261,9 +261,35 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	}
 	defer release()
 
+	// Set before the first Save below, so that a keyring this daemon cannot write
+	// to is reported from the very first flush rather than from whenever the user
+	// next happens to run a command. The secret is kept either way — see
+	// State.storedSecrets — and this is the difference between a documented
+	// fallback and a silent one.
+	config.KeyringWriteFallback = func(account string, err error) {
+		log.Warn("could not put a password in the OS keyring; it stays in state.json (mode 0600) instead, as it did before keyring storage was switched on",
+			"entry", account, "err", err, "check", "backup-maker keychain status")
+	}
+
 	state, err := config.LoadState()
 	if err != nil {
 		return fmt.Errorf("loading state: %w", err)
+	}
+	// A KEYRING THAT WOULD NOT OPEN IS SAID OUT LOUD, ONCE, AT STARTUP. This is
+	// the case the whole opt-in design is shaped around: a daemon started at boot
+	// has no keyring session on most Linux desktops, and a locked keyring looks
+	// identical. The secrets are not lost — they are in the keyring, and the keys
+	// are still in state.json — but every destination and snapshot named here will
+	// fail until it can be read, and it must never fail as "wrong password" with
+	// no explanation anywhere. Beyond this line the ordinary per-destination
+	// failure surfacing does the rest: there is deliberately no new alert
+	// pipeline, because a machine in this state is not a machine whose backups
+	// have silently stopped, it is one that is about to say so per destination.
+	if misses := state.KeyringMisses(); len(misses) > 0 {
+		log.Warn("the OS keyring would not give up stored passwords, so the destinations and snapshots listed cannot be used until it can be read; it is usually locked, or this daemon was started at boot with no keyring session",
+			"entries", strings.Join(misses, ", "),
+			"check", "backup-maker keychain status",
+			"undo", "backup-maker keychain disable")
 	}
 	if state.IPCToken == "" {
 		state.IPCToken = config.NewToken()
@@ -468,6 +494,11 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 			// holds — and it would then stop backing up to its own drives.
 			fresh.InstallID = d.state.InstallID
 		}
+		// And the same treatment for a password the OS keyring would not hand back
+		// on this reload but that we are already holding. See
+		// State.KeepReachableSecrets: a keyring that stops answering mid-session
+		// must not take working share destinations down with it.
+		fresh.KeepReachableSecrets(d.state)
 		if d.tally != nil {
 			fresh.BytesCopiedTotal, fresh.FilesCopiedTotal, fresh.CountingSince = bytes, files, since
 		}

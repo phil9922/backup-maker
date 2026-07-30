@@ -177,6 +177,18 @@ func RemoveTarget(name string) error {
 		delete(state.ArchivePasswords, an)
 		delete(state.ArchiveLastRun, an)
 	}
+	// And out of the OS keyring, where the same secrets are kept when that is
+	// switched on. Best-effort and never fatal: the destination is gone from the
+	// config either way, and the cost of a failure here is a password left in the
+	// user's keyring app with nothing in backup-maker naming it — untidy, not
+	// dangerous. Nothing on a destination is touched by any of this; this is one
+	// machine forgetting a credential.
+	if state.SecretsInKeyring {
+		_ = config.KeyringForget(config.ShareKeyringAccount(name))
+		for _, an := range orphaned {
+			_ = config.KeyringForget(config.ArchiveKeyringAccount(an))
+		}
+	}
 	return state.Save()
 }
 

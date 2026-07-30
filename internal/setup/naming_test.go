@@ -269,6 +269,15 @@ func TestEveryMapInStateIsClassifiedAsDestinationKeyedOrNot(t *testing.T) {
 		"LANDevices":       true, // the token that view issued
 		"ArchivePasswords": true, // archive job name
 		"ArchiveLastRun":   true, // archive job name
+		// Keyed by OS-keyring account name, and a share account does embed the
+		// destination name ("share/pi-drive1") — so this is here on purpose and
+		// only because of what a non-empty entry means. An account is listed only
+		// when the keyring refused to give that secret up, and RenameTarget
+		// REFUSES OUTRIGHT in that state rather than moving anything, precisely
+		// because a rename with the value out of reach loses the password. So no
+		// rename can ever reach a state where this needed moving. Remove that
+		// refusal and this classification becomes wrong.
+		"MissingFromKeyring": true,
 	}
 
 	st := reflect.TypeOf(config.State{})

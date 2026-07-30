@@ -5,6 +5,8 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -44,7 +46,36 @@ type State struct {
 	// ShareCredentials maps share-target name -> SMB password. state.json is
 	// 0600 and machine-owned: plaintext-but-private, the same trust level as
 	// the IPC token and syncthing API key above.
+	//
+	// Unless SecretsInKeyring is set, in which case the FILE holds
+	// KeyringSentinel here and this map is filled from the OS keyring on load.
 	ShareCredentials map[string]string `json:"share_credentials,omitempty"`
+	// SecretsInKeyring says the share passwords above and the archive passwords
+	// below are kept in the OS keyring, with a KeyringSentinel standing in for
+	// each value in this file. OPT-IN, off by default, never required — see
+	// internal/config/keyring.go for the whole of why, and for why the keys stay
+	// in the file even when the values do not.
+	//
+	// IN state.json DESPITE NOT BEING A CREDENTIAL, which is the opposite of the
+	// reason every other field here is. It is a fact about THIS machine's
+	// keyring: whether one exists, and whether this install was told to use it.
+	// config.toml is the file that is safe to paste into an issue report and to
+	// copy to another machine, and this flag copied to a headless Pi would
+	// describe storage that does not exist there — a config that says "the
+	// passwords are in the keyring" on a machine with no keyring at all.
+	SecretsInKeyring bool `json:"secrets_in_keyring,omitempty"`
+	// MissingFromKeyring names the keyring accounts (ShareKeyringAccount,
+	// ArchiveKeyringAccount) whose secret the keyring would not give up on the
+	// last load — a locked keyring, or a daemon started at boot with no keyring
+	// session. Derived on every load, so it is never serialized.
+	//
+	// IT EXISTS SO THAT A MISS IS LOUD. Two things depend on it. Save puts the
+	// sentinel back for these keys, because the file is the only record that the
+	// secret exists at all and dropping the key would strand the value in the
+	// keyring with nothing pointing at it. And RenameTarget refuses outright
+	// while a destination is listed here, because a rename in that state moves a
+	// name and leaves the password behind.
+	MissingFromKeyring map[string]bool `json:"-"`
 	// WebhookURL is where alerts are POSTed when the webhook sink is on.
 	//
 	// HERE RATHER THAN IN config.toml because it is usually a credential: a
@@ -89,8 +120,9 @@ type State struct {
 	SetupComplete bool `json:"setup_complete,omitempty"`
 	// ArchivePasswords maps archive name -> the REQUIRED zip password (same
 	// privacy level as ShareCredentials: 0600, machine-owned, never in
-	// config.toml). Losing this password means losing access to the
-	// archives; the wizard says so out loud.
+	// config.toml, and moved into the OS keyring by the same SecretsInKeyring
+	// flag). Losing this password means losing access to the archives; the
+	// wizard says so out loud.
 	ArchivePasswords map[string]string `json:"archive_passwords,omitempty"`
 	// ArchiveLastRun tracks when each archive job last completed, so
 	// schedules survive daemon restarts and overdue jobs catch up.
@@ -246,7 +278,134 @@ func LoadState() (*State, error) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
 	}
+	s.hydrateFromKeyring()
 	return &s, nil
+}
+
+// hydrateFromKeyring replaces each sentinel in the two secret maps with the real
+// value out of the OS keyring.
+//
+// HERE, IN LoadState, AND NOWHERE ELSE — this and forFile below are the entire
+// seam. Between them, an in-memory State always holds real secret values and
+// every one of the dozens of readers (the mirror engines, the snapshot writer,
+// the wizard, the adopt path, the status page) goes on reading a plain map and
+// does not know this feature exists. A per-call-site accessor would be the same
+// feature with one more place to forget it, and the place somebody forgot would
+// be a destination that stops backing up.
+//
+// A SECRET IT CANNOT GET IS DELETED FROM THE MAP, NEVER LEFT AS THE SENTINEL.
+// The sentinel is an ordinary string, and a caller handed it will use it: the SMB
+// client would try to log in with KeyringSentinel as the password, which the
+// server rejects and which surfaces to the user as a wrong password on a machine
+// where the password is perfectly correct. The snapshot writer is worse — it
+// would encrypt a zip with the sentinel, and that archive's real password is then
+// not the one in anybody's keyring and not written down anywhere. A missing entry
+// makes a caller MISS, which every caller already handles, and which the daemon
+// reports at startup by name.
+//
+// Never fails. A keyring that will not open is a reason to say so, not a reason
+// for the CLI and the daemon to refuse to read their own state file.
+func (s *State) hydrateFromKeyring() {
+	if !s.SecretsInKeyring {
+		return
+	}
+	for _, kind := range []struct {
+		secrets map[string]string
+		prefix  string
+	}{
+		{s.ShareCredentials, shareAccountPrefix},
+		{s.ArchivePasswords, archiveAccountPrefix},
+	} {
+		for key, value := range kind.secrets {
+			if value != KeyringSentinel {
+				// A real value left in the file by a keyring write that failed
+				// (see storedSecrets). It is the truth; leave it alone, and the
+				// next save will try the keyring for it again.
+				continue
+			}
+			account := kind.prefix + key
+			secret, err := KeyringFetch(account)
+			if err != nil {
+				delete(kind.secrets, key)
+				if s.MissingFromKeyring == nil {
+					s.MissingFromKeyring = map[string]bool{}
+				}
+				s.MissingFromKeyring[account] = true
+				continue
+			}
+			kind.secrets[key] = secret
+		}
+	}
+}
+
+// KeepReachableSecrets fills in, from a State this process already holds, the
+// secrets a fresh load could not get out of the OS keyring.
+//
+// FOR THE DAEMON'S CONFIG RELOAD, and it is the same judgement as the
+// never-rotate rule on the IPC token beside its call site: for a secret, memory
+// is the better source. The daemon re-reads state.json every time config.toml
+// changes, and a keyring can stop answering while it runs — a relock, a restarted
+// session bus, a keyring daemon that died. Without this, saving an unrelated
+// setting would strip the share passwords out of a daemon that had them in memory
+// and had been using them successfully all day, and every share destination would
+// stop. That is precisely the failure keyring storage is not allowed to introduce.
+//
+// A KEY THE FILE NO LONGER LISTS IS NOT CARRIED OVER, because that is a removal
+// and removals must stick: only accounts the file still records — the ones in
+// MissingFromKeyring — are considered at all.
+//
+// The miss is then no longer a miss, so the account is cleared: this State does
+// hold the real value. The cost is that a save happening while the keyring is
+// still shut writes that value to state.json in plaintext, which is the ordinary
+// fallback (0600, machine-owned, and reported through KeyringWriteFallback), and
+// which the next save with a working keyring undoes.
+func (s *State) KeepReachableSecrets(prev *State) {
+	if prev == nil || len(s.MissingFromKeyring) == 0 {
+		return
+	}
+	for account := range s.MissingFromKeyring {
+		if key, ok := strings.CutPrefix(account, shareAccountPrefix); ok {
+			if secret, held := prev.ShareCredentials[key]; held {
+				if s.ShareCredentials == nil {
+					s.ShareCredentials = map[string]string{}
+				}
+				s.ShareCredentials[key] = secret
+				delete(s.MissingFromKeyring, account)
+			}
+			continue
+		}
+		if key, ok := strings.CutPrefix(account, archiveAccountPrefix); ok {
+			if secret, held := prev.ArchivePasswords[key]; held {
+				if s.ArchivePasswords == nil {
+					s.ArchivePasswords = map[string]string{}
+				}
+				s.ArchivePasswords[key] = secret
+				delete(s.MissingFromKeyring, account)
+			}
+		}
+	}
+}
+
+// SecretMissing reports whether one keyring account's secret was unreachable on
+// the last load. Callers that are about to move or re-key a secret ask this
+// first: moving a name while the value is out of reach is how the value is lost.
+func (s *State) SecretMissing(account string) bool {
+	return s.MissingFromKeyring[account]
+}
+
+// KeyringMisses lists the unreachable accounts in a stable order, for a message
+// somebody can act on. Sorted because it is printed and logged, and a set
+// iterated in map order reads like a different problem every time.
+func (s *State) KeyringMisses() []string {
+	if len(s.MissingFromKeyring) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s.MissingFromKeyring))
+	for account := range s.MissingFromKeyring {
+		out = append(out, account)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Owns reports whether a claim recorded under id belongs to this installation,
@@ -297,7 +456,7 @@ func (s *State) Save() error {
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
+	data, err := json.MarshalIndent(s.forFile(), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -306,6 +465,76 @@ func (s *State) Save() error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// forFile is what actually gets written: s itself in the ordinary case, and a
+// redacted clone when the secrets live in the OS keyring.
+//
+// A CLONE, NEVER s ITSELF, and this is the sharpest edge in the feature. The
+// daemon holds this exact State in memory for its whole life and hands the share
+// passwords to the mirror engines out of it; Save is called from the tally's
+// flush every few seconds. Redacting in place would therefore replace live
+// passwords with a sentinel a few seconds after startup, and every share
+// destination on the machine would begin failing to authenticate — on a timer,
+// with nothing having changed, on the one code path nobody is watching.
+func (s *State) forFile() *State {
+	if !s.SecretsInKeyring {
+		return s
+	}
+	// Shallow: everything else in the struct is written as it stands, and this
+	// clone lives only long enough to be marshalled.
+	clone := *s
+	clone.ShareCredentials = s.storedSecrets(s.ShareCredentials, shareAccountPrefix)
+	clone.ArchivePasswords = s.storedSecrets(s.ArchivePasswords, archiveAccountPrefix)
+	return &clone
+}
+
+// storedSecrets is one secret map as the file should hold it: the values put into
+// the keyring and replaced with the sentinel, the keys left exactly where they
+// were.
+//
+// A FAILED KEYRING WRITE FALLS BACK TO PLAINTEXT, deliberately, and this is the
+// rule the whole design turns on. The user asked for their password to be kept
+// somewhere better; they did not ask for it to be thrown away. If the keyring
+// will not take it, the only two options are the file — where it lived safely for
+// every version before this one, 0600 and machine-owned — or nowhere, which means
+// a destination that cannot be reached until somebody remembers a password they
+// were told they no longer had to. So it goes in the file, and
+// KeyringWriteFallback says so out loud, because a fallback nobody is told about
+// is indistinguishable from a lie.
+//
+// Never deletes from the keyring, and never drops a key: see MissingFromKeyring.
+func (s *State) storedSecrets(secrets map[string]string, prefix string) map[string]string {
+	stored := make(map[string]string, len(secrets))
+	for key, secret := range secrets {
+		account := prefix + key
+		if err := KeyringPut(account, secret); err != nil {
+			stored[key] = secret
+			reportKeyringFallback(account, err)
+			continue
+		}
+		stored[key] = KeyringSentinel
+	}
+	// The entries this load could not read back. Their keys were removed from the
+	// in-memory map (so that nothing uses a sentinel as a password) and must go
+	// back into the FILE, because the file is the only record that the secret
+	// exists: written without them, it would leave a password in the keyring that
+	// nothing on this machine can ever name again.
+	for account := range s.MissingFromKeyring {
+		key, ok := strings.CutPrefix(account, prefix)
+		if !ok || key == "" {
+			continue // the other kind of secret; its own call handles it
+		}
+		if _, present := secrets[key]; present {
+			// Set again since the failed load — by `set-password`, by the wizard,
+			// or read back once the keyring opened. Whatever is in the map now is
+			// newer than this record of a miss, and overwriting it with a sentinel
+			// would discard a password somebody just typed.
+			continue
+		}
+		stored[key] = KeyringSentinel
+	}
+	return stored
 }
 
 // LANDevice is one browser that has asked to read the network view.

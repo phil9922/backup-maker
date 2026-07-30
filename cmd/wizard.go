@@ -184,6 +184,11 @@ archives:
 			name := cfg.Archives[idx].Name
 			cfg.Archives = append(cfg.Archives[:idx], cfg.Archives[idx+1:]...)
 			delete(state.ArchivePasswords, name)
+			// The keyring copy goes with it, for the reason setup.RemoveArchive
+			// gives: the two storages must forget the same thing.
+			if state.SecretsInKeyring {
+				_ = config.KeyringForget(config.ArchiveKeyringAccount(name))
+			}
 			fmt.Println("  removed", name, "(existing zip files on the target stay put)")
 		default:
 			fmt.Println("  a, r, or Enter to finish")

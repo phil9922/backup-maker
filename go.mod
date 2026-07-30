@@ -11,13 +11,16 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9
 	github.com/yuin/goldmark v1.8.5
+	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 )
 
 require (
 	github.com/cloudsoda/sddl v0.0.0-20250224235906-926454e91efc // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/geoffgarside/ber v1.1.0 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jcmturner/aescts/v2 v2.0.0 // indirect

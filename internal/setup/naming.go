@@ -215,6 +215,21 @@ func RenameTarget(from, to string) error {
 	if err != nil {
 		return err
 	}
+	// REFUSED OUTRIGHT when this destination's password lives in the OS keyring
+	// and the keyring would not give it up (locked, or no keyring session — see
+	// internal/config/keyring.go).
+	//
+	// Everything below is a map move, and there is nothing in the map to move: the
+	// rename would report success, config.toml would name the destination
+	// "pi-drive1", and the password would still be filed in the keyring under
+	// "share/backups" with nothing left on the machine pointing at it. That is
+	// data loss, on a flow that looks like it worked, and it stays invisible until
+	// the day the share stops logging in and the password nobody has written down
+	// is asked for. Renaming is never urgent; unlocking a keyring is a moment's
+	// work; so this waits.
+	if state.SecretMissing(config.ShareKeyringAccount(from)) {
+		return fmt.Errorf("%q keeps its password in the OS keyring, and the keyring is locked or unavailable right now: unlock it (or start a keyring session) and try again — renaming now would leave the password filed under the old name with nothing pointing at it. Check with: backup-maker keychain status", from)
+	}
 	// COPIED UNDER THE NEW NAME FIRST, and the old keys removed only after the
 	// config is safely saved. A rename is two files, and a failure between them
 	// is the one outcome that must not lose a destination: with both names
@@ -263,6 +278,17 @@ func RenameTarget(from, to string) error {
 		delete(byTarget, from)
 	}
 	_ = state.Save()
+
+	// The orphaned keyring entry, last and best-effort. The entry under the NEW
+	// name was already written by the first save above — putting secrets in the
+	// keyring is what Save does — so by here the only thing left under the old
+	// name is a duplicate nothing points at. Done after the saves rather than
+	// before for the same reason the whole function copies before it deletes: a
+	// failure at this point costs a stale line in the user's keyring app, whereas
+	// the same failure earlier could cost the password.
+	if state.SecretsInKeyring {
+		_ = config.KeyringForget(config.ShareKeyringAccount(from))
+	}
 	return nil
 }
 

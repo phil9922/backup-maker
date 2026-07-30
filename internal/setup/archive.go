@@ -116,6 +116,15 @@ func RemoveArchive(name string) error {
 	}
 	delete(state.ArchivePasswords, name)
 	delete(state.ArchiveLastRun, name)
+	// And out of the OS keyring if the passwords are kept there, so the two
+	// storages forget the same thing: the line above has always dropped the
+	// password on removal, and leaving a keyring copy behind would mean whether an
+	// old zip can still be opened depended on which storage was in use.
+	// Best-effort for the reason RemoveTarget gives — the schedule is gone either
+	// way, and a leftover entry is untidy rather than harmful.
+	if state.SecretsInKeyring {
+		_ = config.KeyringForget(config.ArchiveKeyringAccount(name))
+	}
 	return state.Save()
 }
 

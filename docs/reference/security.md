@@ -51,7 +51,8 @@ wondering what it will and won't do on its own.
 
 - Network-drive passwords are stored in `state.json` (file mode 0600, next to
   the config) — never in the shareable `config.toml`. Update them with
-  `backup-maker set-password <target>`.
+  `backup-maker set-password <target>`. They can optionally be moved into your
+  OS keyring instead — see [below](#optional-keeping-passwords-in-the-os-keyring).
 - The same applies to **alert delivery credentials**: the webhook address, the
   ntfy topic and the ntfy access token all live in `state.json` rather than
   `config.toml`. A webhook URL is usually a right to post in its own right (a
@@ -98,6 +99,51 @@ wondering what it will and won't do on its own.
   destination names. Your phone still buzzes. On ntfy specifically, remember a
   topic name is not a password: pick one with real randomness in it, or protect
   the topic and give backup-maker the access token.
+
+## Optional: keeping passwords in the OS keyring
+
+Two of the passwords above can be moved out of `state.json` and into your
+operating system's keyring — GNOME Keyring or KWallet on Linux, the Keychain on
+macOS, the Credential Manager on Windows:
+
+- each **network drive's** login password, and
+- each **scheduled snapshot's** zip password.
+
+Nothing else moves. The IPC token, the sync engine's API key, the webhook
+address and the ntfy token stay in `state.json`, because they are needed on
+every start — including the starts where no keyring answers.
+
+```sh
+backup-maker keychain status     # where the passwords are, and whether the keyring works here
+backup-maker keychain enable     # move them into the keyring
+backup-maker keychain disable    # put them back in state.json
+```
+
+**It is optional and it is off unless you turn it on.** `state.json` is mode
+0600 in your own config directory, so on a single-user machine the keyring's
+gain is narrower than it sounds: encryption at rest for a file that only your
+account can read anyway. What it costs is availability, which is the thing a
+backup tool cannot trade away.
+
+**The caveat that matters, especially on a Raspberry Pi.** A headless machine
+usually has no keyring at all, and a daemon started at *boot* rather than at
+*login* has no keyring session even where one is installed — so the passwords
+cannot be read, and the destinations and snapshots that need them stop working
+until they can be. `keychain enable` tests your machine for real before it moves
+anything and refuses if that test fails, so you cannot walk into this by
+accident. If it happens later — you locked the keyring, or changed how the
+daemon starts — the daemon says so at startup by name, and `keychain disable`
+puts everything back.
+
+Two details worth knowing. The **names** stay in `state.json` with a placeholder
+where each value was, because a keyring cannot be asked to list what it holds;
+that list is the only record of which passwords exist. And if the keyring
+refuses a *write*, the password is written to `state.json` as before rather than
+being lost, and you are told that it happened.
+
+Stop the daemon before running `enable` or `disable`: it holds the state file in
+memory and would write its own copy back over the change. The command refuses
+while it is running and tells you the commands for your system.
 
 ## Preparing a drive
 
