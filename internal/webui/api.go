@@ -687,8 +687,14 @@ func (s *Server) handleForgetLANDevice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
-// handleSetArchiveSchedule changes how often a snapshot runs and how many are
-// kept. Only the config is written; the daemon's watcher picks it up.
+// handleSetArchiveSchedule changes how often a snapshot runs, how many are kept,
+// and whether it packs everything. Only the config is written; the daemon's
+// watcher picks it up.
+//
+// It deliberately does NOT accept a new folder or a new target: re-pointing a
+// schedule at different files is how somebody ends up with a snapshot of the
+// wrong thing, and it happened here once already. That is a new schedule, made on
+// purpose. The password is changed through its own route.
 func (s *Server) handleSetArchiveSchedule(w http.ResponseWriter, r *http.Request) {
 	if s.actions.SetArchiveSchedule == nil {
 		unavailable(w, "changing a snapshot schedule")
@@ -698,7 +704,7 @@ func (s *Server) handleSetArchiveSchedule(w http.ResponseWriter, r *http.Request
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := s.actions.SetArchiveSchedule(r.PathValue("name"), req.Every, req.Keep); err != nil {
+	if err := s.actions.SetArchiveSchedule(r.PathValue("name"), req.Every, req.Keep, req.NoDefaultIgnores); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}

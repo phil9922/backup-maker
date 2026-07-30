@@ -96,7 +96,7 @@ type Actions struct {
 	SetArchivePaused func(name string, paused bool) error
 	// SetArchiveSchedule changes how often a snapshot runs and how many are
 	// kept.
-	SetArchiveSchedule func(name, every string, keep int) error
+	SetArchiveSchedule func(name, every string, keep int, noDefaultIgnores *bool) error
 	// ReenableFolder puts a stopped folder back into service. It never copies
 	// anything: the destination layout is keyed by label, so the mirror
 	// reconciles against the copy already there.
@@ -192,6 +192,10 @@ type SettingsRequest struct {
 type ArchiveScheduleRequest struct {
 	Every string `json:"every,omitempty"`
 	Keep  int    `json:"keep,omitempty"`
+	// NoDefaultIgnores is a POINTER so that omitting it leaves the setting
+	// alone. A plain bool would mean every change of interval also silently
+	// switched a job that packs everything back to skipping node_modules.
+	NoDefaultIgnores *bool `json:"no_default_ignores,omitempty"`
 }
 
 // ArchivePausedRequest stops or resumes a schedule.

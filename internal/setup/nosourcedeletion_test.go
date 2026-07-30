@@ -74,7 +74,7 @@ func TestNothingInThisPackageEverDeletesFromASource(t *testing.T) {
 	}
 	stillThere(t, "SetFolderIgnores")
 
-	if err := SetArchiveSchedule("nightly", "weekly", 2); err != nil {
+	if err := SetArchiveSchedule("nightly", "weekly", 2, nil); err != nil {
 		t.Fatal(err)
 	}
 	stillThere(t, "SetArchiveSchedule")

@@ -252,6 +252,11 @@ type ArchiveRow struct {
 	// Paused is a schedule deliberately stopped. Distinct from every failure
 	// state on this row: nothing is wrong, and nothing about the job is lost.
 	Paused bool `json:"paused,omitempty"`
+	// NoDefaultIgnores says this job packs everything, including the junk the
+	// live mirror skips. Reported so the edit form can show the setting it is
+	// about to change — a form that cannot show the current value is the
+	// prompt() box it replaced.
+	NoDefaultIgnores bool `json:"no_default_ignores,omitempty"`
 	// Keep is how many snapshots are retained, so the panel can offer to
 	// change it rather than sending somebody to config.toml.
 	Keep int `json:"keep,omitempty"`
@@ -928,6 +933,7 @@ func (col *Collector) Collect() Model {
 			row.CoversEverything = len(job.Folders) == 0
 			row.Paused = job.Paused
 			row.Keep = job.Keep
+			row.NoDefaultIgnores = job.NoDefaultIgnores
 			for _, f := range cfg.FoldersForArchive(job) {
 				row.Folders = append(row.Folders, f.Label)
 			}

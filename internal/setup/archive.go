@@ -127,12 +127,25 @@ func SetArchivePaused(name string, paused bool) error {
 	})
 }
 
-// SetArchiveSchedule changes how often a snapshot runs and how many are kept.
+// SetArchiveSchedule changes how often a snapshot runs, how many are kept, and
+// whether it packs everything or skips the usual junk.
 //
 // Reducing Keep does not delete anything here: the prune happens on the next
 // run, by the same code that has always done it, so a number typed by mistake
 // is a number you can correct before it costs you a snapshot.
-func SetArchiveSchedule(name, every string, keep int) error {
+//
+// WHY noDefaultIgnores IS A POINTER. It is the one field here that is a bool, and
+// "leave it alone" has to be distinguishable from "set it to false" — otherwise
+// every edit of the interval would silently switch a job that was packing
+// everything back to skipping node_modules.
+//
+// It was not editable at all until now, and that was the sharpest example of the
+// cost of asking these questions through browser prompt() boxes: a prompt can ask
+// for one line of text, so the wizard's third question simply had nowhere to live
+// after setup. On one real machine the setting was the difference between a 4.3GB
+// nightly zip and a 25GB one, and the only route to it was deleting the schedule
+// and retyping a password that by design cannot be recovered.
+func SetArchiveSchedule(name, every string, keep int, noDefaultIgnores *bool) error {
 	return editArchive(name, func(a *config.Archive) error {
 		if every != "" {
 			if _, err := config.ParseEvery(every); err != nil {
@@ -142,6 +155,9 @@ func SetArchiveSchedule(name, every string, keep int) error {
 		}
 		if keep > 0 {
 			a.Keep = keep
+		}
+		if noDefaultIgnores != nil {
+			a.NoDefaultIgnores = *noDefaultIgnores
 		}
 		return nil
 	})

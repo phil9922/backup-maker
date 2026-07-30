@@ -112,14 +112,14 @@ func TestChangingAScheduleRefusesAnUnusableInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := SetArchiveSchedule("nightly", "whenever", 0); err == nil {
+	if err := SetArchiveSchedule("nightly", "whenever", 0, nil); err == nil {
 		t.Error("an unusable interval was accepted")
 	}
 	if got := load(t).Archives[0].Every; got != "daily" {
 		t.Errorf("a refused edit still changed the schedule to %q", got)
 	}
 
-	if err := SetArchiveSchedule("nightly", "weekly", 7); err != nil {
+	if err := SetArchiveSchedule("nightly", "weekly", 7, nil); err != nil {
 		t.Fatal(err)
 	}
 	cfg := load(t)

@@ -935,7 +935,7 @@ function renderArchives(st) {
     // rather than sending the user to the command line.
     if (a.needs_password && !readOnly) {
       const btn = el('button', 'small-btn', 'enter password…');
-      btn.onclick = () => enterArchivePassword(a);
+      btn.onclick = () => openArchivePasswordForm(tr, a);
       state.appendChild(btn);
     }
     state.dataset.label = 'State';
@@ -1075,15 +1075,82 @@ function archiveProgressCell(a) {
   return cell;
 }
 
-async function enterArchivePassword(a) {
-  const pw = prompt(`Password for snapshot "${a.name}":`);
-  if (!pw) return;
-  const resp = await mutate('/api/archives/' + encodeURIComponent(a.name) + '/password', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: pw }),
-  });
-  if (!resp.ok) alert(await resp.text()); else refresh();
+// The password a snapshot needs before it can run, asked for in the row it
+// belongs to.
+//
+// It was a browser prompt(), which is the wrong shape for a secret in three ways
+// that matter. It shows what you type, so a password goes on screen in a box
+// anyone behind you can read; it cannot ask twice, so a typo becomes a schedule
+// that runs and writes zips nobody can open; and it carries no explanation, while
+// this is the one field in the product whose value cannot be recovered if it is
+// wrong. A form can do all three, and the one beside it already does.
+function openArchivePasswordForm(tr, a) {
+  for (const open of tr.parentElement.querySelectorAll('tr.ignore-row')) open.remove();
+  editingArchive = a.name;
+
+  const row = el('tr', 'ignore-row');
+  const cell = el('td');
+  cell.colSpan = 8;
+  row.appendChild(cell);
+
+  const form = el('div', 'share-form');
+  form.appendChild(el('label', 'muted',
+    `Password for the snapshots "${a.name}" writes`));
+  const pw = el('input');
+  pw.type = 'password';
+  pw.autocomplete = 'new-password';
+  const pw2 = el('input');
+  pw2.type = 'password';
+  pw2.placeholder = 'repeat it';
+  pw2.autocomplete = 'new-password';
+  form.append(pw, pw2);
+  form.appendChild(el('p', 'muted small',
+    'This schedule has no stored password, so it cannot run. Snapshot contents ' +
+    'are AES-256 encrypted: there is no way to recover this password, and nothing ' +
+    'inside a zip written with it can be read again without it — by you or by ' +
+    'anyone. Store it somewhere safe.'));
+
+  const err = el('p', 'bad');
+  err.hidden = true;
+  const actions = el('div', 'card-actions');
+  const save = el('button', 'small-btn primary', 'Save');
+  const cancel = el('button', 'small-btn', 'Cancel');
+  actions.append(save, cancel);
+
+  const close = () => { editingArchive = null; refresh(); };
+  cancel.onclick = close;
+  save.onclick = async () => {
+    if (pw.value === '') {
+      err.hidden = false;
+      setText(err, 'Enter the password this schedule should use.');
+      return;
+    }
+    // Asked twice, because a prompt() could not: a typo here produces zips that
+    // open for nobody.
+    if (pw.value !== pw2.value) {
+      err.hidden = false;
+      setText(err, 'The two passwords do not match.');
+      return;
+    }
+    save.disabled = true;
+    const resp = await mutate('/api/archives/' + encodeURIComponent(a.name) + '/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw.value }),
+    });
+    if (!resp.ok) {
+      err.hidden = false;
+      setText(err, await resp.text());
+      save.disabled = false;
+      return;
+    }
+    close();
+  };
+
+  form.append(err, actions);
+  cell.appendChild(form);
+  tr.after(row);
+  pw.focus();
 }
 
 // The lifetime odometer: how much backup-maker has copied since it was set up.
@@ -2186,6 +2253,27 @@ function openArchiveEditor(tr, a) {
   keep.value = String(a.keep || 5);
   form.appendChild(keep);
 
+  // WHAT IT PACKS. Chosen once in the wizard and then unreachable for ever,
+  // because a prompt() takes one line of text and there was nowhere to ask a
+  // third question. On one real machine it was the difference between a 4.3GB
+  // nightly zip and a 25GB one — node_modules alone was 11GB — and the only way
+  // to change it was to delete the schedule and retype a password that by design
+  // cannot be recovered. It is the clearest argument in the product for why an
+  // edit belongs in a form.
+  const everything = el('input');
+  everything.type = 'checkbox';
+  everything.checked = !!a.no_default_ignores;
+  const everythingLabel = el('label');
+  everythingLabel.append(everything,
+    document.createTextNode(' Include everything, even node_modules and build output'));
+  form.appendChild(everythingLabel);
+  form.appendChild(el('p', 'muted small',
+    'Off by default: snapshots skip the same junk the live mirror skips. Ticking ' +
+    'it seals a complete copy — useful for an archive you might restore years ' +
+    'later, when a package may no longer be downloadable. It makes each snapshot ' +
+    'much larger. This applies to snapshots written from now on; the zips already ' +
+    'on your destination are unchanged.'));
+
   form.appendChild(el('label', 'muted', 'New password (leave blank to keep the current one)'));
   const pw = el('input');
   pw.type = 'password';
@@ -2230,7 +2318,12 @@ function openArchiveEditor(tr, a) {
     let resp = await mutate('/api/archives/' + name + '/schedule', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ every: every.value, keep: n }),
+      // Sent explicitly every time, because the server treats an omitted value
+      // as "leave it alone" — which is what stops an interval change from
+      // silently switching a job back to skipping junk.
+      body: JSON.stringify({
+        every: every.value, keep: n, no_default_ignores: everything.checked,
+      }),
     });
     if (resp.ok && pw.value !== '') {
       resp = await mutate('/api/archives/' + name + '/password', {

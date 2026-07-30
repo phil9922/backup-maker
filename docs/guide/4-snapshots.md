@@ -55,14 +55,27 @@ None of them deletes a snapshot that has already been written.
   the row reads *paused* rather than looking like a failure. **Resume** puts it
   back. If the interval passed while it was paused, the next run happens at the
   next check rather than waiting a full period.
-- **Edit** asks how often it should run (`hourly`, `12h`, `daily`, `weekly`,
-  or a custom interval) and how many snapshots to keep. Lowering the keep count
-  deletes nothing immediately — the extra snapshots are pruned by the next run,
-  so a number typed by mistake can be corrected before it costs you anything.
-  It deliberately does **not** offer to change the password or the folder: the
-  password is never sent to the browser and so cannot be shown back, and
-  re-pointing a schedule at a different folder is exactly how somebody ends up
-  with a snapshot of the wrong thing. That is a new schedule, made on purpose.
+- **Edit** opens a form on the row itself, with everything about the schedule
+  that is safe to change:
+
+  - **How often it runs** — `hourly`, `12h`, `daily` or `weekly`, shown as a list
+    with the current setting already selected.
+  - **How many snapshots to keep.** Lowering it deletes nothing immediately: the
+    extra snapshots are pruned by the next run, so a number typed by mistake can
+    be corrected before it costs you anything.
+  - **Whether it packs everything**, including `node_modules` and build output.
+    This is the setting most worth knowing about, because it is usually the
+    difference between a few gigabytes and a great many — and until recently it
+    could only be chosen once, in the wizard, and never changed. Turning it off
+    does not shrink the zips already written; it applies from the next run.
+  - **A new password.** Changing it affects snapshots written from now on. The
+    zips already on your destination still open with the password that made them
+    — nothing is re-encrypted, and nothing already written becomes unreadable.
+    Keep the old password for as long as you keep those.
+
+  It deliberately does **not** offer to change the folder. Re-pointing a schedule
+  at different files is exactly how somebody ends up with a snapshot of the wrong
+  thing, and it has happened here. That is a new schedule, made on purpose.
 - **Stop** ends the schedule for good. It is called *stop* and not *delete*
   because the snapshots it already wrote are left exactly where they are, and
   still open with the password that made them. What is forgotten is
