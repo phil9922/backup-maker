@@ -1,0 +1,103 @@
+#!/bin/bash
+# backup-watch — a dead-man's switch for backup-maker, run ON THE DESTINATION.
+#
+# Why this exists: a machine cannot report its own death. Every health check
+# that runs on the computer being backed up fails in exactly the case that
+# matters — that computer being off, crashed, stolen, or wedged. This runs on
+# the always-on destination instead and watches for SILENCE.
+#
+# backup-maker writes backup-maker-status.html onto every drive/share
+# destination whenever what it says changes, AND at least every 15 minutes
+# regardless so its timestamp keeps moving. If that file stops being updated, the
+# machine that writes it has stopped backing up, whatever the reason. That single
+# check covers: powered off, crashed, daemon dead, daemon hung, network down,
+# drive unplugged, backup misconfigured.
+#
+# THE 15 MINUTES IS THE FLOOR THIS THRESHOLD MUST CLEAR. Before v0.1.12 the page
+# was rewritten every single minute, so almost any threshold worked. It is now
+# written on change plus a heartbeat, so BACKUP_WATCH_MAX_AGE_MIN must stay well
+# above 15 or a perfectly healthy machine will be reported dead. The default of
+# 360 leaves a 24x margin; do not lower it near 15 without checking
+# statusHeartbeat in internal/daemon/statuswriter.go first.
+#
+# Deliberately quiet in two situations, because neither is a failure:
+#   - the destination is not mounted yet (nothing has been set up)
+#   - no status page has EVER appeared (same)
+# It only complains when a page that WAS being updated goes stale.
+set -u
+
+ROOT="${BACKUP_WATCH_ROOT:-/mnt/backups}"
+MAX_AGE_MIN="${BACKUP_WATCH_MAX_AGE_MIN:-360}"   # 6 hours
+STATE_DIR="${BACKUP_WATCH_STATE:-/var/lib/backup-watch}"
+# Optional. Receives a POST when state changes. Keep the body content-free if it
+# leaves your network: the fact that something is wrong is the alert; the detail
+# is on the LAN.
+WEBHOOK="${BACKUP_WATCH_WEBHOOK:-}"
+
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+STATE_FILE="$STATE_DIR/state"
+previous=$(cat "$STATE_FILE" 2>/dev/null || echo "unknown")
+
+emit() {                    # emit <state> <message>
+    local state="$1" msg="$2"
+    if [ "$state" != "$previous" ]; then
+        logger -t backup-watch "$msg"
+        echo "$msg"
+        if [ -n "$WEBHOOK" ]; then
+            # ntfy takes the notification text from the BODY. Posting the JSON
+            # below to a topic URL does deliver, but it arrives on the phone as a
+            # line of raw JSON — which is the one place legibility matters most,
+            # since this alert is the only one that survives the backed-up machine
+            # dying. So ntfy endpoints get plain text, a title, and a priority:
+            # 5 for a failure (it breaks through Do Not Disturb) and 3 for the
+            # all-clear, matching what backup-maker's own ntfy sink does.
+            local style="${BACKUP_WATCH_WEBHOOK_STYLE:-}"
+            if [ -z "$style" ]; then
+                case "$WEBHOOK" in *ntfy*) style=ntfy ;; *) style=json ;; esac
+            fi
+            if [ "$style" = ntfy ]; then
+                local prio=3 title="Backups are current again"
+                if [ "$state" = stale ]; then prio=5; title="BACKUPS HAVE STOPPED"; fi
+                curl -fsS -m 10 -X POST "$WEBHOOK" \
+                     -H "Title: $title" -H "Priority: $prio" -H "Tags: floppy_disk" \
+                     -d "$msg" >/dev/null 2>&1 || true
+            else
+                curl -fsS -m 10 -X POST "$WEBHOOK" \
+                     -H 'Content-Type: application/json' \
+                     -d "{\"state\":\"$state\",\"message\":\"$msg\"}" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+    echo "$state" > "$STATE_FILE" 2>/dev/null || true
+}
+
+if ! mountpoint -q "$ROOT"; then
+    # Not a failure: the destination drive simply is not mounted here yet.
+    emit "unconfigured" "backup-watch: $ROOT is not mounted; nothing to watch yet."
+    exit 0
+fi
+
+# mindepth 2, so ONLY the per-machine pages match. The one at the destination
+# root is an index of the machines, written by whichever daemon last updated its
+# own page — so watching it adds no coverage, and it made the alert name the mount
+# directory as though it were a computer: "from my-laptop (6m) backups (6m)".
+# A dead-man's switch has to be legible at 3am.
+mapfile -t pages < <(find "$ROOT" -mindepth 2 -maxdepth 2 -name 'backup-maker-status.html' 2>/dev/null)
+if [ "${#pages[@]}" -eq 0 ]; then
+    emit "unconfigured" "backup-watch: no backup-maker status page under $ROOT yet."
+    exit 0
+fi
+
+stale=()
+for page in "${pages[@]}"; do
+    age_min=$(( ( $(date +%s) - $(stat -c %Y "$page") ) / 60 ))
+    if [ "$age_min" -gt "$MAX_AGE_MIN" ]; then
+        stale+=("$(basename "$(dirname "$page")") (${age_min}m)")
+    fi
+done
+
+if [ "${#stale[@]}" -gt 0 ]; then
+    emit "stale" "BACKUPS HAVE STOPPED: no update for over $((MAX_AGE_MIN/60))h from ${stale[*]}. That machine is off, broken, or no longer backing up."
+else
+    emit "ok" "backup-watch: backups are current again."
+fi
