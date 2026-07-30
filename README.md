@@ -238,7 +238,9 @@ survive a logout as well as a reboot, and what does and doesn't get copied.
 ## Documentation
 
 The full set lives in [docs/](docs/README.md), in roughly the order you'll need
-it.
+it. It is also built into the binary: click **Docs** in the dashboard, or run
+`backup-maker docs --export ./manual` to write it out as web pages you can read
+with no daemon, no web server and no internet.
 
 **Getting started**
 

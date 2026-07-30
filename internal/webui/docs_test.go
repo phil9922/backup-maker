@@ -145,6 +145,39 @@ func TestDocsRefuseTraversalAndUnknownPages(t *testing.T) {
 	}
 }
 
+// THE FIRST LINK ON THE DOCUMENTATION INDEX is "read the guide", written
+// `guide/` so it works on GitHub. It 404'd here for as long as this viewer has
+// existed: a directory is neither Markdown nor an image, so the handler
+// appended .md and looked for `guide.md`. A folder means its first page in
+// reading order.
+func TestALinkToAFolderOpensItsFirstPage(t *testing.T) {
+	withDocs(t)
+	for _, p := range []string{"/docs/guide/", "/docs/guide"} {
+		rec := getDocs(t, p)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d, want the guide's first page", p, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "1. Installing") {
+			t.Errorf("GET %s did not open the first page of the guide", p)
+		}
+	}
+}
+
+// And the link itself has to be readdressed, or it never reaches the handler
+// above in a form that works.
+func TestAFolderLinkIsRewrittenToAPage(t *testing.T) {
+	prev := docsRoot
+	t.Cleanup(func() { docsRoot = prev })
+	SetDocs(fstest.MapFS{
+		"docs/README.md":          {Data: []byte("# Start\n\nRead [the guide](guide/).\n")},
+		"docs/guide/1-install.md": {Data: []byte("# 1. Installing\n")},
+	})
+	body := getDocs(t, "/docs").Body.String()
+	if !strings.Contains(body, `href="/docs/guide/1-install.md"`) {
+		t.Errorf("the folder link was not resolved to a page:\n%s", body)
+	}
+}
+
 // A build that somehow carries no documentation says so rather than panicking.
 func TestDocsAbsentIsHandled(t *testing.T) {
 	prev := docsRoot

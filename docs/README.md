@@ -9,6 +9,17 @@ You can also read all of this **inside backup-maker itself, with no internet
 connection**: open the dashboard and click **Docs**. These pages are built into
 the binary.
 
+And when the daemon is not running — a fresh machine, a rescue boot, or a backup
+drive in your hand and nothing else — write the manual out as ordinary web
+pages and open it in any browser:
+
+```sh
+backup-maker docs --export ./manual     # then open manual/index.html
+```
+
+That directory needs no daemon, no web server and no internet, and can be
+copied anywhere, including onto a backup destination.
+
 ---
 
 ## The guide — read in order
@@ -56,4 +67,4 @@ Read these when they apply to you, not before.
 ---
 
 Looking for what backup-maker *is*, rather than how to use it? That is the
-[project overview](../README.md).
+[project overview](https://github.com/phil9922/backup-maker#readme).
