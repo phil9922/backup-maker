@@ -206,15 +206,23 @@ function updateRow(tr, r, folder, first) {
   // A scan with a denominator drives a real bar. Stripes are only for the part
   // before the source walk has finished, when there genuinely is no number.
   const scanning = r.state === 'scanning';
+  // A PHASE ONLY MEANS ANYTHING WHILE THE ROW IS SCANNING. This asked about
+  // r.phase alone, so a phase left set by the last pass went on being narrated
+  // — an idle, fully-backed-up folder showed "checking for deleted files:
+  // 72,555" beside an animated bar for as long as nothing changed. The engine no
+  // longer leaves it set (endScan), and this no longer trusts it if it is: the
+  // CLI has always required the scanning state before printing a phase, and the
+  // two surfaces disagreeing is what let it go unnoticed.
+  const tidying = scanning && r.phase === 'tidying';
   // A phase with no denominator gets stripes rather than a full bar: a solid
   // 100% that sits still for minutes is what made this look stalled.
   c.fill.classList.toggle('indeterminate',
-    (scanning && !r.total_bytes && !r.scan_total) || r.phase === 'tidying');
+    (scanning && !r.total_bytes && !r.scan_total) || tidying);
   if (scanning && !r.total_bytes && r.scan_total > 0) {
     c.fill.style.width = Math.min(100, ((r.scanned_files || 0) / r.scan_total) * 100) + '%';
   }
 
-  if (r.phase === 'tidying') {
+  if (tidying) {
     // The tail of a pass: looking for things deleted from the source. It has
     // no denominator and it is where the minutes go on a network destination,
     // so it says what it is doing rather than leaving a full amber bar to be

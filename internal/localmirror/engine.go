@@ -349,6 +349,9 @@ func (e *Engine) sync() {
 	e.scanTotal.Store(0) // unknown until the source walk finishes
 	e.beginPass()
 	copied, removed, err := e.reconcile()
+	// However this pass ended, it is no longer scanning. Deferred rather than
+	// written at each exit so a return added later cannot forget it.
+	defer e.endScan()
 	if err != nil {
 		if IsNoSpace(err) {
 			// Reclaiming already ran and still couldn't free enough, or there
@@ -672,6 +675,32 @@ func (e *Engine) endTransfer() {
 	e.doneFiles, e.totalFiles = 0, 0
 	e.doneBytes, e.totalBytes = 0, 0
 	e.inFlight.Store(0)
+}
+
+// endScan puts the scan counters away when a pass stops scanning, for the same
+// reason endTransfer exists: a number left on screen describes work that is no
+// longer happening.
+//
+// THE BUG THIS FIXES, and it is the one people report. phase was only ever
+// cleared by beginTransfer — that is, only when the pass found something to
+// copy. A pass that found nothing left phase on "tidying" for ever, and the
+// dashboard narrates the phase whenever it is set: a folder that was fully
+// backed up and completely idle sat there saying "checking for deleted files:
+// 72,555" beside an animated bar, indefinitely, until something changed.
+//
+// So the machine looked busy and stuck at the same time, which is exactly how it
+// gets described — "it hasn't backed up in ten minutes and it's just sitting on
+// checking for deleted files". Nothing was wrong: it had nothing to do, and the
+// screen was still describing the last thing it did.
+//
+// Called on every exit from a pass, including the failures. An offline
+// destination that stopped mid-listing must not keep narrating the listing.
+func (e *Engine) endScan() {
+	e.scanned.Store(0)
+	e.scanTotal.Store(0)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.phase = ""
 }
 
 // calibrateMtime probes whether the target honors Chtimes: write a scratch
