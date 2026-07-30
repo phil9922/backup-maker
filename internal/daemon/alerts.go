@@ -56,6 +56,16 @@ type alerter struct {
 	// it a webhook that stopped working would be silent — and silent alerting
 	// is the failure this whole feature exists to prevent.
 	delivered func([]notify.Result)
+	// recorded is called once per alert with what was raised and where it got
+	// to, for the history the user can read back.
+	//
+	// HUNG OFF send() RATHER THAN OFF EACH EMISSION POINT, which is the only
+	// reason it is trustworthy: there are nine places in this file that raise an
+	// alert and every one of them ends up here, so a tenth added later is
+	// recorded without anybody remembering to record it. A per-call-site hook is
+	// a hook somebody forgets, and the alert it forgets is the one missing from
+	// the history on the day it is read.
+	recorded func(config.AlertRecord)
 	// kinds mirrors [general.alerts]: which categories the user still wants.
 	// The zero value means every category on, which is what makes an
 	// unconfigured daemon behave exactly as it did before the setting existed.
@@ -351,13 +361,26 @@ func (a *alerter) nameClashResolved(name, where string) {
 // notifier bounds itself, and this bounds the daemon: alerts are transitions,
 // so a handful of goroutines a day is the whole cost.
 func (a *alerter) send(al alert) {
+	// Stamped before the goroutine, so the history is ordered by when the alert
+	// was RAISED rather than by how long each delivery happened to take.
+	raised := time.Now()
 	go func() {
+		rec := config.AlertRecord{
+			At: raised, Title: al.title, Body: al.body,
+			Urgent: al.urgency == notify.Critical,
+		}
 		defer func() {
 			// A notification must never be the thing that takes the daemon
 			// down. Nothing here is expected to panic; the point is that a
 			// backup process cannot afford to find out it was wrong.
 			if r := recover(); r != nil {
 				a.log.Debug("desktop notification panicked", "recovered", r)
+			}
+			// Recorded on EVERY path out, including the ones that delivered
+			// nothing. An alert nobody could deliver is the most important line
+			// this history has.
+			if a.recorded != nil {
+				a.recorded(rec)
 			}
 		}()
 		sink := a.sink()
@@ -366,12 +389,26 @@ func (a *alerter) send(al alert) {
 		}
 		fan, ok := sink.(notify.Multi)
 		if !ok {
-			if err := sink.Notify(context.Background(), al.urgency, al.title, al.body); err != nil {
+			err := sink.Notify(context.Background(), al.urgency, al.title, al.body)
+			// The only non-fan-out sink this daemon ever holds is the desktop
+			// one it is constructed with, before the first config apply swaps
+			// in the fan-out — so that is what this outcome belongs to.
+			if err != nil {
+				rec.Failed = []string{"desktop"}
 				a.log.Debug("could not deliver an alert", "title", al.title, "err", err)
+			} else {
+				rec.Delivered = []string{"desktop"}
 			}
 			return
 		}
 		results := fan.Deliver(context.Background(), al.urgency, al.title, al.body)
+		for _, r := range results {
+			if r.Err == nil {
+				rec.Delivered = append(rec.Delivered, r.Method)
+			} else {
+				rec.Failed = append(rec.Failed, r.Method)
+			}
+		}
 		for _, r := range results {
 			if r.Err == nil {
 				continue

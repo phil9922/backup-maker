@@ -407,6 +407,45 @@ func TestNetworkStatusHidesTheLifetimeTotal(t *testing.T) {
 	}
 }
 
+// The alert history is a timeline of when this household's backups have been
+// broken and for how long, and each entry quotes the fault by destination name.
+// The network view publishes the CURRENT state of every destination, which is
+// the part somebody in another room can act on; how often it has failed before
+// is not, and that view has no password.
+func TestNetworkStatusHidesTheAlertHistory(t *testing.T) {
+	full := map[string]any{
+		"machine_name": "workstation",
+		"recent_alerts": []any{
+			map[string]any{
+				"at":     "2026-07-29T22:38:00Z",
+				"title":  "Backups are not reaching backup-pi",
+				"body":   "Last seen 8d ago. Nothing has been backed up there since.",
+				"urgent": true,
+			},
+		},
+	}
+
+	var reached bool
+	h := lanReadOnlyOpen(everythingHandler(&reached), func() any { return full })
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	body := rec.Body.String()
+
+	for _, leaked := range []string{
+		"recent_alerts",
+		"Backups are not reaching",
+		"Last seen 8d ago",
+		"2026-07-29T22:38:00Z",
+	} {
+		if strings.Contains(body, leaked) {
+			t.Errorf("the network view published %q from the alert history: %s", leaked, body)
+		}
+	}
+	if !strings.Contains(body, "workstation") {
+		t.Error("the view still has to be useful")
+	}
+}
+
 // lanReadOnlyOpen is lanReadOnly with the device gate off, which is what every
 // test here that predates approved-device mode assumes.
 func lanReadOnlyOpen(next http.Handler, status func() any) http.Handler {

@@ -135,6 +135,65 @@ type State struct {
 	BytesCopiedTotal uint64    `json:"bytes_copied_total,omitempty"`
 	FilesCopiedTotal uint64    `json:"files_copied_total,omitempty"`
 	CountingSince    time.Time `json:"counting_since,omitzero"`
+	// RecentAlerts is what this machine has told you, newest last. See
+	// AlertRecord.
+	RecentAlerts []AlertRecord `json:"recent_alerts,omitempty"`
+}
+
+// MaxAlertHistory is how many alerts are kept. Alerts fire on transitions, not
+// on a timer, so fifty of them is months of an ordinary machine and still a few
+// kilobytes — and the ones that matter are read within a day or two of being
+// raised.
+const MaxAlertHistory = 50
+
+// AlertRecord is one alert this machine raised, kept so there is a record of
+// what happened and not only of what is happening.
+//
+// WHY IT IS PERSISTED, unlike the delivery outcome shown beside it on the
+// dashboard, and the contrast is the whole design. status.DeliveryInfo answers
+// "is the webhook working right now", which a restart must not answer out of
+// last week's memory. This answers "what has this machine told me, and did it
+// get out" — which is history. A desktop notification is gone the moment it is
+// dismissed, a phone notification the moment it is swiped, and on a headless
+// machine neither was ever shown; without this there is no record anywhere that
+// backups stopped at 3am and started again at 6.
+type AlertRecord struct {
+	At    time.Time `json:"at"`
+	Title string    `json:"title"`
+	Body  string    `json:"body,omitempty"`
+	// Urgent marks the alerts that mean something is wrong, as opposed to an
+	// all-clear or a piece of news. It is stored rather than re-derived from the
+	// title, because the title is prose and prose gets rewritten.
+	Urgent bool `json:"urgent,omitempty"`
+	// Delivered names the methods that took this alert, Failed the ones that
+	// were tried and could not.
+	//
+	// BOTH EMPTY MEANS NOTHING WAS EVEN TRIED — no desktop, no webhook, no ntfy
+	// — which is the default state of a headless machine and exactly the case
+	// worth being able to see. An alert raised and delivered nowhere is the
+	// silence this whole feature exists to break, and it is invisible
+	// everywhere else.
+	Delivered []string `json:"delivered,omitempty"`
+	Failed    []string `json:"failed,omitempty"`
+}
+
+// RecordAlert adds one alert to the history, keeping it in time order and
+// discarding the oldest past MaxAlertHistory.
+//
+// Inserted by time rather than appended, because delivery happens on its own
+// goroutine: two alerts raised a moment apart can finish out of order, and a
+// history that is not in order is one somebody has to read twice to trust.
+func (s *State) RecordAlert(r AlertRecord) {
+	i := len(s.RecentAlerts)
+	for i > 0 && s.RecentAlerts[i-1].At.After(r.At) {
+		i--
+	}
+	s.RecentAlerts = append(s.RecentAlerts, AlertRecord{})
+	copy(s.RecentAlerts[i+1:], s.RecentAlerts[i:])
+	s.RecentAlerts[i] = r
+	if n := len(s.RecentAlerts); n > MaxAlertHistory {
+		s.RecentAlerts = append([]AlertRecord(nil), s.RecentAlerts[n-MaxAlertHistory:]...)
+	}
 }
 
 // ScanMark is what one folder × destination pair learned on its last COMPLETED

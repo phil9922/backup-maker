@@ -55,7 +55,16 @@ type Model struct {
 	Receive         ReceiveInfo             `json:"receive"`
 	ReceivedFolders []ReceivedFolderInfo    `json:"received_folders,omitempty"`
 	PendingSources  []pairing.PendingSource `json:"pending_sources,omitempty"`
-	Totals          Totals                  `json:"totals"`
+	// RecentAlerts is what this machine has told you, newest first — the record
+	// that a desktop notification stops being the moment it is dismissed.
+	//
+	// STRIPPED FROM THE NETWORK VIEW: an alert body names destinations and
+	// quotes failures, and the list as a whole is a timeline of when this
+	// household's backups have been broken and for how long. The current state
+	// of every destination is already on that view, which is the part somebody
+	// in another room can act on.
+	RecentAlerts []config.AlertRecord `json:"recent_alerts,omitempty"`
+	Totals       Totals               `json:"totals"`
 	// Settings is what the dashboard's Settings panel renders and edits.
 	// STRIPPED FROM THE NETWORK VIEW: which alerts this household has
 	// switched off is a description of how closely they are watching, and
@@ -532,6 +541,8 @@ type Collector struct {
 	UpdateComparable func() bool
 	// Delivery reports how each delivery method last performed.
 	Delivery func() []DeliveryInfo
+	// RecentAlerts reports what this machine has raised, newest first.
+	RecentAlerts func() []config.AlertRecord
 }
 
 // shortCommit is the first seven characters of the build's git SHA, or "" when
@@ -612,6 +623,9 @@ func (col *Collector) Collect() Model {
 	}
 	if col.Delivery != nil {
 		m.Settings.Delivery = col.Delivery()
+	}
+	if col.RecentAlerts != nil {
+		m.RecentAlerts = col.RecentAlerts()
 	}
 	if col.LANViewURL != nil {
 		m.Settings.LANViewURL = col.LANViewURL()

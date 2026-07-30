@@ -938,6 +938,19 @@ select {
   background: currentColor;
 }
 
+/* --- recently reported -------------------------------------------------
+   The alert history, beneath the verdict. The state classes are spelled out
+   for this surface as well: `.dot::before` paints itself in currentColor, so a
+   dot whose span has an `ok`/`bad` class no rule can reach is drawn in the body
+   colour — the exact fault that made every destination state look healthy for
+   two releases. TestStateColoursReachTheWordTheyDescribe covers these too. */
+.alert-row { display: flex; flex-direction: column; gap: var(--s2); }
+.alert-head { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
+.alert-head .ok { color: var(--ok); }
+.alert-head .bad { color: var(--bad); }
+.alert-head strong { color: var(--fg); }
+.alert-row p { margin: 0; }
+
 /* --- type icons -------------------------------------------------------- */
 .type-icon { width: 1rem; height: 1rem; flex: none; color: var(--muted); }
 .card .type-icon { margin-top: 0.15rem; }

@@ -230,6 +230,41 @@ is never allowed to hide behind a collapsed section.
 The panel is not shown on the read-only network view, which cannot change
 anything and is not told what you have switched off.
 
+### What it has already told you
+
+Every alert above is a moment in time. A desktop notification is gone once you
+dismiss it, a phone notification once you swipe it, and a machine with no
+desktop never showed one at all — so by default there was no record anywhere
+that backups stopped at 3am and came back at 6.
+
+There is now. The dashboard shows **Recently reported** beneath the verdict
+whenever something was raised in the last week, and the full list is:
+
+```sh
+backup-maker alerts             # the last ten, newest first
+backup-maker alerts --all       # everything kept
+```
+
+Each entry says where it actually got to:
+
+```
+!! 3d ago       Backups are not reaching backup-pi
+                Last seen 8d ago. Nothing has been backed up there since.
+                27 Jul 2026, 03:14, delivered by desktop, ntfy
+```
+
+**The line to look for is "delivered nowhere".** It means the alert was raised
+and nothing carried it — no desktop, no webhook, no phone — which is the state
+where a backup can fail without you ever hearing about it. It is the normal
+state of a machine nobody has set delivery up on, a headless Raspberry Pi
+included, and it is invisible everywhere else in the program.
+
+The last fifty are kept, in `state.json`. Alerts fire on changes rather than on
+a timer, so fifty is months of an ordinary machine. They are **not** published
+to the read-only network view: the current state of every destination is there
+already, and how often yours have failed before is not something somebody in
+another room needs.
+
 ## Bookmarking the dashboard
 
 `http://127.0.0.1:<dashboard_port>` — 8666 unless you changed it — is a

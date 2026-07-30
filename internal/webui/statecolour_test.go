@@ -34,9 +34,9 @@ func TestStateColoursReachTheWordTheyDescribe(t *testing.T) {
 		// selectors that must all appear, one per place the class is used
 		selectors []string
 	}{
-		{"ok", []string{"td .ok", ".card-meta .ok"}},
+		{"ok", []string{"td .ok", ".card-meta .ok", ".alert-head .ok"}},
 		{"busy", []string{"td .busy", ".card-meta .busy"}},
-		{"bad", []string{"td .bad", ".card-meta .bad"}},
+		{"bad", []string{"td .bad", ".card-meta .bad", ".alert-head .bad"}},
 		{"paused", []string{"#archive-rows td .paused"}},
 	} {
 		if !strings.Contains(js, "'"+c.class+"'") {

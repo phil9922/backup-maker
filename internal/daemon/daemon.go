@@ -257,6 +257,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	d.delivery = newDeliveryLog()
 	d.alerts = newAlerter(notify.Desktop(), log, cfg.General.DesktopAlerts)
 	d.alerts.delivered = d.delivery.record
+	d.alerts.recorded = d.recordAlert
 	// Both built before applyConfig, which hands them to the engines it starts.
 	// The marks come first: the tally's flush is what writes them out.
 	d.marks = newSyncMarks(state)
@@ -329,6 +330,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		UpdateCheckedAt:    d.updateCheckedAt,
 		UpdateComparable:   d.updateComparable,
 		Delivery:           d.delivery.snapshot,
+		RecentAlerts:       d.alertHistory,
 	}
 	// Wake-on-LAN for offline targets that opted in with a MAC address.
 	go d.wakeLoop(ctx, collector.Collect)

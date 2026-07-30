@@ -201,6 +201,13 @@ func RedactForNetwork(v any) any {
 	// room can act on. It is also the one part of the model attached to a
 	// permanent-delete action, which this view may never reach.
 	delete(m, "retired")
+	// What this machine has alerted about, and when. An alert body names
+	// destinations and quotes the failure that caused it, and the list as a
+	// whole is a timeline of when this household's backups have been broken and
+	// for how long — which is a description of how well watched they are, not a
+	// health fact. The CURRENT state of every destination is on this view
+	// already, and that is the part somebody in another room can act on.
+	delete(m, "recent_alerts")
 	// The lifetime volume figure is a measurement of the household, not a
 	// health fact: it says roughly how much data lives here and how fast it
 	// churns, and nobody watching from another room can act on it. Same reason

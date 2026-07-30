@@ -344,6 +344,23 @@
       </div>
     </section>
 
+    <!-- What this machine has told you, and whether it got out.
+         BENEATH THE VERDICT AND ABOVE THE DETAIL, because "how are things now"
+         is this page's job and "what happened while I was away" is the next
+         question — not one to go hunting for in a settings panel. It renders
+         only when there is something from the last week, so a machine with
+         nothing to report shows nothing at all rather than an empty box that
+         teaches you to stop looking.
+         A desktop notification is gone when it is dismissed and a phone one
+         when it is swiped; on a machine with no desktop neither was ever shown.
+         Without this there is no record anywhere that backups stopped at 3am
+         and came back at 6. -->
+    <section id="alerts-section" hidden>
+      <h2>Recently reported</h2>
+      <ul id="alerts-list" class="cards"></ul>
+      <p id="alerts-more" class="muted small" hidden></p>
+    </section>
+
 
     <!-- The two kinds of backup, kept apart.
          They used to share one "Folders being protected" list, which said

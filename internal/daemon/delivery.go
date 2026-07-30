@@ -5,6 +5,7 @@ package daemon
 import (
 	"sync"
 
+	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/notify"
 	"github.com/phil9922/backup-maker/internal/status"
 )
@@ -61,6 +62,39 @@ func (d *deliveryLog) snapshot() []status.DeliveryInfo {
 		for j := i; j > 0 && out[j].Method < out[j-1].Method; j-- {
 			out[j], out[j-1] = out[j-1], out[j]
 		}
+	}
+	return out
+}
+
+// recordAlert keeps one raised alert in the history and writes it out.
+//
+// Persisted immediately rather than batched like the byte counters, because the
+// events worth reading back are exactly the ones a machine may not survive: a
+// destination going stale before a crash, a snapshot failing before a reboot.
+// Alerts fire on transitions, so this is a handful of writes a day rather than
+// the per-file storm the tally exists to avoid.
+//
+// Takes d.mu because it mutates the state the rest of the daemon shares, and
+// takes it AFTER delivery has finished rather than around it — a desktop that
+// never answers must not be holding the lock the watchdog reads liveness from.
+func (d *daemon) recordAlert(r config.AlertRecord) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.state.RecordAlert(r)
+	if err := d.state.Save(); err != nil {
+		d.log.Debug("could not save the alert history", "err", err)
+	}
+}
+
+// alertHistory is what the dashboard and `backup-maker alerts` read, newest
+// first — the order somebody scanning for "what just happened" wants, and the
+// reverse of how it is stored.
+func (d *daemon) alertHistory() []config.AlertRecord {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]config.AlertRecord, 0, len(d.state.RecentAlerts))
+	for i := len(d.state.RecentAlerts) - 1; i >= 0; i-- {
+		out = append(out, d.state.RecentAlerts[i])
 	}
 	return out
 }

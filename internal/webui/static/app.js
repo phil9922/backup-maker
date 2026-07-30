@@ -1224,6 +1224,78 @@ function renderPending(sources) {
   }
 }
 
+// How long an alert stays on the dashboard. Beyond this it is still kept and
+// still listed by `backup-maker alerts`; it just stops occupying the top of a
+// page whose job is the present.
+const ALERT_SHOWN_FOR_MS = 7 * 24 * 3600 * 1000;
+const ALERTS_SHOWN = 5;
+
+function renderAlerts(st) {
+  const sec = document.getElementById('alerts-section');
+  // Never on the network view: the model strips recent_alerts for it, and this
+  // is the belt to that braces — an alert body names destinations and quotes
+  // failures.
+  const all = (readOnly ? [] : st.recent_alerts) || [];
+  const cutoff = Date.now() - ALERT_SHOWN_FOR_MS;
+  const recent = all.filter((a) => {
+    const t = new Date(a.at).getTime();
+    return !isNaN(t) && t >= cutoff;
+  });
+  if (recent.length === 0) {
+    sec.hidden = true;
+    return;
+  }
+  sec.hidden = false;
+
+  const list = document.getElementById('alerts-list');
+  list.replaceChildren();
+  for (const a of recent.slice(0, ALERTS_SHOWN)) {
+    const li = el('li', 'card alert-row');
+    const head = el('div', 'alert-head');
+    head.appendChild(el('span', 'dot ' + (a.urgent ? 'bad' : 'ok')));
+    head.appendChild(el('strong', null, a.title));
+    // Relative for reading at a glance, absolute on hover — "3d ago" is the
+    // useful form and the exact time is what somebody correlating with a log
+    // actually needs.
+    const when = el('span', 'muted small', humanTime(a.at));
+    when.title = new Date(a.at).toLocaleString();
+    head.appendChild(when);
+    li.appendChild(head);
+    if (a.body) li.appendChild(el('p', 'muted', a.body));
+    li.appendChild(deliveryNote(a));
+    list.appendChild(li);
+  }
+
+  const more = document.getElementById('alerts-more');
+  const hidden = all.length - Math.min(recent.length, ALERTS_SHOWN);
+  more.hidden = hidden <= 0;
+  more.textContent = hidden > 0
+    ? `${hidden} older — see them with: backup-maker alerts --all`
+    : '';
+}
+
+// deliveryNote says where one alert actually got to.
+//
+// THE EMPTY CASE IS WHY THIS COLUMN EXISTS. An alert raised with no delivery
+// method switched on went nowhere at all, and that is invisible everywhere else
+// in the program — it is precisely the silence the alerting feature exists to
+// break, so it is drawn as a fault rather than as a blank.
+function deliveryNote(a) {
+  const ok = a.delivered || [];
+  const bad = a.failed || [];
+  if (ok.length === 0 && bad.length === 0) {
+    return el('p', 'small bad', 'Delivered nowhere — no delivery method was switched on.');
+  }
+  if (bad.length === 0) {
+    return el('p', 'small muted', 'Delivered by ' + ok.join(', ') + '.');
+  }
+  if (ok.length === 0) {
+    return el('p', 'small bad', 'Delivered nowhere — ' + bad.join(', ') + ' failed.');
+  }
+  return el('p', 'small muted',
+    'Delivered by ' + ok.join(', ') + '; ' + bad.join(', ') + ' failed.');
+}
+
 async function acceptPair(p, btn) {
   if (!confirm(`Approve "${p.name || 'unnamed'}"?\n\n${p.device_id}\n\nIt will be able to store backups on this computer. Only approve it if that ID matches what "backup-maker pair" prints on the other machine.`)) return;
   btn.disabled = true;
@@ -1441,6 +1513,8 @@ function applyStatus(st) {
   } else {
     recSec.hidden = true;
   }
+
+  renderAlerts(st);
 
   const pendSec = document.getElementById('pending-section');
   if (st.pending_sources && st.pending_sources.length > 0) {
