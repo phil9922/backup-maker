@@ -364,9 +364,11 @@ beside the backups:
   ├─ backup-maker-status.html          ← open this from any device
   ├─ workstation/
   │    ├─ backup-maker-status.html     ← that computer's own report
+  │    ├─ .backup-maker-manual/        ← this manual, readable off the drive
   │    └─ code/…
   ├─ laptop/
   │    ├─ backup-maker-status.html
+  │    ├─ .backup-maker-manual/
   │    └─ documents/…
   └─ backup-maker-archives/…
 ```
@@ -399,7 +401,7 @@ a day, whether or not anything had happened.
 minutes ago"*, recomputed in your browser each time you open it. Past an hour it
 stops presenting itself as status at all:
 
-![The status page written to a destination, shown three days stale: a red banner reading "This page is out of date — treat it as history, not status", explaining that nothing has been reported for 3 days and that the backups themselves are still on the drive. Beneath it every folder still reads "backed up" in green as of when it was written, a destination that could not report its capacity says "free space unavailable — reserve not enforced" in red, and a footer notes that paths and addresses are deliberately omitted](../screenshots/11-status-page.png)
+![The status page written to a destination, shown three days stale: a red banner reading "This page is out of date — treat it as history, not status", explaining that nothing has been reported for 3 days and that the backups themselves are still on the drive. Beneath it every folder still reads "backed up" in green as of when it was written, a destination that could not report its capacity says "free space unavailable — reserve not enforced" in red, a panel below asks "Need to get these files back, or set up a new computer?" and links to the manual on the drive, and a footer notes that paths and addresses are deliberately omitted](../screenshots/11-status-page.png)
 
 That warning is the whole point. A page cheerfully reporting "backed up" from
 a machine that died last week is worse than no page: it is false reassurance,
@@ -408,6 +410,26 @@ backing up three days ago is the single most valuable thing this can tell you.
 
 Like the network view, it carries folder **labels** and destination **names**
 only — never paths or addresses.
+
+### The manual is on the drive too
+
+The page links to a copy of this whole manual sitting beside it, in
+`.backup-maker-manual/`. Same reasoning as the page itself: the documentation is
+built into the binary and read in the dashboard, which is exactly what you have
+not got when you are holding a drive and the computer that wrote it will not
+start. Open `index.html` in any browser — no daemon, no web server, no internet.
+
+It is written once per version, not on the status page's rhythm: it is a couple
+of megabytes, nearly all of it screenshots, and it only changes when you upgrade.
+A destination that was offline or full gets it on a later attempt, and **the page
+links to it only where it is actually there** — an offer to read something that
+is not on the drive would be worse than no offer.
+
+You can also write it anywhere else yourself, which is the same manual:
+
+```bash
+backup-maker docs --export ./manual     # then open manual/index.html
+```
 
 ### Serving the status page over HTTP
 

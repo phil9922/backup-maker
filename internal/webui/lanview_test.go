@@ -163,7 +163,8 @@ func TestNetworkStatusHidesPathsAndAddresses(t *testing.T) {
 		},
 		"targets": []any{
 			map[string]any{"name": "nas", "state": "in sync", "location": "//192.168.1.50/backups",
-				"free_bytes": 335007449088.0, "total_bytes": 1979120929792.0,
+				"description": "old external in the hall cupboard",
+				"free_bytes":  335007449088.0, "total_bytes": 1979120929792.0,
 				"space_reported_at": "2026-07-24T10:00:00Z", "min_free_bytes": 21474836480.0},
 		},
 		"rows": []any{
@@ -193,6 +194,10 @@ func TestNetworkStatusHidesPathsAndAddresses(t *testing.T) {
 		"total_bytes",             // how big the hardware is
 		"space_reported_at",
 		"min_free_bytes",
+		// Which drive it physically is, and where in the house. Free text about
+		// the hardware, written for somebody standing in front of it — which is
+		// not who reads this view.
+		"old external in the hall cupboard",
 	} {
 		if strings.Contains(body, secret) {
 			t.Errorf("network status leaked %q", secret)

@@ -3,6 +3,8 @@
 package webui
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +12,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/phil9922/backup-maker/internal/version"
 )
 
 // exportMarker is written at the root of an export and is what lets a later
@@ -32,6 +36,122 @@ type ExportedDocs struct {
 	Assets int
 }
 
+// DocsFile is one file of the exported manual: a slash-separated path relative
+// to the root of the export, and the bytes that go in it.
+type DocsFile struct {
+	Name string
+	Data []byte
+	// Page marks a rendered documentation page rather than an asset carried
+	// along beside it, which is the only distinction any caller has needed —
+	// "16 pages and 15 files" is what an export reports.
+	Page bool
+}
+
+// BuildDocs renders the whole manual into memory as the files an export writes.
+//
+// IN MEMORY, AND ON PURPOSE. The same set of files is written to more than one
+// place — a directory the user named, and every backup destination — and the
+// pages are a pure function of the build, so rendering them once per write
+// target would be the same work repeated. It is a couple of megabytes, almost
+// all of it screenshots, held only for as long as it takes to write them.
+//
+// Nothing here touches the filesystem, so the two writers cannot drift in what
+// they produce; they differ only in where it goes and what they are allowed to
+// overwrite.
+func BuildDocs() ([]DocsFile, error) {
+	fsys := docsFiles()
+	if fsys == nil {
+		return nil, errors.New("this build carries no documentation to export")
+	}
+	var out []DocsFile
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") {
+			raw, err := fs.ReadFile(fsys, p)
+			if err != nil {
+				return err
+			}
+			out = append(out, DocsFile{Name: docsFileName(p), Data: raw})
+			return nil
+		}
+		page, err := renderDocsPage(fsys, p, exportedDocsPaths(p))
+		if err != nil {
+			return fmt.Errorf("%s: %w", p, err)
+		}
+		out = append(out, DocsFile{Name: docsFileName(p), Data: []byte(page), Page: true})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// The pages are styled by the dashboard's own stylesheet, so it travels
+	// with them; without it the export is readable but looks like nothing.
+	for _, name := range []string{"style.css", "favicon.ico"} {
+		raw, err := fs.ReadFile(staticFS, path.Join("static", name))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, DocsFile{Name: name, Data: raw})
+	}
+	return out, nil
+}
+
+// DocsFingerprint identifies the manual this build carries, so somewhere
+// holding a copy can tell whether it is the current one without comparing two
+// megabytes of files.
+//
+// COMPUTED FROM THE DOCUMENTATION ITSELF, not from the version string. A build
+// that changes a page keeps the same version number for as long as it is
+// unreleased, and the copy on a destination would then never be replaced — the
+// one failure mode where being out of date is invisible, because a manual looks
+// exactly as convincing whether or not it describes this program. The build is
+// mixed in as well, since the renderer is Go code that the pages depend on.
+//
+// It hashes the sources rather than the rendered output so nothing has to be
+// rendered to answer the question; it is asked periodically and answered "yes,
+// that is what is already there" nearly every time.
+func DocsFingerprint() (string, error) {
+	fsys := docsFiles()
+	if fsys == nil {
+		return "", errors.New("this build carries no documentation")
+	}
+	h := sha256.New()
+	v := version.Get()
+	fmt.Fprintf(h, "build\x00%s\x00%s\x00", v.Version, v.Commit)
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		raw, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "doc\x00%s\x00%d\x00", p, len(raw))
+		h.Write(raw)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, name := range []string{"style.css", "favicon.ico"} {
+		raw, err := fs.ReadFile(staticFS, path.Join("static", name))
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "asset\x00%s\x00%d\x00", name, len(raw))
+		h.Write(raw)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // ExportDocs writes the documentation to dir as a directory of HTML files that
 // need no daemon, no network and no web server — the manual, readable from a
 // clone, a memory stick, or a backup destination beside the status page.
@@ -40,9 +160,9 @@ type ExportedDocs struct {
 // anything: same Markdown, same stylesheet, same sidebar, addressed relatively
 // so the result can be moved anywhere. See docsPaths.
 func ExportDocs(dir string) (*ExportedDocs, error) {
-	fsys := docsFiles()
-	if fsys == nil {
-		return nil, errors.New("this build carries no documentation to export")
+	files, err := BuildDocs()
+	if err != nil {
+		return nil, err
 	}
 	if dir == "" {
 		return nil, errors.New("say where to write the documentation")
@@ -56,47 +176,21 @@ func ExportDocs(dir string) (*ExportedDocs, error) {
 	}
 
 	out := &ExportedDocs{Dir: abs}
-	err = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if p == "." {
-				return nil
+	for _, f := range files {
+		dest := filepath.Join(abs, filepath.FromSlash(f.Name))
+		if parent := filepath.Dir(dest); parent != abs {
+			if err := os.MkdirAll(parent, 0o755); err != nil {
+				return nil, err
 			}
-			return os.MkdirAll(filepath.Join(abs, filepath.FromSlash(p)), 0o755)
 		}
-		dest := filepath.Join(abs, filepath.FromSlash(docsFileName(p)))
-		if !strings.HasSuffix(p, ".md") {
-			raw, err := fs.ReadFile(fsys, p)
-			if err != nil {
-				return err
-			}
+		if err := os.WriteFile(dest, f.Data, 0o644); err != nil {
+			return nil, err
+		}
+		if f.Page {
+			out.Pages++
+		} else {
 			out.Assets++
-			return os.WriteFile(dest, raw, 0o644)
 		}
-		page, err := renderDocsPage(fsys, p, exportedDocsPaths(p))
-		if err != nil {
-			return fmt.Errorf("%s: %w", p, err)
-		}
-		out.Pages++
-		return os.WriteFile(dest, []byte(page), 0o644)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// The pages are styled by the dashboard's own stylesheet, so it travels
-	// with them; without it the export is readable but looks like nothing.
-	for _, name := range []string{"style.css", "favicon.ico"} {
-		raw, err := fs.ReadFile(staticFS, path.Join("static", name))
-		if err != nil {
-			return nil, err
-		}
-		if err := os.WriteFile(filepath.Join(abs, name), raw, 0o644); err != nil {
-			return nil, err
-		}
-		out.Assets++
 	}
 	return out, nil
 }

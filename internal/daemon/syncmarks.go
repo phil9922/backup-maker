@@ -71,6 +71,54 @@ func newSyncMarks(s *config.State) *syncMarks {
 	return m
 }
 
+// fill takes clocks for folder × destination pairs this process has none for,
+// from a state file something else wrote while we were running.
+//
+// MEMORY STILL WINS WHEREVER BOTH KNOW A PAIR — a state.json written by a setup
+// command is behind us, and adopting its timestamp would wind a clock backwards.
+// But a pair that exists only on disk is one something else CREATED, and the one
+// thing that creates one is a rename: setup.RenameTarget copies a destination's
+// clocks over to its new name, and without this the next flush would write them
+// straight back out under the name that destination no longer has. Every folder
+// would then read "never synced" to a destination that has been backed up for
+// months — so a drive nobody has plugged in since would look merely offline
+// instead of overdue, which is the exact fault syncMarks exists to prevent.
+//
+// Reports whether anything was taken, so the caller can flush it back out.
+func (m *syncMarks) fill(s *config.State) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	took := false
+	for folder, byTarget := range s.MirrorLastSync {
+		for target, when := range byTarget {
+			if when.IsZero() {
+				continue // never is not a mark, the same rule newSyncMarks uses
+			}
+			if _, known := m.at[folder][target]; known {
+				continue
+			}
+			if m.at[folder] == nil {
+				m.at[folder] = map[string]time.Time{}
+			}
+			m.at[folder][target] = when
+			took = true
+		}
+	}
+	for folder, byTarget := range s.MirrorScanState {
+		for target, mk := range byTarget {
+			if _, known := m.scans[folder][target]; known {
+				continue
+			}
+			if m.scans[folder] == nil {
+				m.scans[folder] = map[string]config.ScanMark{}
+			}
+			m.scans[folder][target] = mk
+			took = true
+		}
+	}
+	return took
+}
+
 // lastSync reports what to seed an engine with. A pair that has never synced
 // gets the zero time, which is what keeps a brand-new destination reading as
 // offline rather than as long overdue.

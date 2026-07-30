@@ -293,3 +293,78 @@ func TestARestartWithAStaleDestinationAlertsOnceNotEveryCycle(t *testing.T) {
 		}
 	}
 }
+
+// THE GUARANTEE: a destination that gets renamed keeps how long it has been
+// since each folder reached it.
+//
+// The half of a rename that lives here, and the one that is invisible until it
+// matters. setup.RenameTarget copies the clocks in state.json across to the new
+// name — but this process holds them in memory, keyed by the OLD name, and the
+// next flush writes memory over the file. Every folder would then read "never
+// synced" to a destination that has been backed up for months, so a drive
+// nobody has plugged in since would look merely offline instead of overdue.
+// Which is the exact fault syncMarks was written to prevent.
+func TestARenamedDestinationKeepsItsSyncClocks(t *testing.T) {
+	synced := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	scan := config.ScanMark{TargetUUID: "uuid-pi"}
+	before := &config.State{
+		MirrorLastSync:  map[string]map[string]time.Time{"code": {"backups": synced}},
+		MirrorScanState: map[string]map[string]config.ScanMark{"code": {"backups": scan}},
+	}
+	m := newSyncMarks(before)
+
+	// What setup.RenameTarget leaves on disk: the same clocks under both names,
+	// the old one about to be dropped.
+	renamed := &config.State{
+		MirrorLastSync: map[string]map[string]time.Time{
+			"code": {"backups": synced, "pi-drive1": synced},
+		},
+		MirrorScanState: map[string]map[string]config.ScanMark{
+			"code": {"backups": scan, "pi-drive1": scan},
+		},
+	}
+	if !m.fill(renamed) {
+		t.Fatal("nothing was taken from the state file, so the rename's clocks are lost on the next flush")
+	}
+	if got := m.lastSync("code", "pi-drive1"); !got.Equal(synced) {
+		t.Errorf("the renamed destination's clock is %v, want %v: it would read as never synced", got, synced)
+	}
+	if got := m.scanMark("code", "pi-drive1", "uuid-pi"); got.TargetUUID != "uuid-pi" {
+		t.Error("the renamed destination lost what its last pass learned")
+	}
+
+	// And then prune drops the old name, because the config no longer has it.
+	cfg := &config.Config{
+		Folders: []config.Folder{{ID: "code"}},
+		Targets: []config.Target{{Type: "share", Name: "pi-drive1", URL: "//pi/backups/drive1"}},
+	}
+	if !m.prune(cfg) {
+		t.Error("the old name was left behind in state.json")
+	}
+	if got := m.snapshot(); !got["code"]["backups"].IsZero() {
+		t.Error("the old name still has a clock after pruning")
+	}
+	if got := m.snapshot(); !got["code"]["pi-drive1"].Equal(synced) {
+		t.Error("pruning took the new name's clock too")
+	}
+}
+
+// MEMORY STILL WINS where both know a pair. A state.json written by a setup
+// command is behind this process by definition, and adopting its timestamp would
+// wind a clock backwards — which on the staleness alert means a destination
+// reporting itself as more overdue than it is.
+func TestFillNeverWindsAClockBackwards(t *testing.T) {
+	newer := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	older := newer.Add(-48 * time.Hour)
+	m := newSyncMarks(&config.State{MirrorLastSync: map[string]map[string]time.Time{
+		"code": {"card": newer},
+	}})
+	if m.fill(&config.State{MirrorLastSync: map[string]map[string]time.Time{
+		"code": {"card": older},
+	}}) {
+		t.Error("a clock this process already knows was reported as taken from disk")
+	}
+	if got := m.lastSync("code", "card"); !got.Equal(newer) {
+		t.Errorf("the clock went backwards to %v, want %v", got, newer)
+	}
+}

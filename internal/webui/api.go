@@ -461,6 +461,53 @@ func (s *Server) handleRemoveTarget(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleRenameTarget changes what a destination is called.
+//
+// It does NOT accept a new location in the same breath, deliberately, the same
+// way changing a snapshot schedule refuses to re-point it at another folder: a
+// destination whose address changed is different storage, and the marker check
+// exists to refuse exactly that.
+func (s *Server) handleRenameTarget(w http.ResponseWriter, r *http.Request) {
+	if s.actions.RenameTarget == nil {
+		unavailable(w, "renaming a destination")
+		return
+	}
+	var req TargetNameRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.actions.RenameTarget(r.PathValue("name"), req.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok": true, "name": req.Name,
+		"message": "renamed; nothing on the destination was moved",
+	})
+}
+
+// handleDescribeTarget records which drive this destination physically is.
+//
+// The text goes onto the STORAGE, in its marker file, which is why this can fail
+// with a destination that is not plugged in — and why it is worth having: it is
+// the answer to "which of these two identical cards is this?" read from the card
+// itself, on a machine whose configuration is gone.
+func (s *Server) handleDescribeTarget(w http.ResponseWriter, r *http.Request) {
+	if s.actions.DescribeTarget == nil {
+		unavailable(w, "describing a destination")
+		return
+	}
+	var req TargetDescriptionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.actions.DescribeTarget(r.PathValue("name"), req.Description); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "message": "saved onto the destination"})
+}
+
 func (s *Server) handleAddArchive(w http.ResponseWriter, r *http.Request) {
 	var req ArchiveRequest
 	if !decodeJSON(w, r, &req) {

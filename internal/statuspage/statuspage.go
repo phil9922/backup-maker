@@ -96,6 +96,15 @@ type Page struct {
 	Rows      []Row
 	Snapshots []Row
 	Storage   []StorageLine
+	// Manual links to a copy of the manual sitting beside this page on the same
+	// destination, and is empty when there is not one.
+	//
+	// SET ONLY WHERE THE PAGES ACTUALLY ARE, per destination. The reader of this
+	// page is somebody holding a drive whose computer will not start, which is
+	// also the reader least able to go and find the manual anywhere else — and
+	// exactly the wrong person to send to a link that does not resolve. The
+	// writer knows, because it put them there; this page never guesses.
+	Manual string
 }
 
 // Render produces the complete page: one file, no external assets, so it works
@@ -129,7 +138,8 @@ var tmpl = template.Must(template.New("status").Parse(`<!doctype html>
 <title>{{.Machine}} — backup status</title>
 <style>
  :root { color-scheme: dark; font-family: system-ui, sans-serif;
-   --bg:#10141a; --fg:#e6e9ee; --muted:#8a94a3; --ok:#66bb6a; --busy:#ffca28; --bad:#ef5350; }
+   --bg:#10141a; --fg:#e6e9ee; --muted:#8a94a3; --ok:#66bb6a; --busy:#ffca28; --bad:#ef5350;
+   --link:#8ab4ff; }
  body { background:var(--bg); color:var(--fg); margin:0; padding:1.5rem; }
  .wrap { max-width:52rem; margin:0 auto; }
  h1 { font-size:1.2rem; margin:0 0 .25rem; }
@@ -143,6 +153,9 @@ var tmpl = template.Must(template.New("status").Parse(`<!doctype html>
  th { color:var(--muted); font-weight:500; font-size:.85rem; border-bottom:1px solid #232a34; }
  tr+tr td { border-top:1px solid #1a212b; }
  .ok{color:var(--ok)} .busy{color:var(--busy)} .bad{color:var(--bad)}
+ a { color:var(--link); }
+ .manual { background:#161c24; border:1px solid #232a34; border-radius:8px;
+   padding:.8rem 1rem; margin:0 0 1.5rem; line-height:1.6; }
  footer { color:var(--muted); font-size:.85rem; border-top:1px solid #232a34;
    padding-top:1rem; line-height:1.6; }
 </style>
@@ -198,6 +211,14 @@ var tmpl = template.Must(template.New("status").Parse(`<!doctype html>
 </tbody></table>
 {{end}}
 </div>
+
+{{if .Manual}}
+{{/* OUTSIDE #live, so a stale page does not dim it. A page that has stopped
+     being updated is exactly when somebody needs to read how to get the
+     backups back, and the one thing on it that is still completely true. */}}
+<p class="manual">Need to get these files back, or set up a new computer?
+<a href="{{.Manual}}">The manual is on this drive</a> — no internet needed.</p>
+{{end}}
 
 <footer>
 Written by backup-maker on {{.Machine}}. This is a snapshot of what that

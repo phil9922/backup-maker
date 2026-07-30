@@ -10,15 +10,17 @@ connection**: open the dashboard and click **Docs**. These pages are built into
 the binary.
 
 And when the daemon is not running — a fresh machine, a rescue boot, or a backup
-drive in your hand and nothing else — write the manual out as ordinary web
-pages and open it in any browser:
+drive in your hand and nothing else — **a copy is already on every destination**,
+in `<machine>/.backup-maker-manual/`. The status page beside it links to it.
+Open `index.html` in any browser: no daemon, no web server, no internet.
+
+You can write it anywhere else yourself too:
 
 ```sh
 backup-maker docs --export ./manual     # then open manual/index.html
 ```
 
-That directory needs no daemon, no web server and no internet, and can be
-copied anywhere, including onto a backup destination.
+That directory can be copied anywhere.
 
 ---
 

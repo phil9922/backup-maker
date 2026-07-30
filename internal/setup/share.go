@@ -25,15 +25,12 @@ func AddShareTargetAs(url, username, password, name string, verify, takeOver boo
 	if err != nil {
 		return err
 	}
-	if _, _, share, _, perr := smbfs.Parse(url); perr != nil {
+	if _, _, _, _, perr := smbfs.Parse(url); perr != nil {
 		return perr
-	} else if name == "" {
-		name = share
 	}
-	for _, t := range cfg.Targets {
-		if t.Name == name {
-			return fmt.Errorf("a target named %q already exists", name)
-		}
+	name, nerr := TargetName(cfg, name, DefaultShareTargetName(url))
+	if nerr != nil {
+		return nerr
 	}
 
 	if err := smbfs.TestConnection(url, username, password); err != nil {

@@ -40,6 +40,12 @@ type lastWritten struct {
 	pageAt  time.Time
 	index   string
 	indexAt time.Time
+	// manual is the fingerprint of the manual this destination is believed to
+	// hold, "" for none, and manualAt is when it was last ASKED — recorded
+	// whatever the answer, because both answers have to be rationed. See
+	// manualRecheckEvery.
+	manual   string
+	manualAt time.Time
 }
 
 // due reports whether something whose content now fingerprints as fp needs
@@ -95,11 +101,6 @@ func (d *daemon) cycle(collect func() status.Model) {
 // at each destination root.
 func (d *daemon) writeStatusPages(m status.Model, now time.Time) {
 	built, fp := buildPage(m, now)
-	page, err := statuspage.Render(built)
-	if err != nil {
-		d.log.Warn("could not render the destination status page", "err", err)
-		return
-	}
 	machine := m.MachineName
 	dir := config.MachineDir(machine)
 	if d.written == nil {
@@ -113,6 +114,18 @@ func (d *daemon) writeStatusPages(m status.Model, now time.Time) {
 		if !d.mayWriteAs(b.name, b.where, b.backend, b.uuid, dir) {
 			continue
 		}
+		// Before the page, so the page can say truthfully whether the manual is
+		// beside it. Nearly always a no-op: see manualRecheckEvery.
+		p, pfp := built, fp
+		if d.writeManual(b, dir, now) {
+			p.Manual = manualHref
+			// The link is part of what the page says, so it is part of what
+			// decides whether the page is rewritten. A destination that has just
+			// been given the manual needs a page that points at it, and on an
+			// otherwise idle machine nothing else would earn that write for up
+			// to a heartbeat.
+			pfp = fp + "\x00manual"
+		}
 		was := d.written[b.name]
 		// Nothing to say that this destination is not already saying. Skipped
 		// before MkdirAll and the write, which are the two round trips.
@@ -123,11 +136,20 @@ func (d *daemon) writeStatusPages(m status.Model, now time.Time) {
 		// that aged on its own. On a destination that is an SD card — a Pi's boot
 		// card, say — that was thousands of rewrites a day of a file nobody had
 		// asked a new question of.
-		if !due(fp, was.page, was.pageAt, now) {
+		if !due(pfp, was.page, was.pageAt, now) {
 			// Still reconsider the index: another machine's page can have gone
 			// quiet, and noticing that is not conditional on ours changing.
 			d.writeStatusIndex(b, now)
 			continue
+		}
+		// Rendered per destination rather than once for all of them, because the
+		// manual is per destination. The MODEL is still collected once (see
+		// cycle), which is the part that must not be able to disagree with
+		// itself; this is a template execution with no I/O in it.
+		page, err := statuspage.Render(p)
+		if err != nil {
+			d.log.Warn("could not render the destination status page", "err", err)
+			return
 		}
 		// A destination that is offline simply doesn't get an update; its page
 		// keeps the last thing this machine knew, which is exactly what it is
@@ -142,7 +164,7 @@ func (d *daemon) writeStatusPages(m status.Model, now time.Time) {
 		}
 		// Recorded only on success, so a destination that refused the write is
 		// tried again next tick rather than being treated as up to date.
-		was.page, was.pageAt = fp, now
+		was.page, was.pageAt = pfp, now
 		d.written[b.name] = was
 		d.writeStatusIndex(b, now)
 	}

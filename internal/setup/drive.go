@@ -14,10 +14,15 @@ import (
 )
 
 // CheckNameFree reports whether a target name is still available.
+//
+// The message names a free one, because the caller is a person who typed a name
+// and now has to think of another. Case-insensitive: "backups" and "Backups"
+// would both work and be impossible to tell apart in conversation.
 func CheckNameFree(cfg *config.Config, name string) error {
 	for _, t := range cfg.Targets {
-		if t.Name == name {
-			return fmt.Errorf("a target named %q already exists", name)
+		if strings.EqualFold(t.Name, name) {
+			return fmt.Errorf("a target named %q already exists — try a different one, for example %q",
+				t.Name, FreeTargetName(cfg, name))
 		}
 	}
 	return nil
@@ -87,11 +92,12 @@ func AppendDriveTargetIn(cfg *config.Config, path, name string, create, takeOver
 	if err != nil || !fi.IsDir() {
 		return config.Target{}, fmt.Errorf("drive path not found or not a directory: %s", root)
 	}
-	if name == "" {
-		name = filepath.Base(root)
-	}
-	if err := CheckNameFree(cfg, name); err != nil {
-		return config.Target{}, err
+	// The mount point's own name when none was given, moved along if it is
+	// taken — two cards both mounted as "BACKUPCARD" on different days is
+	// ordinary, and the second being refused with no suggestion was the bug.
+	name, nerr := TargetName(cfg, name, tidyName(filepath.Base(root)))
+	if nerr != nil {
+		return config.Target{}, nerr
 	}
 	if err := EnsureTargetMarkerAs(localmirror.NewLocalFS(root), name, cfg.General.MachineName, takeOver); err != nil {
 		return config.Target{}, locate(err, "drive", root)

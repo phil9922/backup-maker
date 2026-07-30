@@ -96,6 +96,13 @@ type daemon struct {
 	spaceMu sync.Mutex
 	space   map[string]spaceSample
 
+	// descriptions is what each destination's marker file says it physically is,
+	// keyed by target name and guarded by mu. Read when a destination is opened
+	// (see prepareTargets), not on the status cycle: it changes when somebody
+	// types a sentence, and asking the storage once a minute would be a round
+	// trip for an answer that is almost never different.
+	descriptions map[string]string
+
 	// written remembers what was last put on each destination, so a page whose
 	// content has not changed is not rewritten just because a minute has passed.
 	// Only ever touched from the status-page goroutine.
@@ -135,6 +142,14 @@ type daemon struct {
 	// is the entire hazard the config-apply path is shaped around, and it
 	// cannot be demonstrated with storage that answers immediately.
 	newBackend func(config.Target, map[string]string) (localmirror.Backend, time.Duration, bool, error)
+
+	// docsID and docsBuild are the manual this build carries — its fingerprint,
+	// and the files themselves. nil means the real documentation, the same "nil
+	// is the real implementation" seam newBackend uses. They exist because the
+	// embedded docs are installed by the main package, so a test binary carries
+	// none at all and could otherwise not reach any of this.
+	docsID    func() (string, error)
+	docsBuild func() ([]webui.DocsFile, error)
 
 	// newChecker builds the release checker, and exists only so tests can point
 	// it at a recorder instead of github.com. nil means the real one.
@@ -317,6 +332,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		HasArchivePassword: d.hasArchivePassword,
 		SetupDone:          d.setupDone,
 		Space:              d.spaceSamples,
+		Descriptions:       d.targetDescriptions,
 		Totals:             d.totals,
 		LANViewURL:         d.lanViewURL,
 		LANViewProblem:     d.lanViewProblem,
@@ -439,6 +455,13 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 		}
 		d.state = fresh
 		d.mu.Unlock()
+		// A renamed destination's clocks arrive this way and nowhere else: the
+		// marks in memory are keyed by the OLD name, and the next flush writes
+		// memory. Taken before prune below, which is what then drops the old
+		// name — in that order, so the pair is moved rather than lost.
+		if d.marks != nil && d.marks.fill(fresh) && d.tally != nil {
+			d.tally.touch()
+		}
 	}
 
 	// A machine that is demonstrably set up is RECORDED as set up, once.
@@ -512,8 +535,12 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 	inherited := append([]string(nil), d.state.InheritedInstallIDs...)
 	owns := (&config.State{InstallID: installID, InheritedInstallIDs: inherited}).Owns
 
+	d.descriptions = map[string]string{}
 	for _, p := range prepared {
 		t := p.target
+		if p.description != "" {
+			d.descriptions[t.Name] = p.description
+		}
 		// One reclaimer per DESTINATION, shared by every folder writing to it:
 		// several folders can hit a full disk at the same instant, and they
 		// must not all start deleting history concurrently.
@@ -584,6 +611,12 @@ type preparedTarget struct {
 	// it never contends with a sync in progress. nil when the destination
 	// could not be opened at all — the folders below may still have theirs.
 	statusBackend localmirror.Backend
+	// description is what this destination's own marker file says it physically
+	// is. Read here because this is where a live connection already exists and
+	// the marker is already being consulted — asking again on the status cycle
+	// would be a round trip a minute for a sentence that changes when somebody
+	// types one.
+	description string
 	folders       []preparedFolder
 }
 
@@ -620,6 +653,12 @@ func (d *daemon) prepareTargets(cfg *config.Config, uuids, creds map[string]stri
 		if sb, _, _, berr := d.buildBackend(t, creds); berr == nil {
 			// Refresh the adoption manifest while we have a live connection.
 			d.refreshManifest(t, sb, cfg, uuid)
+			// And read what the storage says it is. Best-effort: a destination
+			// that is not there simply has nothing to say about itself, which is
+			// the honest answer rather than a remembered one.
+			if m, merr := localmirror.ReadMarker(sb); merr == nil {
+				p.description = m.Description
+			}
 			p.statusBackend = sb
 		}
 		for _, f := range cfg.FoldersForTarget(t) {
@@ -1090,6 +1129,8 @@ func buildActions(d *daemon) webui.Actions {
 		DeleteRetiredBackups: d.deleteRetiredBackups,
 		ForgetRetired:        d.forgetRetired,
 		RemoveTarget:         setup.RemoveTarget,
+		RenameTarget:         setup.RenameTarget,
+		DescribeTarget:       setup.DescribeTarget,
 		SetFolderIgnores:     setup.SetFolderIgnores,
 		AddArchive:           d.addArchive,
 		CompleteSetup:        d.completeSetup,
@@ -1111,4 +1152,17 @@ func buildActions(d *daemon) webui.Actions {
 			Seen:         d.lanDeviceSeen,
 		},
 	}
+}
+
+// targetDescriptions is what each destination's own marker file says it is,
+// keyed by target name, for the status collector.
+//
+// A destination that could not be opened when the config was last applied is
+// simply absent: the description is a fact about the storage that is there, and
+// remembering one for storage nobody can reach would be this program answering
+// for something it cannot see.
+func (d *daemon) targetDescriptions() map[string]string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return maps.Clone(d.descriptions)
 }

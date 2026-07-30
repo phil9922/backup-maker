@@ -17,11 +17,48 @@ type Marker struct {
 	TargetUUID  string    `json:"target_uuid"`
 	MachineName string    `json:"machine_name"`
 	Created     time.Time `json:"created"`
+	// Description is which physical drive this is, in the user's own words
+	// ("Samsung 128GB card, lives in the laptop"). Optional and purely for
+	// humans: nothing branches on it.
+	//
+	// ON THE STORAGE RATHER THAN IN config.toml, which is the whole point. The
+	// volume label cannot be read over SMB — go-smb2 exposes no decoder for
+	// FileFsVolumeInformation — so there is no way to learn what a share is
+	// sitting on, and two identical cards are indistinguishable once they are
+	// out of the machine. Written here, the answer is on the thing itself: it
+	// survives a reinstall, and adopt can say which drive it is looking at.
+	Description string `json:"description,omitempty"`
 }
 
 // WriteMarker initializes a backend root as a backup target.
 func WriteMarker(b Backend, uuid, machineName string) error {
-	m := Marker{TargetUUID: uuid, MachineName: machineName, Created: time.Now()}
+	return WriteMarkerDescribed(b, uuid, machineName, "")
+}
+
+// WriteMarkerDescribed is WriteMarker carrying a human description of the drive.
+func WriteMarkerDescribed(b Backend, uuid, machineName, description string) error {
+	m := Marker{TargetUUID: uuid, MachineName: machineName, Created: time.Now(),
+		Description: description}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return b.WriteFile(MarkerName, data)
+}
+
+// Describe records what a drive is, keeping everything else in its marker.
+//
+// READ-MODIFY-WRITE, and the identity it preserves is the point: the UUID in
+// this file is what says the storage at a mount point is still the storage this
+// target was set up against. Writing a fresh marker to add a sentence would
+// replace that UUID, and the destination would then be refused as foreign
+// storage — the drive is fine and every backup on it stops.
+func Describe(b Backend, description string) error {
+	m, err := ReadMarker(b)
+	if err != nil {
+		return err
+	}
+	m.Description = description
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err

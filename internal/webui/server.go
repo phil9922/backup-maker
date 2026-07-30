@@ -87,6 +87,14 @@ type Actions struct {
 	// schedule running. Config only; no backup data is touched.
 	StopMirroring func(id string) error
 	RemoveTarget  func(name string) error
+	// RenameTarget changes what a destination is called, everywhere it is
+	// called that. Config and state only: nothing on the storage moves, and it
+	// works with the destination unplugged.
+	RenameTarget func(from, to string) error
+	// DescribeTarget records which physical drive a destination is, in the
+	// user's own words. It writes to the destination's marker file, so it needs
+	// that destination to be reachable — and travels with the drive.
+	DescribeTarget func(name, description string) error
 	// RemoveArchive stops a snapshot schedule from running again. Config only:
 	// the zips it already wrote stay where they are, like every other removal
 	// on this API.
@@ -201,6 +209,17 @@ type ArchiveScheduleRequest struct {
 // ArchivePausedRequest stops or resumes a schedule.
 type ArchivePausedRequest struct {
 	Paused bool `json:"paused"`
+}
+
+// TargetNameRequest is a destination's new name. The old one is in the path.
+type TargetNameRequest struct {
+	Name string `json:"name"`
+}
+
+// TargetDescriptionRequest is which drive a destination physically is, in the
+// user's words. Empty clears it.
+type TargetDescriptionRequest struct {
+	Description string `json:"description"`
 }
 
 // RetiredDeleteRequest confirms a permanent deletion of backed-up files.
@@ -421,6 +440,10 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("POST /api/retired/{id}/delete", s.requireToken(s.handleDeleteRetiredBackups))
 	mux.HandleFunc("DELETE /api/retired/{id}", s.requireToken(s.handleForgetRetired))
 	mux.HandleFunc("DELETE /api/targets/{name}", s.requireToken(s.handleRemoveTarget))
+	// Both are edits to a destination's identity rather than to its data: a
+	// POST to a path that says which one, like the archive routes below.
+	mux.HandleFunc("POST /api/targets/{name}/name", s.requireToken(s.handleRenameTarget))
+	mux.HandleFunc("POST /api/targets/{name}/description", s.requireToken(s.handleDescribeTarget))
 	mux.HandleFunc("POST /api/archives", s.requireToken(s.handleAddArchive))
 	mux.HandleFunc("POST /api/setup/complete", s.requireToken(s.handleCompleteSetup))
 	mux.HandleFunc("GET /api/adopt/scan", s.requireToken(s.handleAdoptScan))

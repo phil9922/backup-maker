@@ -516,6 +516,24 @@ func (c *Config) Validate() error {
 	for _, r := range c.Retired {
 		stopped[r.ID] = true
 	}
+	// THE NAME IS A KEY, in four maps in state.json and in every archive and
+	// retired record that points at a destination. Two targets sharing one means
+	// they share a marker UUID, a share password and every folder's last-synced
+	// clock — so one of them is refused as foreign storage, or hands the other
+	// its password. Checked here because config.toml is a file people edit, and
+	// because a rename is now offered: nothing else was refusing this.
+	seenTarget := map[string]int{}
+	for i, t := range c.Targets {
+		if t.Name == "" {
+			errs = append(errs, fmt.Errorf("target[%d] has no name", i))
+		} else if first, dup := seenTarget[t.Name]; dup {
+			errs = append(errs, fmt.Errorf(
+				"targets[%d] and [%d] are both called %q — a destination's name keys its recorded identity, its password and its sync clocks, so two of them cannot share one; rename one",
+				first, i, t.Name))
+		} else {
+			seenTarget[t.Name] = i
+		}
+	}
 	for i, t := range c.Targets {
 		switch t.Type {
 		case "device":

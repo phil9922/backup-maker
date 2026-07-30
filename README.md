@@ -164,7 +164,7 @@ separate panels, so you can see at a glance which promise a folder actually
 has. Folders you've stopped move to **No longer protected**, where the copies
 they left behind are still named.
 
-![Dashboard with a green "Everything is backed up" verdict and the address another device can watch from beneath it, an "Incremental backups" table grouping code, documents and photos under their paths with every destination "backed up" in green, a "Timed snapshots" table naming the folder each schedule covers with Pause, Edit and Stop beside it, a "Backup drives" panel listing each destination with its location, health and free space, and a "No longer protected" panel showing a stopped folder whose copies are still on two destinations](docs/screenshots/07-dashboard.png)
+![Dashboard with a green "Everything is backed up" verdict and the address another device can watch from beneath it, an "Incremental backups" table grouping code, documents and photos under their paths with every destination "backed up" in green, a "Timed snapshots" table naming the folder each schedule covers with Pause, Edit and Stop beside it, a "Backup drives" panel listing each destination with its location, health and free space — the SD card also naming which physical card it is, and each with a Rename button — and a "No longer protected" panel showing a stopped folder whose copies are still on two destinations](docs/screenshots/07-dashboard.png)
 
 While files are moving you get live progress per destination — real byte
 counts, updating in place. Nothing needs refreshing.

@@ -52,7 +52,12 @@ def folders():
 
 def targets(sdcard_state="in sync", backups_state="in sync"):
     return [
+        # One destination carries a description, read off the drive's own marker
+        # file — the answer to "which of these two identical cards is this?".
+        # Only one, so the shot shows both what it looks like and that it is
+        # optional.
         {"name": "sdcard", "type": "drive", "location": "/media/alex/SDCARD",
+         "description": "Samsung 64GB card, lives in the laptop",
          "folder_count": 3, "all_folders": True, "state": sdcard_state,
          "last_seen": iso(9), "free_bytes": 8 * 1024**3,
          "total_bytes": 64 * 1024**3, "space_reported_at": iso(11),

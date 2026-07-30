@@ -305,6 +305,12 @@ function setText(node, text) {
 // exclude editor out from under someone mid-sentence. While one is open the
 // table is left alone; polling resumes on save or cancel.
 let editingIgnoresFor = null;
+// The destination cards are rebuilt with replaceChildren on every poll, so the
+// rename/describe editor needs the same freeze — and it needs it more than the
+// others: what is in that box is a NAME being retyped, and losing it halfway
+// leaves somebody looking at a card that says something they did not finish
+// saying.
+let editingTarget = null;
 // The archives table rebuilds on every poll too, so an open editor there needs
 // the same freeze the exclude editor has: a form that vanishes mid-sentence
 // once a second is not a form.
@@ -815,6 +821,9 @@ function renderSpace(li, t) {
 }
 
 function renderTargets(st) {
+  // See editingTarget: rebuilding this list would take the open editor away
+  // mid-word. Everything else on the page keeps updating.
+  if (editingTarget !== null) return;
   const sec = document.getElementById('targets-section');
   const list = document.getElementById('target-list');
   const targets = st.targets || [];
@@ -857,6 +866,10 @@ function renderTargets(st) {
         t.folder_count === 1 ? '1 folder' : `${t.folder_count} folders`));
     }
     if (t.wake_enabled) meta.appendChild(el('span', 'muted', 'wakes on demand'));
+    // Which drive this actually is, read off the storage itself. Absent for a
+    // destination that is not currently reachable, which is honest: it
+    // describes what is there, and nothing is there.
+    if (t.description) meta.appendChild(el('span', 'muted', t.description));
     // Deleting a user's backup history is never silent.
     if (t.reclaim_note) meta.appendChild(el('span', 'busy', t.reclaim_note));
     li.appendChild(meta);
@@ -871,6 +884,10 @@ function renderTargets(st) {
     }
     const actions = el('div', 'card-actions');
     if (!readOnly) {
+      const edit = el('button', 'small-btn quiet', 'Rename…');
+      edit.title = 'Change what this destination is called, and say which drive it is';
+      edit.onclick = () => openTargetEditor(li, t);
+      actions.appendChild(edit);
       const btn = el('button', 'small-btn danger', 'Remove');
       btn.onclick = () => removeTarget(t);
       actions.appendChild(btn);
@@ -893,6 +910,80 @@ async function removeFolder(f) {
     `Nothing is deleted now — the copies already on your destinations are left exactly where they are.`)) return;
   const resp = await mutate('/api/folders/' + encodeURIComponent(f.id), { method: 'DELETE' });
   if (!resp.ok) alert(await resp.text()); else refresh();
+}
+
+// openTargetEditor edits a destination's identity: what it is called, and which
+// physical drive it is.
+//
+// The two are together because they answer the same question — "which one is
+// this?" — and apart in every other way. The name is local bookkeeping that
+// nothing on the storage carries, so renaming works with the drive in a drawer.
+// The description is written ONTO the drive, so it needs the drive, and the
+// failure is reported rather than swallowed.
+function openTargetEditor(li, t) {
+  editingTarget = t.name;
+  // card-wide, because a card is a four-column grid: without it this lands in
+  // the 1rem icon column and every line of it wraps one word at a time. The
+  // storage bar above says the same thing the same way.
+  const box = el('div', 'ignore-editor card-wide');
+  box.appendChild(el('span', 'hint',
+    'Renaming moves everything that points at this destination — its stored password, ' +
+    'its recorded identity, any snapshot schedule aimed at it. Nothing on the drive ' +
+    'moves and nothing is re-copied.'));
+
+  const nameRow = el('div', 'edit-row');
+  nameRow.appendChild(el('label', 'muted', 'Called'));
+  const name = el('input');
+  name.value = t.name;
+  name.maxLength = 64;
+  nameRow.appendChild(name);
+  box.appendChild(nameRow);
+
+  const descRow = el('div', 'edit-row');
+  descRow.appendChild(el('label', 'muted', 'Which drive'));
+  const desc = el('input');
+  desc.value = t.description || '';
+  desc.maxLength = 200;
+  desc.placeholder = t.type === 'device'
+    ? 'a paired computer manages its own storage'
+    : 'e.g. Samsung 128GB card, lives in the laptop';
+  desc.disabled = t.type === 'device';
+  descRow.appendChild(desc);
+  box.appendChild(descRow);
+  if (t.type !== 'device') {
+    box.appendChild(el('span', 'hint',
+      'The description is written onto the drive itself, so it is still there ' +
+      'when you are holding the drive and this computer is not running. ' +
+      'It needs the destination to be reachable.'));
+  }
+
+  const save = el('button', 'small-btn', 'Save');
+  const cancel = el('button', 'small-btn quiet', 'Cancel');
+  const close = () => { editingTarget = null; refresh(); };
+  cancel.onclick = close;
+  save.onclick = async () => {
+    save.disabled = true;
+    const wanted = name.value.trim();
+    const described = desc.value.trim();
+    // The description is written first, while the destination is still known by
+    // the name the config currently holds — the other order would need this to
+    // know which name won.
+    if (!desc.disabled && described !== (t.description || '')) {
+      const r = await mutate('/api/targets/' + encodeURIComponent(t.name) + '/description',
+        { method: 'POST', body: JSON.stringify({ description: described }) });
+      if (!r.ok) { alert(await r.text()); save.disabled = false; return; }
+    }
+    if (wanted && wanted !== t.name) {
+      const r = await mutate('/api/targets/' + encodeURIComponent(t.name) + '/name',
+        { method: 'POST', body: JSON.stringify({ name: wanted }) });
+      if (!r.ok) { alert(await r.text()); save.disabled = false; return; }
+    }
+    close();
+  };
+  box.append(save, cancel);
+  li.appendChild(box);
+  name.focus();
+  name.select();
 }
 
 async function removeTarget(t) {

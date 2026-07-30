@@ -71,6 +71,11 @@ func main() {
 		{Destination: "SDCARD", Free: "52GB", Total: "64GB", UsedPct: 19},
 		{Destination: "backups", Unavailable: true},
 	}
+	// The manual is beside the page on any destination this machine has been
+	// able to write to, so a shot without it would show a destination in a state
+	// almost nobody's is in. It is also the one offer on a stale page that is
+	// still completely true, which is why it sits outside the dimmed section.
+	p.Manual = ".backup-maker-manual/index.html"
 
 	out, err := statuspage.Render(p)
 	if err != nil {

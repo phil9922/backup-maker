@@ -457,6 +457,14 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
    to the far edge, away from the box they act on. */
 .card .ignore-editor button { margin-left: 0; }
 .card .ignore-editor .hint { flex-basis: 100%; font-size: 0.85rem; line-height: 1.45; }
+/* One labelled field per line inside a card editor. The destination editor has
+   two boxes that mean different things — a name and a sentence about a drive —
+   and side by side with no labels they read as one address split in half. */
+.card .ignore-editor .edit-row {
+  flex-basis: 100%; display: flex; align-items: center; gap: var(--s3);
+}
+.card .ignore-editor .edit-row label { flex: 0 0 6rem; font-size: 0.85rem; }
+.card .ignore-editor .edit-row input { flex: 1 1 16rem; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .row.spread { justify-content: space-between; }
 

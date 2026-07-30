@@ -225,7 +225,12 @@ func RedactForNetwork(v any) any {
 	// destination's reserve isn't being enforced"), not a measurement, and it
 	// describes no path, address or capacity. Someone watching from the sofa is
 	// owed the knowledge that a destination is unprotected.
-	stripEach(m["targets"], "location", "free_bytes", "total_bytes", "space_reported_at", "min_free_bytes")
+	//
+	// description goes for the same reason as location: it is free text about
+	// the hardware in this house — "the card in the laptop", "old external in
+	// the drawer" — written to help somebody standing in front of the drives,
+	// which is not who is reading this.
+	stripEach(m["targets"], "location", "description", "free_bytes", "total_bytes", "space_reported_at", "min_free_bytes")
 	m["redacted"] = true
 	return m
 }

@@ -5,6 +5,10 @@ rebuilding a whole machine from a destination that survived it, and repairing a
 backup that someone edited in place. If you're here because something has
 already gone wrong, start with the first section.
 
+**If you are reading this off the backup drive itself**, you are in the right
+place: the page beside these files links here, and this section needs nothing but
+a file manager.
+
 ## Restoring
 
 Backups are plain files — no special format. Copy them back with any file

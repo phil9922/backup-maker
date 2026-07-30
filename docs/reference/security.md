@@ -39,6 +39,13 @@ wondering what it will and won't do on its own.
   the same machine whose files are already on the drive in the clear, and adopt
   needs them to put folders back where they were. See
   [Restoring](../guide/6-restoring.md).
+- **The manual on a destination discloses nothing.** Each machine also leaves a
+  copy of the documentation (`<machine>/.backup-maker-manual/`, ~2MB, rewritten
+  only when the version changes) so a drive can be understood without the
+  computer that wrote it. It is byte-for-byte the same pages this build serves
+  and publishes — no configuration, no paths, no names. It is still written only
+  where anything of ours may be written: storage whose identity marker is not
+  recognised gets no manual either.
 
 ## Credentials & security notes
 

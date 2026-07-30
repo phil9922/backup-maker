@@ -48,6 +48,14 @@ func newPageWriter(t *testing.T) *pageWriter {
 	if err := localmirror.WriteMarkerAt(root, "card-uuid", "laptop"); err != nil {
 		t.Fatal(err)
 	}
+	return newPageWriterAt(t, root)
+}
+
+// newPageWriterAt is the same machine writing to a destination that already
+// exists — a second daemon over storage a previous one has been using, which is
+// what an upgrade or a restart looks like from the destination's point of view.
+func newPageWriterAt(t *testing.T, root string) *pageWriter {
+	t.Helper()
 	cfs := &countingFS{Backend: localmirror.NewLocalFS(root), writes: map[string]int{}}
 	cfg := &config.Config{
 		General: config.General{MachineName: "laptop"},

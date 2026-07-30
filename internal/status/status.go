@@ -392,6 +392,15 @@ type TargetInfo struct {
 	// MinFreeBytes is the reclaim reserve kept free on this destination, so the
 	// dashboard can say "keeping 20GB free". 0 means reclaiming is off.
 	MinFreeBytes uint64 `json:"min_free_bytes,omitempty"`
+	// Description is which physical drive this is, in the user's own words, read
+	// from the destination's own marker file rather than from the config — so it
+	// is a fact about the storage that is currently there.
+	//
+	// STRIPPED FROM THE READ-ONLY NETWORK VIEW. It is free text about the
+	// hardware in somebody's house ("the card in the laptop", "old external in
+	// the drawer"), which is exactly the kind of detail that view exists not to
+	// publish to anything on the wifi. See RedactForNetwork.
+	Description string `json:"description,omitempty"`
 }
 
 // SpaceSample is one destination's last-known-good free/total, with the time it
@@ -509,6 +518,11 @@ type Collector struct {
 	// Space returns per-destination free/total usage, keyed by target name.
 	// nil (or a missing key) simply leaves a target's space fields empty.
 	Space func() map[string]SpaceSample
+	// Descriptions returns what each destination's own marker file says it
+	// physically is, keyed by target name. Read off the storage rather than out
+	// of the config, so an unplugged destination simply has nothing to say —
+	// which is honest: the description describes whatever is actually there.
+	Descriptions func() map[string]string
 	// Totals returns the lifetime bytes/files copied and when counting began.
 	// nil leaves the odometer at zero, which the renderers read as "not counted
 	// on this machine" rather than "nothing has been backed up".
@@ -874,6 +888,10 @@ func (col *Collector) Collect() Model {
 	if col.Space != nil {
 		space = col.Space()
 	}
+	var descriptions map[string]string
+	if col.Descriptions != nil {
+		descriptions = col.Descriptions()
+	}
 	for _, t := range cfg.Targets {
 		info := TargetInfo{
 			Name:     t.Name,
@@ -891,6 +909,7 @@ func (col *Collector) Collect() Model {
 			AllFolders:   len(t.Folders) == 0 && len(cfg.Folders) > 0 && !t.ArchivesOnly,
 			WakeEnabled:  t.WakeEnabled(),
 			MinFreeBytes: cfg.MinFreeBytes(t),
+			Description:  descriptions[t.Name],
 		}
 		info.State, info.LastSeen = rollUp(m.Rows, t.Name)
 		info.State = applyRefusal(info.State, refused[t.Name])

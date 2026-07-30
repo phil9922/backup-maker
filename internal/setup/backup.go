@@ -280,14 +280,14 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 		return t, "", nil
 
 	case d.URL != "":
-		if _, _, share, _, err := smbfs.Parse(d.URL); err != nil {
-			return config.Target{}, "", err
-		} else if d.Name == "" {
-			d.Name = share
-		}
-		if err := CheckNameFree(cfg, d.Name); err != nil {
+		if _, _, _, _, err := smbfs.Parse(d.URL); err != nil {
 			return config.Target{}, "", err
 		}
+		name, nerr := TargetName(cfg, d.Name, DefaultShareTargetName(d.URL))
+		if nerr != nil {
+			return config.Target{}, "", nerr
+		}
+		d.Name = name
 		// Prove it works before promising the user anything.
 		if err := smbfs.TestConnection(d.URL, d.Username, d.Password); err != nil {
 			if d.Username == "" {

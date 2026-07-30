@@ -107,6 +107,51 @@ The rest of the drive is left alone, so this also works for a drive you use for
 other things. Only take a name over (`--take-over`) when the computer that
 claimed it really is this one — reinstalled, or restored from a backup.
 
+## What a destination is called, and which drive it actually is
+
+Every destination has a **name** — `sdcard`, `backup-pi`, whatever appears on the
+dashboard and in `backup-maker status`. It is chosen for you and you can change
+it whenever you like.
+
+**The name you are given.** A drive is named after the folder it is mounted at.
+A network drive is named after the machine and the folder on it, so
+`//pi/backups/drive1` becomes `pi-drive1` — the name says which box the disk
+hangs off and which disk it is, which is what you are actually telling apart. An
+address instead of a hostname is left out of the name (`//192.168.5.141/backups`
+is just `backups`): it would be longer, harder to read, and wrong the day your
+router hands out a different lease.
+
+**If the name is already used**, the one offered gets a number on the end —
+`pi-drive1-2`. A name *you* typed is never silently changed: it is refused, and
+the message names one that is free.
+
+**Renaming.** *Rename…* on the destination's card, or:
+
+```sh
+backup-maker rename-target backups pi-drive1
+```
+
+Nothing on the drive moves and nothing is re-copied — the backups are filed under
+your machine name and each folder's label, not under the destination's name — so
+the drive does not even have to be plugged in. Everything pointing at it comes
+along: its stored password, the recorded identity of the storage, any snapshot
+schedule aimed at it, and how long ago each folder last reached it.
+
+**Which drive is this?** Two identical cards are indistinguishable once they are
+out of the machine, and a network drive's volume label cannot be read over SMB at
+all. So you can write a note onto the drive itself:
+
+```sh
+backup-maker describe-target sdcard "Samsung 64GB card, lives in the laptop"
+```
+
+It shows up beside the destination's name, and — because it is stored on the
+storage rather than in this computer's configuration — it is still there when you
+are holding the drive on a machine that has never seen it. It needs the
+destination to be reachable when you set it, is never sent anywhere, and is
+deliberately left out of the [read-only network
+view](5-monitoring.md#watching-from-another-device-on-your-network).
+
 ## See also
 
 - [hardware.md](../setup/hardware.md) — what to buy, in

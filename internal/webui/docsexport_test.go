@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func exportTo(t *testing.T) (string, *ExportedDocs) {
@@ -181,5 +182,79 @@ func TestExportingWithNoDocumentationSaysSo(t *testing.T) {
 	t.Cleanup(func() { docsRoot = prev })
 	if _, err := ExportDocs(filepath.Join(t.TempDir(), "manual")); err == nil {
 		t.Fatal("expected an error when the build carries no documentation")
+	}
+}
+
+// THE GUARANTEE: the fingerprint changes when the manual does.
+//
+// It is what decides whether a copy sitting on a backup destination is replaced,
+// and the failure it prevents is invisible: a manual describing an older version
+// of the program looks exactly as authoritative as a current one, to a reader who
+// has no way of checking it against anything. Keying on the version string alone
+// would miss every change made before the next release.
+func TestTheManualsFingerprintChangesWhenTheDocumentationDoes(t *testing.T) {
+	withDocs(t)
+	was, err := DocsFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := DocsFingerprint(); err != nil || again != was {
+		t.Fatalf("the same documentation fingerprinted differently twice (%q then %q, err %v): "+
+			"every daemon would rewrite the manual on every recheck", was, again, err)
+	}
+
+	for _, c := range []struct {
+		what string
+		docs fstest.MapFS
+	}{
+		{"a page's words changed", fstest.MapFS{
+			"docs/README.md":          {Data: []byte("# Start\n\nSomething else entirely.\n")},
+			"docs/guide/1-install.md": {Data: []byte("# 1. Installing\n")},
+		}},
+		{"a page was added", fstest.MapFS{
+			"docs/README.md":          {Data: []byte("# Start\n")},
+			"docs/guide/1-install.md": {Data: []byte("# 1. Installing\n")},
+			"docs/guide/2-new.md":     {Data: []byte("# 2. New\n")},
+		}},
+		{"a page was renamed", fstest.MapFS{
+			"docs/README.md":          {Data: []byte("# Start\n")},
+			"docs/guide/1-getting.md": {Data: []byte("# 1. Installing\n")},
+		}},
+		{"a screenshot was replaced", fstest.MapFS{
+			"docs/README.md":          {Data: []byte("# Start\n")},
+			"docs/guide/1-install.md": {Data: []byte("# 1. Installing\n")},
+			"docs/screenshots/x.png":  {Data: []byte("\x89PNG\r\n\x1a\ndifferent")},
+		}},
+	} {
+		base := fstest.MapFS{
+			"docs/README.md":          {Data: []byte("# Start\n")},
+			"docs/guide/1-install.md": {Data: []byte("# 1. Installing\n")},
+			"docs/screenshots/x.png":  {Data: []byte("\x89PNG\r\n\x1a\n")},
+		}
+		SetDocs(base)
+		before, err := DocsFingerprint()
+		if err != nil {
+			t.Fatal(err)
+		}
+		SetDocs(c.docs)
+		after, err := DocsFingerprint()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if before == after {
+			t.Errorf("%s and the fingerprint did not: a destination would keep the old manual", c.what)
+		}
+	}
+}
+
+// A build carrying no documentation has no fingerprint, rather than a fingerprint
+// of nothing — which would be a value a destination could match and so keep an
+// old manual for ever.
+func TestNoDocumentationHasNoFingerprint(t *testing.T) {
+	prev := docsRoot
+	t.Cleanup(func() { docsRoot = prev })
+	docsRoot = nil
+	if id, err := DocsFingerprint(); err == nil {
+		t.Errorf("a build with no documentation fingerprinted as %q", id)
 	}
 }

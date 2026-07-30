@@ -39,6 +39,11 @@ carries on.
   out during a restore.
 - **a snapshot job's only remaining archive** — deleting it would leave that
   backup with no protection at all.
+- **the status page and the manual beside it**
+  (`<machine>/.backup-maker-manual/`, about 2MB) — the two files that tell
+  somebody holding this drive what is on it and how to get it back. Reclaiming
+  2MB by deleting the instructions is not a trade worth making, and a destination
+  that cannot spare it is a hardware problem this page cannot solve.
 
 Deletion is spread **evenly across your folders**, oldest first, so one large
 folder can't quietly consume every other folder's history. Every deletion is
