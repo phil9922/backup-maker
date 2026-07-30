@@ -306,7 +306,7 @@ NAS lives" is not.
 The page notices it's the read-only view and hides the controls it can't use,
 rather than showing buttons that fail when tapped:
 
-![The dashboard as another device sees it: a read-only banner, folder labels and destination names with no paths, and no setup or remove controls](../screenshots/10-network-view.png)
+![The dashboard as another device sees it: a read-only banner, folder labels and destination names with no paths, no free-space figures, and no setup, edit or remove controls](../screenshots/10-network-view.png)
 
 Two things worth knowing:
 
@@ -347,6 +347,19 @@ from a phone or another PC and open it. If that destination is a Pi or NAS with
 a web server, point it at that folder and the page is a URL anyone on your
 network can visit, whether or not your computer is running.
 
+**When it gets written.** Every minute backup-maker works out what the page
+would say, and writes it if that differs from what's already there — so anything
+you'd act on, a destination going offline or a snapshot failing, reaches the page
+within the minute. If nothing has changed it rewrites the page anyway every
+fifteen minutes, so its timestamp keeps moving and a healthy machine is never
+mistaken for one that stopped reporting.
+
+Between those, the only thing that goes out of date is the *"4 minutes ago"*
+wording, which can read older than it really is. It can never read newer. That
+matters if your destination is an **SD card** — a Pi's boot card especially:
+earlier versions rewrote these files once a minute for ever, thousands of times
+a day, whether or not anything had happened.
+
 **It refuses to pretend it's current.** The page leads with *"last reported 4
 minutes ago"*, recomputed in your browser each time you open it. Past an hour it
 stops presenting itself as status at all:
@@ -365,8 +378,8 @@ only — never paths or addresses.
 
 If your destination is a Pi or NAS that stays powered, you can make the status
 page available as a URL on your network. Either `python3` or nginx will do it.
-The page is refreshed once a minute by backup-maker, so it's as current as the
-last sync cycle.
+The page is never more than a minute behind whatever it has to tell you, so
+it's as current as the last sync cycle.
 
 **Serve a folder containing only the status page — never the destination
 itself.** Pointed at the destination root, a plain file server would hand out
@@ -448,10 +461,56 @@ sudo nginx -s reload
 
 Open <http://192.168.1.20:8668/> from any device on your network.
 
+## When it looks stuck
+
+A destination that says **backed up** while the progress column sits on the same
+words for minutes is usually working. The reassuring column is the state one: it
+says whether there is a copy on that destination, and it keeps saying so while
+backup-maker looks for changes. The progress column beside it is what's happening
+*now*, and on a network share the looking can genuinely take minutes before a
+byte moves.
+
+To find out where those minutes went, read the log. Every completed pass says how
+long it took and which part of it was slow:
+
+```sh
+journalctl --user -u backup-maker | grep synced | tail -5
+```
+
+```
+msg=synced target=backup-pi took=27.1s copied=2 versioned_away=0 \
+  source=1.1s listing=25.7s comparing=269ms tidying=23ms dirs=33ms
+```
+
+Reading it:
+
+| Stage | What it was doing | Slow usually means |
+|---|---|---|
+| `source` | walking your own folder | a very large folder, or a slow local disk |
+| `listing` | asking the destination what it already has | a network share — this is normally the big one |
+| `comparing` | working out what differs | rarely the problem |
+| `tidying` | looking for things you deleted | rarely the problem |
+| `dirs` | clearing directories left empty | a share that is slow per request |
+
+In the example above, `listing` is 95% of the pass: the time is going on
+enumerating what's on the far end, which is what a share over SMB costs. That's
+normal, and it's why the first pass after a reboot is the slowest one you'll see.
+
+A pass that changed nothing is logged only if it was slow, so a quiet machine
+stays quiet in the log. If you want to see every pass, including the fast
+uneventful ones, they are there at debug level.
+
+**When it really is stuck**, the log says that instead — `sync interrupted`, with
+how long the pass lasted before it died. A destination that has genuinely stopped
+being written to also stops being **backed up** on the dashboard, which is the
+column to trust.
+
 ## On a small screen
 
-The dashboard adapts to narrow windows and phone-sized screens — the status
-table scrolls sideways rather than squashing its columns.
+The dashboard adapts to narrow windows and phone-sized screens. Rather than
+squashing its columns or making you scroll sideways, each backup table **stacks
+into one card per row**, with every column keeping its own label — so a folder
+and its destination stay readable at 390px wide.
 
 Worth being straight about how you'd get there, though: the dashboard listens
 on `127.0.0.1` only, so **a phone on your network cannot simply open it**.
@@ -478,7 +537,7 @@ next time the lease changes.
 
 | Setting up | Watching progress |
 | --- | --- |
-| ![The setup wizard on a phone, showing the computer list with storage ticked](../screenshots/mobile-wizard.png) | ![The dashboard on a phone, showing progress bars and the folders panel](../screenshots/mobile-dashboard.png) |
+| ![The setup wizard on a phone, showing the computer list with storage ticked](../screenshots/mobile-wizard.png) | ![The dashboard on a phone: each folder-and-destination row stacked into its own card with labelled Destination, State, Progress and Last sync lines](../screenshots/mobile-dashboard.png) |
 
 Prefer the command line? Everything the dashboard does has a CLI equivalent —
 see [Getting started](1-install.md), and use `backup-maker wizard` for

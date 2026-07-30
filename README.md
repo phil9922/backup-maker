@@ -164,12 +164,12 @@ separate panels, so you can see at a glance which promise a folder actually
 has. Folders you've stopped move to **No longer protected**, where the copies
 they left behind are still named.
 
-![Dashboard with a green "Everything is backed up" verdict, folder-and-destination rows all in sync, an "Incremental backups" panel listing code, documents and photos with their paths, a "Where backups go" panel listing each destination with its location, health and free space, a "No longer protected" panel showing a stopped folder whose copies are still on two destinations, and a "Timed snapshots" table naming the folder each schedule covers with Pause, Change and Stop beside it](docs/screenshots/07-dashboard.png)
+![Dashboard with a green "Everything is backed up" verdict and the address another device can watch from beneath it, an "Incremental backups" table grouping code, documents and photos under their paths with every destination "backed up" in green, a "Timed snapshots" table naming the folder each schedule covers with Pause, Edit and Stop beside it, a "Backup drives" panel listing each destination with its location, health and free space, and a "No longer protected" panel showing a stopped folder whose copies are still on two destinations](docs/screenshots/07-dashboard.png)
 
 While files are moving you get live progress per destination — real byte
 counts, updating in place. Nothing needs refreshing.
 
-![Dashboard mid-transfer: progress bars part way across with labels like "357.0MB of 2.9GB", timestamps counting in seconds](docs/screenshots/08-transferring.png)
+![Dashboard mid-transfer: a "Backing up now" verdict, progress bars part way across with labels like "2.1GB of 5.2GB", one destination still "checking for changes: 18,422 of 72,510", a folder on its first backup labelled "working out what to copy", and timestamps counting in seconds](docs/screenshots/08-transferring.png)
 
 Each destination also shows how full it is — a usage bar and "312GB free of
 1.8TB", turning amber as it tightens and red once it crosses the headroom you've
@@ -182,7 +182,7 @@ When something is wrong it says so plainly: a destination that's offline, one
 unreachable long enough to go stale, waiting to pair (connected but not yet
 approved), or another machine asking for approval.
 
-![Dashboard showing a network drive offline, a paired computer stale for 9 days marked with a warning triangle, and a notice that a machine called attic-pi wants to back up here](docs/screenshots/09-offline.png)
+![Dashboard showing a network drive offline in red, a paired computer stale for 9 days marked with a warning triangle, a snapshot schedule that failed, the offline drive keeping its last free-space reading marked "as of 4h ago", and a notice that a machine called attic-pi wants to back up here](docs/screenshots/09-offline.png)
 
 There's more — a read-only view for your phone, a status page that works while
 this computer is off, and the small-screen layout — in

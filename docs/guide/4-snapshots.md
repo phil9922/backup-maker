@@ -55,7 +55,7 @@ None of them deletes a snapshot that has already been written.
   the row reads *paused* rather than looking like a failure. **Resume** puts it
   back. If the interval passed while it was paused, the next run happens at the
   next check rather than waiting a full period.
-- **Change…** asks how often it should run (`hourly`, `12h`, `daily`, `weekly`,
+- **Edit** asks how often it should run (`hourly`, `12h`, `daily`, `weekly`,
   or a custom interval) and how many snapshots to keep. Lowering the keep count
   deletes nothing immediately — the extra snapshots are pruned by the next run,
   so a number typed by mistake can be corrected before it costs you anything.

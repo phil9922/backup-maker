@@ -80,8 +80,10 @@ folder is skipped: a directory of your own that merely happens to be *named*
 
 ## Stopping a folder
 
-**Stop protecting** on a folder's card stops future copying. It deletes
-nothing: the copies already on your destinations stay exactly where they are.
+**Stop**, on the folder's row under *Incremental backups*, stops future
+copying. It deletes nothing: the copies already on your destinations stay
+exactly where they are. (**Edit** beside it is where that folder's exclusions
+live.)
 
 Because those copies outlive the folder that made them, the folder does not
 simply disappear from the dashboard — it moves into a section called **No

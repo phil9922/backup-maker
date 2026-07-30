@@ -84,7 +84,7 @@ func cssHasSelector(css, sel string) bool {
 	// opening brace. Whitespace inside the selector is matched flexibly so
 	// reformatting the stylesheet does not fail the test.
 	q = strings.ReplaceAll(q, `\ `, `\s+`)
-	return regexp.MustCompile(`(?m)(^|[,\n])\s*`+q+`\s*[,{]`).MatchString(css)
+	return regexp.MustCompile(`(?m)(^|[,\n])\s*` + q + `\s*[,{]`).MatchString(css)
 }
 
 // cssBlock returns the declarations of the first rule whose selector list
