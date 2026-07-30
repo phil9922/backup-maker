@@ -598,7 +598,7 @@ tablet — and for checking a headless machine you're already SSH'd into.
 **For a phone, the network view above is the answer**, not the dashboard.
 Open `http://<that machine's address>:8667` and use your browser's *Add to
 Home Screen* — Share on iOS, the ⋮ menu on Android — and checking your backups
-becomes one tap. Opened on a phone-sized screen, the page reminds you how.
+becomes one tap.
 
 Two things to know before you do. It is the **read-only** view: you can watch,
 not change. And **the address must stop moving** — it is your machine's DHCP

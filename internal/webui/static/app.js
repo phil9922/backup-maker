@@ -1720,26 +1720,7 @@ document.getElementById('open-wizard').addEventListener('click', () => {
     'Read-only view. You can watch backups from here, but setting them up or ' +
     'changing them is only possible on the computer running backup-maker.');
   document.getElementById('dashboard').prepend(banner);
-  offerHomeScreen();
 })();
-
-// The read-only view is the only page a phone can open — the dashboard binds
-// loopback and refuses everything else — so this is where a home-screen icon
-// is worth suggesting.
-//
-// It is wording, not a button: no browser exposes a way for a page to add
-// itself to the home screen (the install prompt needs a full PWA, and iOS
-// Safari ignores it), and a control that looked like it worked but didn't
-// would be worse than saying nothing.
-function offerHomeScreen() {
-  const hint = document.getElementById('homescreen-hint');
-  if (!hint || !window.matchMedia('(max-width: 40rem)').matches) return;
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  hint.textContent = ios
-    ? ' Keep it a tap away: Share, then "Add to Home Screen".'
-    : ' Keep it a tap away: your browser\'s menu, then "Add to Home screen".';
-  hint.hidden = false;
-}
 
 // Expose for the wizard's "finished" callback.
 window.refreshDashboard = refresh;
