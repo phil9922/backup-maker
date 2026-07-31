@@ -201,10 +201,21 @@ sudo install backup-maker /usr/local/bin/
 backup-maker version
 ```
 
-On Windows, unzip the archive and run `backup-maker.exe` from wherever you keep
-it. On macOS the binaries aren't code-signed, so the first run is blocked until
-you either allow it under System Settings → Privacy & Security, or clear the
-quarantine flag yourself:
+On Windows, unzip the portable ZIP and move `backup-maker.exe` to a folder
+that will stay put — autostart records the binary's path, so a downloads
+folder is the wrong home for it:
+
+```powershell
+Expand-Archive backup-maker_0.1.0_windows_amd64.zip
+mkdir $env:LOCALAPPDATA\backup-maker
+move backup-maker_0.1.0_windows_amd64\backup-maker.exe $env:LOCALAPPDATA\backup-maker\
+& $env:LOCALAPPDATA\backup-maker\backup-maker.exe version
+```
+
+The binaries aren't code-signed, so each OS wants one reassurance on first
+run: Windows may show a SmartScreen warning — **More info → Run anyway**;
+macOS blocks the run until you allow it under System Settings → Privacy &
+Security, or clear the quarantine flag yourself:
 
 ```sh
 xattr -d com.apple.quarantine ./backup-maker
@@ -214,6 +225,12 @@ Every release ships a `checksums.txt`. To check a download arrived intact:
 
 ```sh
 sha256sum -c checksums.txt --ignore-missing
+```
+
+or on Windows, compare against the matching line of `checksums.txt`:
+
+```powershell
+Get-FileHash backup-maker_0.1.0_windows_amd64.zip
 ```
 
 Prefer to compile it? See
@@ -302,7 +319,7 @@ autostart, unit/conformance tests
 plus an end-to-end browser test that drives the real dashboard against a real
 daemon.
 
-Not yet built: Windows firewall helper command, OS-keychain credential storage.
+Not yet built: Windows firewall helper command.
 
 ## Support
 

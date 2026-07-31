@@ -25,6 +25,9 @@ backup-maker autostart enable         # survive reboots
 backup-maker web                      # or set it all up in the browser
 ```
 
+The same commands work in PowerShell or cmd — swap `daemon &` for
+`daemon --background`, which detaches without a console window.
+
 ## Which version am I running?
 
 `backup-maker version` prints it, and the dashboard shows it in the footer, so
@@ -47,6 +50,18 @@ binary you run it from, so install it before you enable anything:
 install -m 755 backup-maker ~/.local/bin/backup-maker
 ```
 
+or on Windows, a folder of its own under your profile:
+
+```powershell
+mkdir $env:LOCALAPPDATA\backup-maker
+move backup-maker.exe $env:LOCALAPPDATA\backup-maker\
+```
+
+Adding that folder to your `PATH` (Settings → search "environment variables",
+or `setx PATH "$env:PATH;$env:LOCALAPPDATA\backup-maker"` in a terminal you
+then reopen) lets you type `backup-maker` in any terminal, but nothing below
+requires it — the full path works everywhere a command is shown.
+
 Do not leave it in a downloads folder, in a git checkout you might move, or —
 least of all — inside a folder you are backing up. Any of those can vanish
 under the service later.
@@ -59,7 +74,10 @@ backup-maker autostart enable
 
 On Linux that writes a systemd *user* unit at
 `~/.config/systemd/user/backup-maker.service` and starts it immediately.
-macOS gets a LaunchAgent; Windows gets a Startup entry. Check it took:
+macOS gets a LaunchAgent, also started immediately. Windows gets a registry
+Run entry that takes effect at your **next sign-in** and deliberately leaves
+an already-running daemon alone — so on Windows, start it once yourself
+(`backup-maker daemon --background`) or sign out and back in. Check it took:
 
 ```sh
 systemctl --user status backup-maker.service    # Linux: should say "active (running)"
