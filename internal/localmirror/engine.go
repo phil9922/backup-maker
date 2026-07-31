@@ -47,7 +47,14 @@ type Engine struct {
 	// destFileHint is how many files the last completed pass found on the
 	// destination, used only as the denominator while the current one lists it.
 	destFileHint int64
-	log          *slog.Logger
+	// lastPrune is when this engine last thinned the version store. In-memory
+	// only and zero at start, so every restart prunes once after its first
+	// pass. That is deliberate: pruning used to wait on a 24-hour ticker,
+	// which needs 24 hours of continuous uptime before its first fire — and a
+	// daemon that restarts for every upgrade, reboot and suspend never gets
+	// there, so the store grew without bound.
+	lastPrune time.Time
+	log       *slog.Logger
 
 	// kick carries the source-relative paths the watcher saw in a burst, not just
 	// a nudge. The paths are what let a save be propagated without enumerating
@@ -235,6 +242,12 @@ func New(o Options) *Engine {
 	if o.OfflinePoll <= 0 {
 		o.OfflinePoll = 5 * time.Second
 	}
+	if o.MaxAgeDays <= 0 {
+		// Same convention as syncthing.StaggeredVersioning: unset means the
+		// default. A zero must never reach Prune — a maxAge of 0 reads as
+		// "every version is too old" and would empty the store.
+		o.MaxAgeDays = config.DefaultVersioningMaxDays
+	}
 	return &Engine{
 		FolderID:     o.FolderID,
 		TargetName:   o.TargetName,
@@ -274,19 +287,20 @@ func New(o Options) *Engine {
 }
 
 // Run drives the mirror until ctx is cancelled: initial reconcile, then
-// event-driven syncs with an hourly full-scan backstop and daily prune.
+// event-driven syncs with an hourly full-scan backstop. The version store is
+// pruned after the first pass and then daily, measured from the last
+// successful prune rather than from a ticker.
 func (e *Engine) Run(ctx context.Context) {
 	defer e.backend.Close()
 	go e.watch(ctx)
 
 	rescan := time.NewTicker(time.Hour)
 	defer rescan.Stop()
-	prune := time.NewTicker(24 * time.Hour)
-	defer prune.Stop()
 	offlinePoll := time.NewTicker(e.pollEvery)
 	defer offlinePoll.Stop()
 
 	e.sync()
+	e.pruneIfDue()
 	for {
 		select {
 		case <-ctx.Done():
@@ -303,12 +317,7 @@ func (e *Engine) Run(ctx context.Context) {
 			e.sync()
 		case <-rescan.C:
 			e.sync()
-		case <-prune.C:
-			if e.online() {
-				if err := Prune(e.backend, e.maxAge, time.Now()); err != nil {
-					e.log.Warn("version prune failed", "err", err)
-				}
-			}
+			e.pruneIfDue()
 		case <-offlinePoll.C:
 			// Cheap no-op while online; while offline this is the
 			// return detector that triggers catch-up (and, for network
@@ -319,6 +328,25 @@ func (e *Engine) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// pruneIfDue applies the staggered retention if a day has passed since this
+// engine last pruned successfully. It is checked after the initial pass and on
+// every hourly rescan, NOT from its own 24-hour ticker: a ticker resets with
+// the process, so it demanded 24 hours of continuous uptime before the first
+// fire — which a machine that upgrades, reboots or suspends daily never
+// reaches, and the "~30 days of versions" the docs promise silently became
+// "for ever". lastPrune only advances on success, so a failed prune retries
+// on the next tick instead of waiting out the day.
+func (e *Engine) pruneIfDue() {
+	if !e.online() || time.Since(e.lastPrune) < 24*time.Hour {
+		return
+	}
+	if err := Prune(e.backend, e.maxAge, time.Now()); err != nil {
+		e.log.Warn("version prune failed", "err", err)
+		return
+	}
+	e.lastPrune = time.Now()
 }
 
 // readyToWrite answers the questions that must be settled before anything is
