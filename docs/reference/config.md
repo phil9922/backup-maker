@@ -21,7 +21,8 @@ freely — the running daemon picks changes up within seconds.
 
 Which `[general]` keys exist is documented alongside the features that use
 them — see [5. Monitoring](../guide/5-monitoring.md) for alerts, delivery and
-the network view, and [When a destination fills up](space.md) for `min_free_gb`.
+the network view, [When a destination fills up](space.md) for `min_free_gb`,
+and [6. Restoring](../guide/6-restoring.md) for `versioning_max_age_days`.
 
 ---
 

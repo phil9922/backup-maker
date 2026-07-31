@@ -17,6 +17,14 @@ manager. Old versions of changed/deleted files live in
 `.stversions/` (machine targets), named `file~20260721-153000.txt`. Restore by
 copying out; don't edit files inside a backup target in place.
 
+Versions are kept for about 30 days, thinned as they age so a frequently-saved
+file doesn't fill the drive: one version per 30 seconds for the last hour, one
+per hour for the first day, one per day after that. So even a file saved on
+every keystroke can be wound back in half-minute steps for an hour — plenty to
+undo a bad afternoon — and in daily steps further back. To keep more or less,
+set `versioning_max_age_days` under `[defaults]` in
+[config.toml](../reference/config.md).
+
 ## Adopting a destination on a new machine
 
 Reinstalled, or replaced the computer entirely? Point a fresh install at a
