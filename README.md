@@ -70,8 +70,7 @@ see [Hardware guidance](docs/setup/hardware.md).
 > macOS) carrying the CLI and the localhost web dashboard. Core sync paths for
 > all three destination types are implemented and end-to-end tested. See
 > "Status & roadmap" below for what's not built yet, and the
-> [documentation](docs/README.md) for everything else. Author: Phil
-> Kokoska.
+> [documentation](docs/README.md) for everything else. Author: phil9922.
 
 - **Real-time & incremental** — a saved file is on every destination within
   seconds; only changed files transfer, never the whole tree.
