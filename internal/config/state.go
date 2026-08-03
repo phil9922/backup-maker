@@ -209,6 +209,69 @@ type AlertRecord struct {
 	// everywhere else.
 	Delivered []string `json:"delivered,omitempty"`
 	Failed    []string `json:"failed,omitempty"`
+	// DismissedAt is when somebody cleared this off the dashboard. It HIDES
+	// rather than deletes, and the distinction is the whole point of storing a
+	// time instead of dropping the row.
+	//
+	// The dashboard's job is the present, so "I have seen this, stop showing it
+	// to me" is a reasonable thing to want — the section already stops showing
+	// an alert after seven days for the same reason. But the history exists
+	// because alerting that has stopped working is the one fault this program
+	// cannot announce by alerting, and "delivered nowhere" is the most
+	// important line it holds. A dismiss that deleted the row would let the
+	// evidence of silent alerting be cleared away by the person least likely to
+	// know that is what they were doing. So `backup-maker alerts` still lists
+	// it, marked, and the record still ages out the ordinary way.
+	DismissedAt time.Time `json:"dismissed_at,omitzero"`
+}
+
+// Dismissed reports whether this alert has been cleared off the dashboard.
+func (r AlertRecord) Dismissed() bool { return !r.DismissedAt.IsZero() }
+
+// DismissAlertsAt hides every alert raised at exactly this instant, reporting
+// how many it changed and how many were there at all.
+//
+// KEYED ON THE RAISED TIME, because an AlertRecord has no id and inventing one
+// now would leave every record already in state.json unaddressable — on the
+// machines that have a history worth clearing. The time is stamped once per
+// alert from time.Now() at nanosecond precision, so two records sharing one is
+// not a case that arises; if it ever did, both are hidden, which is the
+// harmless direction.
+//
+// The two counts are separate so the caller can tell "there is no such alert"
+// from "it was already dismissed". Those deserve different answers: the first
+// is a mistake worth reporting, the second is a no-op, and conflating them
+// makes a second click report an alert that plainly exists as missing.
+// Already-dismissed records keep their original time, so the CLI says when
+// somebody actually dismissed it rather than when they last clicked.
+func (s *State) DismissAlertsAt(at, now time.Time) (changed, found int) {
+	for i := range s.RecentAlerts {
+		if !s.RecentAlerts[i].At.Equal(at) {
+			continue
+		}
+		found++
+		if !s.RecentAlerts[i].Dismissed() {
+			s.RecentAlerts[i].DismissedAt = now
+			changed++
+		}
+	}
+	return changed, found
+}
+
+// DismissAlertsBefore hides every alert raised at or before a moment — what
+// "Dismiss all" means. Bounded by a time rather than clearing the slice, so an
+// alert raised while the click was in flight is not silently swallowed: the one
+// thing worse than a dashboard that will not clear is one that clears something
+// you never saw.
+func (s *State) DismissAlertsBefore(cutoff, now time.Time) int {
+	n := 0
+	for i := range s.RecentAlerts {
+		if !s.RecentAlerts[i].At.After(cutoff) && !s.RecentAlerts[i].Dismissed() {
+			s.RecentAlerts[i].DismissedAt = now
+			n++
+		}
+	}
+	return n
 }
 
 // RecordAlert adds one alert to the history, keeping it in time order and

@@ -3,7 +3,9 @@
 package daemon
 
 import (
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/notify"
@@ -86,9 +88,45 @@ func (d *daemon) recordAlert(r config.AlertRecord) {
 	}
 }
 
+// dismissAlert hides one alert from the dashboard, keyed on the instant it was
+// raised. Dismissed records are still published and still listed by
+// `backup-maker alerts` — see AlertRecord.DismissedAt for why hiding and
+// deleting are deliberately different things here.
+func (d *daemon) dismissAlert(at time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	changed, found := d.state.DismissAlertsAt(at, time.Now())
+	if found == 0 {
+		// Saying so rather than answering ok: a dashboard whose Dismiss button
+		// reports success while the row stays put is the shape of bug that gets
+		// reported as "it doesn't work" with nothing in any log.
+		return fmt.Errorf("no alert was raised at %s", at.Format(time.RFC3339Nano))
+	}
+	if changed == 0 {
+		return nil // already dismissed — nothing to do, and not a failure
+	}
+	return d.state.Save()
+}
+
+// dismissAlertsBefore hides everything raised up to a moment — "Dismiss all",
+// bounded by the time the button was pressed so an alert raised since then
+// survives to be read.
+func (d *daemon) dismissAlertsBefore(cutoff time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.state.DismissAlertsBefore(cutoff, time.Now()) == 0 {
+		return nil // nothing to do is not a failure
+	}
+	return d.state.Save()
+}
+
 // alertHistory is what the dashboard and `backup-maker alerts` read, newest
 // first — the order somebody scanning for "what just happened" wants, and the
 // reverse of how it is stored.
+//
+// Dismissed records are INCLUDED. The dashboard drops them, because that is
+// what dismissing them meant; the CLI keeps them, because the history is the
+// one place a raised-and-delivered-nowhere alert is visible at all.
 func (d *daemon) alertHistory() []config.AlertRecord {
 	d.mu.Lock()
 	defer d.mu.Unlock()

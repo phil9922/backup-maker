@@ -952,12 +952,37 @@ select {
    dot whose span has an `ok`/`bad` class no rule can reach is drawn in the body
    colour — the exact fault that made every destination state look healthy for
    two releases. TestStateColoursReachTheWordTheyDescribe covers these too. */
-.alert-row { display: flex; flex-direction: column; gap: var(--s2); }
+/* align-items:stretch undoes the `start` inherited from .card, which this row
+   overrides the display of but not the alignment. Without it every child sizes
+   to its own content, so the head line is only as wide as its title — and the
+   `margin-left:auto` that puts Dismiss on the right edge has no free space to
+   resolve against and silently collapses to zero. */
+.alert-row {
+  display: flex; flex-direction: column; gap: var(--s2); align-items: stretch;
+}
 .alert-head { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
 .alert-head .ok { color: var(--ok); }
 .alert-head .bad { color: var(--bad); }
 .alert-head strong { color: var(--fg); }
 .alert-row p { margin: 0; }
+/* Dismiss sits at the far end of the head line, on the row it dismisses.
+   margin-left:auto rather than a column, because .alert-head wraps on a narrow
+   screen and a fixed column would drag the × onto a line of its own away from
+   the title it belongs to. */
+.alert-head .alert-dismiss {
+  margin-left: auto; line-height: 1; padding: 0.15rem 0.45rem;
+  font-size: 1.05rem; flex: none;
+}
+/* NOT `flex: 1 1 auto` on the title, which is the obvious way to stop a long
+   one wrapping the status dot onto a line of its own. It does not work — with
+   flex-wrap:wrap the line break is decided from each item's CONTENT size,
+   before any shrinking — and it costs something real: a growing title pushes
+   the timestamp away from the words it belongs to and out to the right-hand
+   edge of a wide screen. The narrow-screen wrap is left as it was. */
+.alerts-actions {
+  display: flex; align-items: center; gap: var(--s2);
+  flex-wrap: wrap; margin-top: var(--s2);
+}
 
 /* --- type icons -------------------------------------------------------- */
 .type-icon { width: 1rem; height: 1rem; flex: none; color: var(--muted); }

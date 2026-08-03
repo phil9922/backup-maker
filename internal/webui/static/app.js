@@ -1345,7 +1345,12 @@ function renderAlerts(st) {
   // failures.
   const all = (readOnly ? [] : st.recent_alerts) || [];
   const cutoff = Date.now() - ALERT_SHOWN_FOR_MS;
+  // A dismissed alert leaves this section and never returns to it. It is NOT
+  // deleted — the record stays in the history `backup-maker alerts` reads, and
+  // still says whether it was delivered anywhere. This page's job is the
+  // present; the history's job is that a silent failure stays on the record.
   const recent = all.filter((a) => {
+    if (a.dismissed_at) return false;
     const t = new Date(a.at).getTime();
     return !isNaN(t) && t >= cutoff;
   });
@@ -1368,6 +1373,13 @@ function renderAlerts(st) {
     const when = el('span', 'muted small', humanTime(a.at));
     when.title = new Date(a.at).toLocaleString();
     head.appendChild(when);
+    // Dismiss sits on the row it dismisses, at the end of the head line, so
+    // there is never a question of which entry it applies to.
+    const x = el('button', 'quiet alert-dismiss', '×');
+    x.title = 'Dismiss — hides this here; backup-maker alerts still has it';
+    x.setAttribute('aria-label', 'Dismiss "' + a.title + '"');
+    x.onclick = () => dismissAlerts({ at: a.at }, x);
+    head.appendChild(x);
     li.appendChild(head);
     if (a.body) li.appendChild(el('p', 'muted', a.body));
     li.appendChild(deliveryNote(a));
@@ -1380,6 +1392,34 @@ function renderAlerts(st) {
   more.textContent = hidden > 0
     ? `${hidden} older — see them with: backup-maker alerts --all`
     : '';
+
+  const foot = document.getElementById('alerts-actions');
+  foot.replaceChildren();
+  const all_ = el('button', 'quiet small', 'Dismiss all');
+  // Bounded by the newest alert ON SCREEN rather than by "now", so an alert
+  // that arrives between this page rendering and the click is not swallowed
+  // unread — the one outcome worse than a section that will not clear.
+  const newest = recent.reduce((m, a) => (a.at > m ? a.at : m), recent[0].at);
+  all_.onclick = () => dismissAlerts({ before: newest }, all_);
+  foot.appendChild(all_);
+  foot.appendChild(el('span', 'muted small',
+    'Dismissing hides an entry here. backup-maker alerts still lists it.'));
+}
+
+// Hide one alert, or everything up to a moment. The server keeps the record
+// either way; this only decides what the dashboard shows.
+async function dismissAlerts(what, btn) {
+  btn.disabled = true;
+  try {
+    const resp = await mutate('/api/alerts/dismiss',
+      { method: 'POST', body: JSON.stringify(what) });
+    if (!resp.ok) settingsMessage((await resp.text()).trim(), true);
+  } catch {
+    settingsMessage('Could not reach the backup daemon.', true);
+  } finally {
+    btn.disabled = false;
+    refresh();
+  }
 }
 
 // deliveryNote says where one alert actually got to.

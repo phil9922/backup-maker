@@ -1194,6 +1194,8 @@ func buildActions(d *daemon) webui.Actions {
 		SetArchiveSchedule:   setup.SetArchiveSchedule,
 		SetSettings:          d.setSettings,
 		TestAlert:            d.testAlert,
+		DismissAlert:         d.dismissAlert,
+		DismissAlertsBefore:  d.dismissAlertsBefore,
 		ApproveLANDevice:     d.approveLANDevice,
 		DenyLANDevice:        d.denyLANDevice,
 		ForgetLANDevice:      d.forgetLANDevice,

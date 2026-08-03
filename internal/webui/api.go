@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
 
@@ -713,6 +714,51 @@ func (s *Server) handleApproveLANDevice(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.actions.ApproveLANDevice(r.PathValue("code")); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// handleDismissAlert clears entries off "Recently reported".
+//
+// One request shape for both answers, because they are the same act at
+// different scope: `{"at": "<time>"}` hides the one alert raised at that
+// instant, `{"before": "<time>"}` hides everything up to that moment. "Dismiss
+// all" sends `before` set to now rather than an empty body meaning everything —
+// an alert raised between rendering the page and pressing the button is one
+// nobody has read, and clearing it would be the one thing worse than a
+// dashboard that will not clear.
+//
+// Neither deletes anything: `backup-maker alerts` still lists what was
+// dismissed, which is deliberate (see config.AlertRecord.DismissedAt).
+func (s *Server) handleDismissAlert(w http.ResponseWriter, r *http.Request) {
+	if s.actions.DismissAlert == nil || s.actions.DismissAlertsBefore == nil {
+		unavailable(w, "dismissing alerts")
+		return
+	}
+	var req struct {
+		At     string `json:"at"`
+		Before string `json:"before"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&req); err != nil {
+		http.Error(w, "could not read which alert to dismiss", http.StatusBadRequest)
+		return
+	}
+	which, act := req.At, s.actions.DismissAlert
+	if req.At == "" {
+		which, act = req.Before, s.actions.DismissAlertsBefore
+	}
+	if which == "" {
+		http.Error(w, "say which alert to dismiss, or how far back", http.StatusBadRequest)
+		return
+	}
+	when, err := time.Parse(time.RFC3339Nano, which)
+	if err != nil {
+		http.Error(w, "that is not a time this understands", http.StatusBadRequest)
+		return
+	}
+	if err := act(when); err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}

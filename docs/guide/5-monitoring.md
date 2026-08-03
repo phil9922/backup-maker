@@ -261,6 +261,15 @@ that backups stopped at 3am and came back at 6.
 There is now. The dashboard shows **Recently reported** beneath the verdict
 whenever something was raised in the last week, and the full list is:
 
+**Clearing it.** Each entry has a **×**, and there is a **Dismiss all** beneath
+them. Both only hide: the record stays in the history, `backup-maker alerts`
+still lists it and still says where it got to, marked `(dismissed)`. That
+distinction is deliberate rather than fussy — an alert that was raised and
+delivered nowhere is the only visible sign that alerting itself has stopped
+working, and tidying a dashboard should not be able to erase it. **Dismiss all**
+clears what is on the page and nothing newer, so an alert that arrives while you
+are reading is still there afterwards.
+
 ```sh
 backup-maker alerts             # the last ten, newest first
 backup-maker alerts --all       # everything kept

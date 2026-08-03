@@ -149,6 +149,12 @@ type Actions struct {
 	// leaves the view open to everyone on the network, which is what it was
 	// before the setting existed.
 	LANGate *LANGate
+	// DismissAlert hides one entry under "Recently reported", keyed on the
+	// instant it was raised. DismissAlertsBefore does the same for everything
+	// up to a moment — "Dismiss all". Neither deletes: the record stays in the
+	// history that `backup-maker alerts` reads.
+	DismissAlert        func(at time.Time) error
+	DismissAlertsBefore func(cutoff time.Time) error
 	// DenyLANDevice turns a waiting device down without deleting what
 	// recognises it, so it is refused in silence instead of asking again
 	// under a new code every few seconds.
@@ -462,6 +468,7 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("DELETE /api/archives/{name}", s.requireToken(s.handleRemoveArchive))
 	mux.HandleFunc("POST /api/settings", s.requireToken(s.handleSetSettings))
 	mux.HandleFunc("POST /api/alerts/test", s.requireToken(s.handleTestAlert))
+	mux.HandleFunc("POST /api/alerts/dismiss", s.requireToken(s.handleDismissAlert))
 	mux.HandleFunc("POST /api/lan-devices/{code}/approve", s.requireToken(s.handleApproveLANDevice))
 	mux.HandleFunc("POST /api/lan-devices/{code}/deny", s.requireToken(s.handleDenyLANDevice))
 	mux.HandleFunc("DELETE /api/lan-devices/{code}", s.requireToken(s.handleForgetLANDevice))

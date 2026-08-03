@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/daemon"
 	"github.com/phil9922/backup-maker/internal/status"
 )
@@ -50,21 +51,41 @@ where backups can fail without you ever hearing about it.`,
 			show = show[:brief]
 		}
 		for _, a := range show {
-			mark := "  "
-			if a.Urgent {
-				mark = "!!"
+			for _, line := range alertLines(a) {
+				fmt.Println(line)
 			}
-			fmt.Printf("%s %-12s %s\n", mark, humanTime(a.At), a.Title)
-			if a.Body != "" {
-				fmt.Printf("               %s\n", a.Body)
-			}
-			fmt.Printf("               %s, %s\n", a.At.Format("2 Jan 2006, 15:04"), deliveryLine(a.Delivered, a.Failed))
 		}
 		if len(show) < len(m.RecentAlerts) {
 			fmt.Printf("\n%d older, shown with: backup-maker alerts --all\n", len(m.RecentAlerts)-len(show))
 		}
 		return nil
 	},
+}
+
+// alertLines renders one alert for the terminal.
+//
+// A function rather than a run of Printf so it can be tested. What it must
+// never stop doing is marking a DISMISSED alert while still listing it:
+// dismissing clears an entry off the dashboard and nothing more, and this
+// listing is the only place a raised-and-delivered-nowhere alert remains
+// visible. If tidying a page could remove it from here too, the evidence that
+// alerting itself had stopped working would be clearable by somebody with no
+// idea that is what they were doing.
+func alertLines(a config.AlertRecord) []string {
+	mark := "  "
+	if a.Urgent {
+		mark = "!!"
+	}
+	seen := ""
+	if a.Dismissed() {
+		seen = "  (dismissed)"
+	}
+	lines := []string{fmt.Sprintf("%s %-12s %s%s", mark, humanTime(a.At), a.Title, seen)}
+	if a.Body != "" {
+		lines = append(lines, "               "+a.Body)
+	}
+	return append(lines, fmt.Sprintf("               %s, %s",
+		a.At.Format("2 Jan 2006, 15:04"), deliveryLine(a.Delivered, a.Failed)))
 }
 
 // deliveryLine says where one alert actually got to.
