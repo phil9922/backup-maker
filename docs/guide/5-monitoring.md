@@ -220,6 +220,27 @@ is never allowed to hide behind a collapsed section.
     **Deny**; approving it lets that device read backup status, and **Revoke**
     takes it away again immediately.
 
+  **The holding page asks the device what it is**, and whatever is typed there
+  appears beside the code on your dashboard — so the request reads *"Alex's
+  phone — iPhone at 192.168.1.23"* rather than describing an anonymous handset
+  by an address that changes with the DHCP lease. Nobody has to type anything;
+  a device that gives no name is listed exactly as it was before.
+
+  **Treat that name as a hint and the code as the check.** It is typed by
+  whoever is holding the device, which is the point — but it also means anyone
+  on your wifi can choose what their own row says about itself. The code is
+  generated here and shown on both screens, so it is the one thing neither end
+  can pick. A name is worth reading; it is not worth approving on.
+
+  **Deny means "stop asking me", and it lasts a week.** The device keeps seeing
+  the holding page — it is told nothing about having been turned down — but it
+  raises no further notification and does not come back to the top of your
+  dashboard. After a week it may ask again, which is what stops a phone denied
+  by mistake being locked out for good. To undo it sooner, or to change your
+  mind at any point, the denied device stays listed under the access setting
+  with **Allow** beside it. **Forget** there throws the record away instead,
+  which lets that device ask again immediately.
+
   Approval is remembered by a token in that browser's cookies, **not by IP
   address**. That is deliberate: a LAN address is a DHCP lease that moves, so
   it would lock out your own phone when the router reassigned it, and anyone

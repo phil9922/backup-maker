@@ -20,6 +20,12 @@ found because somebody re-shot the screenshots. So the shooting scripts refuse t
 save a shot that fails these, and the guards live here rather than in one of them.
 """
 
+# Used by nothing_local_leaked to ask the OS for the real home directory. It was
+# missing, so that guard raised NameError instead of checking anything — the one
+# failure a guard must never have, since a guard that throws looks the same from
+# a distance as a guard that passes.
+import os
+
 # Text whose colour matches the surface behind it. Catches the whole family:
 # invisible labels, and states that lost their colour and fell back to the body's.
 INVISIBLE_TEXT = """() => {

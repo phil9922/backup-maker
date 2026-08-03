@@ -1129,6 +1129,13 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
 /* The code is what makes approving a comparison rather than a guess, so it is
    the largest thing in the row. */
 .lan-request-code { font-size: 1.35rem; letter-spacing: 0.1em; }
+/* The name a device gave for itself, over the line describing what actually
+   connected. Stacked rather than run together, because they answer different
+   questions — what it calls itself, and what we can see of it — and a reader
+   who trusts the first without noticing the second has been misled by a string
+   somebody on the network chose. */
+.lan-request-who { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.lan-request-who strong { overflow-wrap: anywhere; }
 .lan-request-actions { display: flex; gap: var(--s2); margin-left: auto; }
 @media (max-width: 40rem) {
   .lan-request-actions { margin-left: 0; width: 100%; }

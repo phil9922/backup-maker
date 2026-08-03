@@ -523,13 +523,25 @@ func (a *alerter) updateAvailable(latest string) {
 // is asking for access and is waiting on an answer — and a settings panel with
 // one row per internal code path is how a preferences screen becomes unusable.
 // Normal urgency: it is a request, not a fault.
-func (a *alerter) lanDeviceWaiting(code, kind string) {
+// The name, when there is one, is what the device typed for itself — so it
+// leads, with the kind of device kept behind it as the part nobody chose:
+// "Phil's iPhone (iPhone) wants to see backup status". A notification is read
+// in one glance and acted on somewhere else, so the CODE is still what the body
+// asks you to match. A name cannot be checked against anything.
+func (a *alerter) lanDeviceWaiting(code, kind, name string) {
 	if !a.wants(config.AlertKinds.PairRequestsOn) {
 		return
 	}
+	who := kind
+	if name != "" {
+		who = name
+		if kind != "" {
+			who += " (" + kind + ")"
+		}
+	}
 	a.send(alert{
 		urgency: notify.Normal,
-		title:   kind + " wants to see backup status",
+		title:   who + " wants to see backup status",
 		body:    "Approve code " + code + " on the backup-maker dashboard to let it watch.",
 	})
 }

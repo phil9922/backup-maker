@@ -149,6 +149,10 @@ type Actions struct {
 	// leaves the view open to everyone on the network, which is what it was
 	// before the setting existed.
 	LANGate *LANGate
+	// DenyLANDevice turns a waiting device down without deleting what
+	// recognises it, so it is refused in silence instead of asking again
+	// under a new code every few seconds.
+	DenyLANDevice func(code string) error
 	// ApproveLANDevice and ForgetLANDevice manage that list from the
 	// dashboard. Loopback-only, like every other mutating route.
 	ApproveLANDevice func(code string) error
@@ -459,6 +463,7 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("POST /api/settings", s.requireToken(s.handleSetSettings))
 	mux.HandleFunc("POST /api/alerts/test", s.requireToken(s.handleTestAlert))
 	mux.HandleFunc("POST /api/lan-devices/{code}/approve", s.requireToken(s.handleApproveLANDevice))
+	mux.HandleFunc("POST /api/lan-devices/{code}/deny", s.requireToken(s.handleDenyLANDevice))
 	mux.HandleFunc("DELETE /api/lan-devices/{code}", s.requireToken(s.handleForgetLANDevice))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.General.DashboardPort)

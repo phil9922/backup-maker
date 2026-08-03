@@ -39,13 +39,22 @@ func lanReadOnly(next http.Handler, status func() any, gate *LANGate) http.Handl
 		// approved.
 		policy := gate.check(w, r)
 		if !policy.allow {
+			// The one thing a device that has not been approved may say. It is
+			// handled INSIDE the refusal branch rather than added to the
+			// allow-list below, so it can never become a route an approved
+			// device reaches or a route that exists when the gate is off — it
+			// is part of the holding page, not part of the view.
+			if r.Method == http.MethodPost && r.URL.Path == "/name" {
+				gate.handleDeviceName(w, r, policy)
+				return
+			}
 			if strings.HasPrefix(r.URL.Path, "/api/") {
 				// Whatever the page is doing in the background gets a plain
 				// refusal rather than a page of HTML.
 				http.Error(w, "this device is waiting for approval", http.StatusForbidden)
 				return
 			}
-			holdingPage(w, policy.code)
+			holdingPage(w, policy.code, policy.name)
 			return
 		}
 		// Static assets (the dashboard itself) are fine to serve. Everything

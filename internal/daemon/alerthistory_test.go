@@ -107,7 +107,7 @@ func TestEveryKindOfAlertReachesTheHistory(t *testing.T) {
 	a.nameClash("card", "/media/card", "my-laptop")
 	a.nameClashResolved("card", "/media/card")
 	a.updateAvailable("v9.9.9")
-	a.lanDeviceWaiting("123456", "A phone")
+	a.lanDeviceWaiting("123456", "A phone", "")
 
 	recs := want(6)
 	seen := map[string]bool{}

@@ -719,6 +719,21 @@ func (s *Server) handleApproveLANDevice(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
+// handleDenyLANDevice turns a waiting device down. Loopback-only like the rest:
+// the answer to "may this thing watch" is given at the machine, never from the
+// network asking the question.
+func (s *Server) handleDenyLANDevice(w http.ResponseWriter, r *http.Request) {
+	if s.actions.DenyLANDevice == nil {
+		unavailable(w, "device approval")
+		return
+	}
+	if err := s.actions.DenyLANDevice(r.PathValue("code")); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
 // handleForgetLANDevice removes a device, approved or not. Removing an approved
 // one revokes it: the browser's token stops matching anything and it is back to
 // the holding page.

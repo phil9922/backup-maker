@@ -33,15 +33,27 @@ type LANGate struct {
 	// device reads the view, exactly as before this existed.
 	ApprovedOnly func() bool
 	// Seen records a device arriving with this token — issuing the record on
-	// first sight — and reports whether it is approved and the short code to
-	// show it. An empty token means the browser sent none.
-	Seen func(token, addr, agent string) (approved bool, code string, issued string)
+	// first sight — and reports whether it is approved, the short code to show
+	// it, and the name it has already given itself. An empty token means the
+	// browser sent none.
+	Seen func(token, addr, agent string) (approved bool, code, name, issued string)
+	// Named records what a device calls itself, against the token it arrived
+	// with. Reports whether there was a record to name — false for a browser
+	// whose request has since lapsed, which is a thing to say rather than a
+	// thing to silently accept.
+	Named func(token, name string) bool
 }
 
 // devicePolicy is what the wrapper needs to know about one request.
 type devicePolicy struct {
 	allow bool
 	code  string
+	// name is what the device has called itself so far, so the holding page can
+	// show the box already filled in rather than asking again on every reload.
+	name string
+	// token is the record this request belongs to, so a name posted back can be
+	// filed against the device that posted it and no other.
+	token string
 	// issued is a token to set as a cookie, blank when the browser already had
 	// a usable one.
 	issued string
@@ -55,7 +67,7 @@ func (g *LANGate) check(w http.ResponseWriter, r *http.Request) devicePolicy {
 	if c, err := r.Cookie(lanDeviceCookie); err == nil {
 		token = c.Value
 	}
-	approved, code, issued := g.Seen(token, clientAddr(r), deviceKind(r.UserAgent()))
+	approved, code, name, issued := g.Seen(token, clientAddr(r), deviceKind(r.UserAgent()))
 	if issued != "" {
 		http.SetCookie(w, &http.Cookie{
 			Name:  lanDeviceCookie,
@@ -68,7 +80,46 @@ func (g *LANGate) check(w http.ResponseWriter, r *http.Request) devicePolicy {
 			SameSite: http.SameSiteLaxMode,
 		})
 	}
-	return devicePolicy{allow: approved, code: code, issued: issued}
+	if issued != "" {
+		token = issued
+	}
+	return devicePolicy{allow: approved, code: code, name: name, token: token, issued: issued}
+}
+
+// maxDeviceNameBody bounds what the network listener will read from an
+// unapproved device posting its name. A name is forty characters; a kilobyte is
+// already absurd, and the point is that nothing about this endpoint scales with
+// what the client decides to send.
+const maxDeviceNameBody = 1 << 10
+
+// handleDeviceName files the name a waiting device gave for itself.
+//
+// THE ONLY THING AN UNAPPROVED DEVICE MAY WRITE, and the exception is narrow on
+// purpose: it writes one bounded, sanitised string, into the record its own
+// cookie already identifies, about itself. It cannot name another device, it
+// cannot approve itself, and nothing it writes is ever consulted to decide
+// anything — the answer to this request is the same holding page either way.
+func (g *LANGate) handleDeviceName(w http.ResponseWriter, r *http.Request, policy devicePolicy) {
+	if g.Named == nil || policy.token == "" {
+		http.Error(w, "this device is waiting for approval", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxDeviceNameBody)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "that name could not be read", http.StatusBadRequest)
+		return
+	}
+	// A request that lapsed while somebody was typing into it does NOT land
+	// here: the gate above has already filed this POST as a fresh request and
+	// issued a cookie for it, so the name goes onto the live record. This is
+	// the case where there is no record even after that — nothing to name, and
+	// worth saying rather than answering 204 to a write that did not happen.
+	if !g.Named(policy.token, r.PostFormValue("name")) {
+		http.Error(w, "this request has expired — reload to ask again", http.StatusConflict)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // clientAddr is the peer address, for recognition only — never for a decision.
@@ -137,8 +188,19 @@ func NewLANDeviceCode() string {
 // code, so they can match it against the one on the dashboard.
 //
 // Deliberately says nothing about the backups themselves. Whoever is reading
-// this has not been approved to know anything.
-func holdingPage(w http.ResponseWriter, code string) {
+// this has not been approved to know anything. That includes whether they were
+// turned down: a denied device sees exactly this page, because "no" is a fact
+// for the person at the computer, and telling the other end only invites
+// another try from a different browser.
+//
+// IT ALSO ASKS WHO IS HOLDING IT. The dashboard end of this exchange used to
+// offer a code, a coarse guess at the kind of device and an address, which
+// answers "something is asking" but not "what am I letting in" — and in a house
+// with three iPhones on it, an address that changes with the lease is not an
+// answer. The device is the only end that knows, so it is the end that is
+// asked. What comes back is a label and is treated as one: the code is still
+// what gets compared before anybody presses Approve.
+func holdingPage(w http.ResponseWriter, code, name string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusForbidden)
@@ -156,14 +218,68 @@ func holdingPage(w http.ResponseWriter, code string) {
   .code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1.6rem;
           letter-spacing:.12em; background:#1c2430; border:1px solid #2b3542;
           border-radius:10px; padding:.6rem 1rem; display:inline-block; margin:.5rem 0 1rem; }
+  form { display:flex; gap:.5rem; margin:0 0 .75rem; }
+  input { flex:1 1 auto; min-width:0; font:inherit; font-size:1rem; color:#e6e9ee;
+          background:#1c2430; border:1px solid #2b3542; border-radius:8px; padding:.55rem .7rem; }
+  input::placeholder { color:#6b7686; }
+  button { font:inherit; font-size:1rem; color:#10141a; background:#7aa2f7; border:0;
+           border-radius:8px; padding:.55rem .9rem; cursor:pointer; }
+  .named { color:#e6e9ee; }
 </style></head>
 <body><main>
   <h1>This device is waiting for approval</h1>
   <p>Backup status is only shown to devices approved on the computer running backup-maker.</p>
   <div class="code">` + html.EscapeString(code) + `</div>
+  <p>Give this device a name so whoever is at that computer knows what is asking.</p>
+  <form id="name-form" method="post" action="/name">
+    <input id="name" name="name" value="` + html.EscapeString(name) + `" maxlength="40"
+           placeholder="e.g. Alex&#39;s phone" autocomplete="off"
+           aria-label="A name for this device">
+    <button type="submit">Save</button>
+  </form>
+  <p id="said"` + hiddenUnlessNamed(name) + `>Asking as <span class="named">` +
+		html.EscapeString(name) + `</span>.</p>
   <p>Open the backup-maker dashboard on that computer and approve this code.
      This page checks again on its own.</p>
 </main>
-<script>setTimeout(function(){location.reload();}, 5000);</script>
+<script>
+// The reload is what makes approval arrive without anybody tapping anything —
+// and it is also, if left alone, what wipes a half-typed name every five
+// seconds. It stands down while the box is being used, which is the same guard
+// the dashboard's exclude editor needs for the same reason.
+(function () {
+  var form = document.getElementById('name-form');
+  var box = document.getElementById('name');
+  var said = document.getElementById('said');
+  var busy = false;
+  box.addEventListener('focus', function () { busy = true; });
+  box.addEventListener('blur', function () { busy = false; });
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var body = new URLSearchParams();
+    body.set('name', box.value);
+    fetch('/name', {method: 'POST', body: body,
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+      .then(function () {
+        box.blur();
+        busy = false;
+        said.hidden = box.value.trim() === '';
+        said.querySelector('.named').textContent = box.value.trim();
+      })
+      .catch(function () {});
+  });
+  setInterval(function () { if (!busy) { location.reload(); } }, 5000);
+})();
+</script>
 </body></html>`))
+}
+
+// hiddenUnlessNamed keeps the confirmation line out of the page until there is
+// something to confirm, rather than rendering an empty "Asking as ." and hiding
+// it with a class somebody could forget to write a rule for.
+func hiddenUnlessNamed(name string) string {
+	if name == "" {
+		return " hidden"
+	}
+	return ""
 }

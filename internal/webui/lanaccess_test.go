@@ -15,24 +15,47 @@ type deviceBook struct {
 	mu       sync.Mutex
 	approved map[string]bool // token -> approved
 	codes    map[string]string
+	names    map[string]string
 	next     int
+	// forget makes a token stop matching, standing in for a request that
+	// lapsed while somebody was typing a name into it.
+	forget map[string]bool
 }
 
 func newBook() *deviceBook {
-	return &deviceBook{approved: map[string]bool{}, codes: map[string]string{}}
+	return &deviceBook{
+		approved: map[string]bool{}, codes: map[string]string{},
+		names: map[string]string{}, forget: map[string]bool{},
+	}
 }
 
-func (b *deviceBook) seen(token, addr, agent string) (bool, string, string) {
+func (b *deviceBook) seen(token, addr, agent string) (bool, string, string, string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if code, ok := b.codes[token]; ok && token != "" {
-		return b.approved[token], code, ""
+		return b.approved[token], code, b.names[token], ""
 	}
 	b.next++
 	issued := "token-" + string(rune('a'+b.next-1))
 	code := "CODE-" + string(rune('A'+b.next-1))
 	b.codes[issued] = code
-	return false, code, issued
+	return false, code, "", issued
+}
+
+func (b *deviceBook) named(token, name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.codes[token]; !ok || b.forget[token] {
+		return false
+	}
+	b.names[token] = name
+	return true
+}
+
+func (b *deviceBook) nameOf(token string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.names[token]
 }
 
 func (b *deviceBook) approve(token string) {
@@ -48,6 +71,7 @@ func gated(book *deviceBook, armed bool) http.Handler {
 		&LANGate{
 			ApprovedOnly: func() bool { return armed },
 			Seen:         book.seen,
+			Named:        book.named,
 		})
 }
 

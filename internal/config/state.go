@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // State is machine-owned runtime data, distinct from the user-editable
@@ -559,4 +561,75 @@ type LANDevice struct {
 	// Agent is a coarse guess at the kind of device ("iPhone", "Android"),
 	// for the same recognition purpose. Never trusted.
 	Agent string `json:"agent,omitempty"`
+	// Name is what the person holding the device typed on the holding page,
+	// so the row on the dashboard says "Phil's iPhone" rather than describing
+	// an anonymous handset by its address.
+	//
+	// IT IS TYPED BY WHOEVER IS ON THE NETWORK, which makes it the only
+	// attacker-chosen string in this record. Treated accordingly: sanitised on
+	// the way in (SafeDeviceName), escaped on the way out, and never allowed to
+	// become the thing you check before approving — that is still the CODE,
+	// which neither side can choose. A name that says "already approved" must
+	// cost nothing, because nobody is meant to be reading it as evidence.
+	Name string `json:"name,omitempty"`
+	// DeniedAt is when somebody at the machine turned this device down. While
+	// it is set the device is refused in silence: no alert, and no row in the
+	// queue waiting to be answered again.
+	//
+	// A DENIAL LAPSES (see deniedLANDeviceTTL) rather than standing for ever.
+	// Denying is a one-click answer to something that interrupted you, and the
+	// device it was aimed at is often one you do want later — a phone denied by
+	// mistake must not be permanently unable to ask. What must not lapse is the
+	// quiet: the point of denying is that the thing stops pestering you now.
+	DeniedAt time.Time `json:"denied_at,omitzero"`
+}
+
+// SafeDeviceName reduces what a device typed for itself to something that can
+// be shown in a list beside a decision.
+//
+// EVERYTHING HERE ASSUMES THE STRING IS HOSTILE. It arrives on the
+// unauthenticated network listener, so it is bounded (a name is a label, not a
+// payload), stripped of control characters (which can reorder or hide the text
+// around them in a terminal or a log line), and collapsed to single spaces so
+// nothing can pad itself into looking like a separate row. The empty string is
+// a valid answer and means "no name" — clearing one is allowed.
+func SafeDeviceName(s string) string {
+	const maxDeviceName = 40
+	if !utf8.ValidString(s) {
+		return ""
+	}
+	var b strings.Builder
+	kept, gap := 0, false
+	for _, r := range s {
+		// Whitespace is tested BEFORE control characters, because a newline is
+		// both and the two answers differ: as a control character it would be
+		// deleted, turning "kitchen\ntablet" into one word, and as whitespace
+		// it collapses into the single space that was plainly meant. What it
+		// must not do is survive — a name spanning two lines is a name that can
+		// forge a second row in a list or a second line in a log.
+		if unicode.IsSpace(r) {
+			gap = kept > 0
+			continue
+		}
+		// Cf covers the bidirectional overrides and the zero-width characters:
+		// the ones that let a string render as something other than what it is,
+		// or hide inside another word.
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		if gap {
+			if kept >= maxDeviceName {
+				break
+			}
+			b.WriteRune(' ')
+			kept++
+			gap = false
+		}
+		if kept >= maxDeviceName {
+			break
+		}
+		b.WriteRune(r)
+		kept++
+	}
+	return b.String()
 }

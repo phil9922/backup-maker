@@ -61,6 +61,18 @@ wondering what it will and won't do on its own.
   the same reason none of them is ever sent back to the dashboard: it is told
   only that one is saved, so replacing one means typing it again. Set them in
   the dashboard's Settings panel, not by hand.
+- **A device waiting for approval can write exactly one thing: a name for
+  itself.** With the network view set to *specific devices*, the holding page
+  asks what the device is, and that name is shown beside the code on your
+  dashboard. It is the only string in the program typed by somebody who has not
+  been approved to do anything, so it is bounded (40 characters), stripped of
+  control and direction-changing characters, stored as text, rendered as text,
+  and filed against the token in that browser's own cookie — a device can name
+  itself and nothing else. It decides nothing: the same holding page comes back
+  either way. **The short code remains the thing to check before approving**,
+  because it is generated here and neither end can choose it; a name that reads
+  *"the household NAS"* is a claim, not a credential. Names are never published
+  on the network view itself.
 - The built-in SMB client speaks SMB 2/3 only. Devices that offer nothing but
   SMB1 (very old routers/NAS) aren't supported — check for a firmware update.
 - Automatic deletion to reclaim space is **off unless you set `min_free_gb`**,

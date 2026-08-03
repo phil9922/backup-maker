@@ -32,7 +32,7 @@ func TestTheWaitingListCannotBeGrownWithoutBound(t *testing.T) {
 	d := gatedDaemon(t)
 
 	for range 500 {
-		if _, _, issued := d.lanDeviceSeen("", "192.168.1.9", "a device"); issued == "" {
+		if _, _, _, issued := d.lanDeviceSeen("", "192.168.1.9", "a device"); issued == "" {
 			t.Fatal("no token was issued")
 		}
 	}
@@ -46,7 +46,7 @@ func TestTheWaitingListCannotBeGrownWithoutBound(t *testing.T) {
 func TestEvictionNeverForgetsAnApprovedDevice(t *testing.T) {
 	d := gatedDaemon(t)
 
-	_, code, token := d.lanDeviceSeen("", "192.168.1.20", "iPhone")
+	_, code, _, token := d.lanDeviceSeen("", "192.168.1.20", "iPhone")
 	if err := d.approveLANDevice(code); err != nil {
 		t.Fatalf("approving: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestEvictionNeverForgetsAnApprovedDevice(t *testing.T) {
 		d.lanDeviceSeen("", "192.168.1.9", "a device")
 	}
 
-	approved, gotCode, issued := d.lanDeviceSeen(token, "192.168.1.20", "iPhone")
+	approved, gotCode, _, issued := d.lanDeviceSeen(token, "192.168.1.20", "iPhone")
 	if !approved {
 		t.Error("an approved device was evicted by a flood of unapproved ones")
 	}
@@ -67,12 +67,12 @@ func TestEvictionNeverForgetsAnApprovedDevice(t *testing.T) {
 // A returning approved device must be recognised by its token, not re-queued.
 func TestAnApprovedDeviceIsRecognisedOnReturn(t *testing.T) {
 	d := gatedDaemon(t)
-	_, code, token := d.lanDeviceSeen("", "192.168.1.30", "Android")
+	_, code, _, token := d.lanDeviceSeen("", "192.168.1.30", "Android")
 	if err := d.approveLANDevice(code); err != nil {
 		t.Fatal(err)
 	}
 	for range 5 {
-		approved, _, issued := d.lanDeviceSeen(token, "192.168.1.30", "Android")
+		approved, _, _, issued := d.lanDeviceSeen(token, "192.168.1.30", "Android")
 		if !approved || issued != "" {
 			t.Fatalf("a returning approved device was challenged again (approved=%v issued=%q)", approved, issued)
 		}
@@ -85,17 +85,17 @@ func TestAnApprovedDeviceIsRecognisedOnReturn(t *testing.T) {
 // Revoking takes effect at once — that is the whole point of being able to.
 func TestRevokingADeviceLocksItOutImmediately(t *testing.T) {
 	d := gatedDaemon(t)
-	_, code, token := d.lanDeviceSeen("", "192.168.1.40", "iPad")
+	_, code, _, token := d.lanDeviceSeen("", "192.168.1.40", "iPad")
 	if err := d.approveLANDevice(code); err != nil {
 		t.Fatal(err)
 	}
-	if approved, _, _ := d.lanDeviceSeen(token, "192.168.1.40", "iPad"); !approved {
+	if approved, _, _, _ := d.lanDeviceSeen(token, "192.168.1.40", "iPad"); !approved {
 		t.Fatal("approval did not take")
 	}
 	if err := d.forgetLANDevice(code); err != nil {
 		t.Fatalf("revoking: %v", err)
 	}
-	approved, _, issued := d.lanDeviceSeen(token, "192.168.1.40", "iPad")
+	approved, _, _, issued := d.lanDeviceSeen(token, "192.168.1.40", "iPad")
 	if approved {
 		t.Error("a revoked device still reads the network view")
 	}

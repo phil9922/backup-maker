@@ -1195,10 +1195,12 @@ func buildActions(d *daemon) webui.Actions {
 		SetSettings:          d.setSettings,
 		TestAlert:            d.testAlert,
 		ApproveLANDevice:     d.approveLANDevice,
+		DenyLANDevice:        d.denyLANDevice,
 		ForgetLANDevice:      d.forgetLANDevice,
 		LANGate: &webui.LANGate{
 			ApprovedOnly: d.lanViewApprovedOnly,
 			Seen:         d.lanDeviceSeen,
+			Named:        d.lanDeviceNamed,
 		},
 	}
 }

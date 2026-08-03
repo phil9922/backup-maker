@@ -176,11 +176,22 @@ type DeliveryInfo struct {
 // question being answered is "is this the phone in my hand?" — and an address
 // or a user-agent string cannot answer it. Both are carried anyway, as
 // recognition aids only; neither decides anything.
+// Name is the exception to "both are carried anyway": it is the one field here
+// the device chose for itself, so it is a recognition aid that a stranger also
+// gets to write. Rendered as text and never as markup, and never the thing the
+// approval turns on.
+//
+// Denied marks a device that was turned down and is being refused quietly. It
+// is reported so the settings panel can offer to allow it after all — a denial
+// lasts a week, and a person who denied the wrong device should not have to
+// wait it out.
 type LANDeviceInfo struct {
 	Code      string    `json:"code"`
 	Approved  bool      `json:"approved"`
+	Denied    bool      `json:"denied,omitempty"`
 	Addr      string    `json:"addr,omitempty"`
 	Kind      string    `json:"kind,omitempty"`
+	Name      string    `json:"name,omitempty"`
 	FirstSeen time.Time `json:"first_seen,omitzero"`
 	LastSeen  time.Time `json:"last_seen,omitzero"`
 }

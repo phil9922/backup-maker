@@ -2047,8 +2047,12 @@ function renderLANRequests(st) {
   const sec = document.getElementById('lan-requests-section');
   const box = document.getElementById('lan-requests');
   if (!sec || !box) return;
+  // Denied devices are deliberately absent. Denying is the answer to "stop
+  // asking me", and a row that comes straight back saying the same thing has
+  // not answered it — the device is refused quietly instead, and stays visible
+  // in the settings panel where it can be allowed after all.
   const waiting = readOnly ? [] : ((st.settings && st.settings.lan_devices) || [])
-    .filter((d) => !d.approved);
+    .filter((d) => !d.approved && !d.denied);
   if (waiting.length === 0) {
     sec.hidden = true;
     box.replaceChildren();
@@ -2068,23 +2072,35 @@ function renderLANRequests(st) {
     // The code is the whole point: it is what makes this a comparison against
     // the screen in your hand rather than a guess.
     row.appendChild(el('strong', 'mono lan-request-code', d.code));
+    const who = el('div', 'lan-request-who');
+    // The name the device gave for itself leads, because "Alex's phone" is the
+    // thing that makes this decidable in a house with three identical handsets.
+    // It is TEXT, set through textContent like everything else here — it is
+    // typed by whoever is on the wifi, and the day it renders as markup is the
+    // day this panel starts taking instructions from the thing it is guarding
+    // against.
+    if (d.name) who.appendChild(el('strong', null, d.name));
     const meta = el('span', 'muted small');
     meta.textContent = (d.kind || 'a device') + (d.addr ? ' at ' + d.addr : '') +
       ' — asked ' + humanTime(d.first_seen);
-    row.appendChild(meta);
+    who.appendChild(meta);
+    row.appendChild(who);
     const actions = el('div', 'lan-request-actions');
     const ok = el('button', 'primary', 'Approve');
     ok.onclick = () => lanDeviceAction(d.code, 'approve', ok);
     const no = el('button', 'danger', 'Deny');
-    no.onclick = () => lanDeviceAction(d.code, 'forget', no);
+    no.onclick = () => lanDeviceAction(d.code, 'deny', no);
     actions.append(ok, no);
     row.appendChild(actions);
     box.appendChild(row);
   }
 
   const note = el('p', 'muted small');
-  note.textContent = 'Check the code matches the one on that device before approving. ' +
-    'Unanswered requests expire after 5 minutes.';
+  note.textContent = waiting.some((d) => d.name)
+    ? 'A device names itself, so treat the name as a hint and the code as the check. ' +
+      'Denying stops it asking for a week. Unanswered requests expire after 5 minutes.'
+    : 'Check the code matches the one on that device before approving. ' +
+      'Denying stops it asking for a week. Unanswered requests expire after 5 minutes.';
   box.appendChild(note);
 }
 
@@ -2225,44 +2241,64 @@ function renderLANDevices(st, mode) {
     return;
   }
   box.hidden = false;
-  const waiting = devices.filter((d) => !d.approved).length;
+  const waiting = devices.filter((d) => !d.approved && !d.denied).length;
+  const denied = devices.filter((d) => d.denied).length;
   title.textContent = waiting > 0
     ? `${waiting} device${waiting > 1 ? 's' : ''} waiting for approval`
-    : 'Approved devices';
+    : denied > 0 ? 'Approved and denied devices' : 'Approved devices';
 
   list.replaceChildren();
-  const ordered = devices.slice().sort((a, b) => (a.approved === b.approved ? 0 : a.approved ? 1 : -1));
+  // Waiting first, then approved, then denied — the order somebody wants to
+  // read them in: what needs an answer, what is already allowed, and last the
+  // ones being refused quietly, which are here to be undoable rather than to be
+  // looked at.
+  const rank = (d) => (d.denied ? 2 : d.approved ? 1 : 0);
+  const ordered = devices.slice().sort((a, b) => rank(a) - rank(b));
   for (const d of ordered) {
     const li = el('li', 'card');
     li.appendChild(icon('device'));
     li.appendChild(el('strong', 'mono', d.code));
     const meta = el('div', 'card-meta');
+    // Device-chosen text, so textContent — el() sets text, never markup.
+    if (d.name) meta.appendChild(el('span', null, d.name));
     meta.appendChild(el('span', 'muted', d.kind || 'a device'));
     if (d.addr) meta.appendChild(el('span', 'muted mono', d.addr));
-    meta.appendChild(el('span', d.approved ? 'ok dot' : 'busy dot',
-      d.approved ? 'approved' : 'waiting'));
+    meta.appendChild(el('span',
+      d.approved ? 'ok dot' : d.denied ? 'muted dot' : 'busy dot',
+      d.approved ? 'approved' : d.denied ? 'denied' : 'waiting'));
     li.appendChild(meta);
     const actions = el('div', 'card-actions');
     if (!d.approved) {
-      const ok = el('button', 'primary', 'Approve');
+      // "Allow" rather than "Approve" on a denied row: the device is not
+      // standing there asking, so this is changing your mind rather than
+      // answering a question.
+      const ok = el('button', 'primary', d.denied ? 'Allow' : 'Approve');
       ok.onclick = () => lanDeviceAction(d.code, 'approve', ok);
       actions.appendChild(ok);
     }
-    const no = el('button', 'danger', d.approved ? 'Revoke' : 'Deny');
-    no.onclick = () => lanDeviceAction(d.code, 'forget', no);
+    // Deny keeps the record and the quiet; Forget throws it away, which lets
+    // the device ask again immediately. They are different answers, so a denied
+    // row offers Forget and a waiting one offers Deny.
+    const no = el('button', 'danger',
+      d.approved ? 'Revoke' : d.denied ? 'Forget' : 'Deny');
+    no.onclick = () => lanDeviceAction(d.code, d.denied || d.approved ? 'forget' : 'deny', no);
     actions.appendChild(no);
     li.appendChild(actions);
     list.appendChild(li);
   }
 }
 
+// approve | deny | forget. Deny and forget are deliberately separate calls:
+// forgetting deletes what recognises the browser, so the device is a stranger
+// again on its next reload and asks afresh — which is right for revoking and
+// wrong for "stop bothering me".
 async function lanDeviceAction(code, what, btn) {
   btn.disabled = true;
-  const url = what === 'approve'
-    ? '/api/lan-devices/' + encodeURIComponent(code) + '/approve'
-    : '/api/lan-devices/' + encodeURIComponent(code);
+  const url = what === 'forget'
+    ? '/api/lan-devices/' + encodeURIComponent(code)
+    : '/api/lan-devices/' + encodeURIComponent(code) + '/' + what;
   try {
-    const resp = await mutate(url, { method: what === 'approve' ? 'POST' : 'DELETE' });
+    const resp = await mutate(url, { method: what === 'forget' ? 'DELETE' : 'POST' });
     if (!resp.ok) settingsMessage((await resp.text()).trim(), true);
   } catch {
     settingsMessage('Could not reach the backup daemon.', true);
