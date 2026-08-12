@@ -433,8 +433,19 @@ type Row struct {
 	FolderPath  string  `json:"folder_path"`
 	TargetName  string  `json:"target_name"`
 	TargetType  string  `json:"target_type"`
-	State       string  `json:"state"` // in sync | syncing | offline | stale | awaiting-pair | wrong-drive | name-clash | error
+	State       string  `json:"state"` // in sync | syncing | offline | stale | awaiting-pair | wrong-drive | name-clash | error | paused
 	Completion  float64 `json:"completion"`
+	// Paused is this ONE folder→destination mirror switched off on purpose. The
+	// folder's other destinations are unaffected, which is why it lives on the
+	// row rather than on the folder or the target.
+	//
+	// It is carried beside State — which reads "paused" whenever this is true —
+	// because the two answer different questions: State is the word to show, and
+	// this is what the control on the row draws itself from. Never omitempty: a
+	// row that simply left the key out would be indistinguishable from an older
+	// daemon that has never heard of pausing, and the safe reading of silence is
+	// "running", which is what an explicit false says.
+	Paused bool `json:"paused"`
 	// ScannedFiles is how many files the scan has looked at so far, and
 	// ScanTotal how many there are to look at. Only set while State is
 	// "scanning", when no transfer totals exist to fill a bar with. ScanTotal is
@@ -538,6 +549,15 @@ type Collector struct {
 	// nil leaves the odometer at zero, which the renderers read as "not counted
 	// on this machine" rather than "nothing has been backed up".
 	Totals func() (bytes, files uint64, since time.Time)
+	// LastSync reports when one folder last completed a copy to one
+	// destination, for the pairs that have no engine to ask — a PAUSED pair.
+	// nil leaves the row's clock at zero.
+	//
+	// A seam rather than a read of the engines, because the whole point of a
+	// paused pair is that its engine is not running. The clock itself survives
+	// in state.json: the pair is still configured, so nothing prunes it, which
+	// is what lets a resumed mirror carry on instead of reading "never synced".
+	LastSync func(folderID, target string) time.Time
 	// LANViewURL returns the address the read-only view is listening on, or ""
 	// when it is off or was asked for and could not bind. nil leaves it blank,
 	// which the panel renders as "not running".
@@ -719,7 +739,12 @@ func (col *Collector) Collect() Model {
 				TargetType:  t.Type,
 				LastSeen:    lastSeen,
 			}
-			if !m.EngineOK {
+			if cfg.MirrorPaused(f.ID, t.Name) {
+				// Asked before the engine, because a paused pair is not shared
+				// with that machine at all (see syncthing.Reconcile) and asking
+				// about it would report an error where there is none.
+				pauseMirrorRow(&row)
+			} else if !m.EngineOK {
 				row.State = "error"
 				row.Detail = "sync engine not running"
 			} else if comp, err := client.Completion(f.ID, t.DeviceID); err == nil {
@@ -790,7 +815,54 @@ func (col *Collector) Collect() Model {
 		if n := len(st.FileErrors); n > 0 {
 			row.Detail = firstError(st.FileErrors, n)
 		}
+		// A pause takes effect on the next config apply, which tears this engine
+		// down. Until then the config is the honest answer — and this is also
+		// what keeps a paused pair out of the staleness test above, whichever
+		// order the two land in.
+		if cfg.MirrorPaused(row.FolderID, row.TargetName) {
+			pauseMirrorRow(&row)
+		}
 		m.Rows = append(m.Rows, row)
+	}
+
+	// The paused pairs themselves. THEY HAVE NO ENGINE — that is what pausing
+	// does — so nothing above produces a row for them, and a pair that simply
+	// vanished from the table would read as a destination nobody ever chose.
+	// Built from the config, through the same choke point the engines resolve
+	// through, so the rows and the mirrors cannot disagree about which pairs
+	// exist.
+	haveRow := map[string]map[string]bool{}
+	for _, r := range m.Rows {
+		if haveRow[r.FolderID] == nil {
+			haveRow[r.FolderID] = map[string]bool{}
+		}
+		haveRow[r.FolderID][r.TargetName] = true
+	}
+	for _, t := range cfg.Targets {
+		if t.Type == "device" {
+			continue // already rowed above, paused or not
+		}
+		for _, f := range cfg.FoldersForTarget(t) {
+			if !cfg.MirrorPaused(f.ID, t.Name) || haveRow[f.ID][t.Name] {
+				continue
+			}
+			row := Row{
+				FolderID:    f.ID,
+				FolderLabel: f.Label,
+				FolderPath:  f.Path,
+				TargetName:  t.Name,
+				TargetType:  t.Type,
+			}
+			// When this pair last completed a copy, straight from the clocks
+			// that outlive the engine. Without it the row would say "never" of a
+			// destination holding a full backup, which is the one sentence this
+			// program must never get wrong.
+			if col.LastSync != nil {
+				row.LastSeen = col.LastSync(f.ID, t.Name)
+			}
+			pauseMirrorRow(&row)
+			m.Rows = append(m.Rows, row)
+		}
 	}
 
 	// Wake-on-LAN opt-in, applied to both row sources in one pass.
@@ -807,6 +879,14 @@ func (col *Collector) Collect() Model {
 		refused = col.Refused()
 	}
 	for i := range m.Rows {
+		if m.Rows[i].Paused {
+			// None of this applies to a mirror that is switched off. It is not
+			// on its first pass, nothing is waiting for the destination to wake
+			// up, and a refusal to write to storage describes what would happen
+			// if we tried — which we are not going to. Dressing a deliberate
+			// stop as a fault is exactly what RowHealth refuses to do.
+			continue
+		}
 		m.Rows[i].WakeEnabled = wakeable[m.Rows[i].TargetName]
 		m.Rows[i].FirstBackup = m.Rows[i].LastSeen.IsZero() &&
 			(m.Rows[i].State == "scanning" || m.Rows[i].State == "syncing")
@@ -1092,6 +1172,28 @@ func (col *Collector) Collect() Model {
 	return m
 }
 
+// pauseMirrorRow makes a row say the one thing a paused pair has to say.
+//
+// EVERY PROGRESS FIGURE IS CLEARED AND THE ROW IS NEVER STALE. Nothing is being
+// copied, so a half-finished transfer's counters would be describing work that
+// is not happening; and "overdue" is the wrong word for a mirror somebody
+// switched off — staleness means a backup that was meant to be running and is
+// not, which is why alerting keys on it and must not fire here.
+//
+// LastSeen SURVIVES on purpose: when this pair was last backed up is precisely
+// what the person who paused it wants to see beside the word.
+func pauseMirrorRow(r *Row) {
+	r.Paused = true
+	r.State = "paused"
+	r.Detail = "paused: nothing new is being copied here. Everything already backed up stays where it is."
+	r.Stale = false
+	r.FirstBackup = false
+	r.Completion = 0
+	r.NeedItems, r.NeedBytes = 0, 0
+	r.ScannedFiles, r.ScanTotal, r.Phase = 0, 0, ""
+	r.TransferredBytes, r.TotalBytes = 0, 0
+}
+
 // neverSeen reports a device syncthing holds no last-seen time for.
 //
 // The signal is not a Go zero time: syncthing answers /rest/stats/device with
@@ -1166,7 +1268,15 @@ func TargetLocation(t config.Target) string { return config.TargetLocation(t) }
 // stateRank orders destination states by how much they matter, so "the worst
 // one wins" means the same thing everywhere it is decided. Anything absent
 // ranks 0 and loses.
+//
+// "paused" RANKS BELOW EVERYTHING, INCLUDING "in sync", and it is the only entry
+// here that does. A destination is only paused as a whole when every folder
+// pointed at it is paused, so any other row must win: a destination still
+// mirroring one folder is described by that folder, not by the one somebody
+// switched off. It also keeps a paused pair from ever making a destination's
+// headline read worse than it is — the roll-up feeds the dashboard's verdict.
 var stateRank = map[string]int{
+	"paused":  -1,
 	"in sync": 0, "syncing": 1, "scanning": 1,
 	"offline": 2, "awaiting-pair": 2, "stale": 3, "full": 4, "wrong-drive": 5, "name-clash": 5, "error": 6,
 }

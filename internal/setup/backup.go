@@ -5,6 +5,8 @@ package setup
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/smbfs"
@@ -58,13 +60,30 @@ type ArchiveSpec struct {
 	IncludeEverything bool `json:"include_everything,omitempty"`
 }
 
-// BackupRequest is one run of the wizard: protect this folder, send it to these
-// destinations, in this style.
-type BackupRequest struct {
+// FolderRef names one folder in a run of the wizard. Exactly one of the two
+// identifying fields is used: FolderID for a folder that is already set up,
+// Path for one that is not.
+type FolderRef struct {
 	// FolderID protects a folder that is ALREADY set up, instead of adding a
 	// new one. Without it there would be no way to give an existing folder a
 	// second kind of backup — the duplicate-path guard rejects re-adding it,
 	// so a folder mirrored to an SD card could never also be snapshotted.
+	FolderID    string   `json:"folder_id,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Label       string   `json:"label,omitempty"`
+	ExtraIgnore []string `json:"extra_ignore,omitempty"`
+}
+
+// BackupRequest is one run of the wizard: protect these folders, send them to
+// these destinations, in this style.
+type BackupRequest struct {
+	// Folders is the whole selection when several folders are protected in one
+	// pass. When it is set the single FolderID/Path pair below is ignored
+	// entirely: the two forms describe the same thing, and merging them could
+	// only protect something the caller never listed.
+	Folders []FolderRef `json:"folders,omitempty"`
+	// FolderID and Path are the older single-folder form of this request, still
+	// sent by callers that only ever protect one folder at a time.
 	FolderID     string        `json:"folder_id,omitempty"`
 	Path         string        `json:"path"`
 	Label        string        `json:"label,omitempty"`
@@ -74,13 +93,30 @@ type BackupRequest struct {
 	Archive      *ArchiveSpec  `json:"archive,omitempty"`
 }
 
-// CreateBackup adds one folder and wires it to every destination, all or
-// nothing.
+// selection is the folders this request asks for, in the order they were sent.
+func (req BackupRequest) selection() []FolderRef {
+	if len(req.Folders) > 0 {
+		return req.Folders
+	}
+	return []FolderRef{{
+		FolderID: req.FolderID, Path: req.Path,
+		Label: req.Label, ExtraIgnore: req.ExtraIgnore,
+	}}
+}
+
+// CreateBackup adds the chosen folders and wires them to every destination, all
+// or nothing.
 //
 // Partial application is the worst possible outcome here: the user would be
-// told they are protected while one destination silently does nothing. So every
-// destination is validated and connection-tested BEFORE config.toml is written,
-// and any failure aborts without saving.
+// told they are protected while one destination silently does nothing — or, with
+// several folders in one request, while one of the folders was never saved. So
+// every folder and every destination is resolved against an in-memory config and
+// connection-tested BEFORE config.toml is written, and any failure aborts
+// without saving.
+//
+// The folder returned is the FIRST of the selection: callers that show one
+// folder back to the user (the dashboard's response) want that one, and the
+// whole selection is in the config by the time this returns.
 //
 // Note the one irreversible step: stamping a marker file on a drive or share.
 // That is idempotent and harmless — an abandoned commit leaves a recognizable
@@ -107,27 +143,12 @@ func CreateBackup(req BackupRequest) (config.Folder, []config.Target, error) {
 		return config.Folder{}, nil, errors.New("a timed backup needs a schedule and a password")
 	}
 
-	var folder config.Folder
-	if req.FolderID != "" {
-		found := false
-		for _, f := range cfg.Folders {
-			if f.ID == req.FolderID {
-				folder, found = f, true
-				break
-			}
-		}
-		if !found {
-			return config.Folder{}, nil, fmt.Errorf("no folder with id %q", req.FolderID)
-		}
-	} else {
-		var err error
-		folder, err = AppendFolder(cfg, req.Path, req.Label, req.ExtraIgnore, false)
-		if err != nil {
-			return config.Folder{}, nil, err
-		}
+	folders, err := resolveFolders(cfg, req)
+	if err != nil {
+		return config.Folder{}, nil, err
 	}
 
-	// Which KIND of backup this is, recorded on the folder itself.
+	// Which KIND of backup this is, recorded on each folder itself.
 	//
 	// The destination-side flag (ArchivesOnly, set by scopeFor below) only
 	// governs destinations created here. Every destination already configured
@@ -136,8 +157,12 @@ func CreateBackup(req BackupRequest) (config.Folder, []config.Target, error) {
 	// exactly how one request for a daily zip turned into a continuous copy on
 	// every drive. Adding an incremental backup clears the flag, because that
 	// is a person asking for the mirror this time.
-	setSnapshotOnly(cfg, folder.ID, req.Mode == ModeTimed)
-	folder.SnapshotOnly = req.Mode == ModeTimed
+	folderIDs := make([]string, 0, len(folders))
+	for i := range folders {
+		setSnapshotOnly(cfg, folders[i].ID, req.Mode == ModeTimed)
+		folders[i].SnapshotOnly = req.Mode == ModeTimed
+		folderIDs = append(folderIDs, folders[i].ID)
+	}
 
 	// Credentials discovered along the way; only persisted once everything
 	// validates.
@@ -145,7 +170,7 @@ func CreateBackup(req BackupRequest) (config.Folder, []config.Target, error) {
 	var attached []config.Target
 
 	for i, d := range req.Destinations {
-		t, creds, err := resolveDestination(cfg, d, folder.ID, req.Mode)
+		t, creds, err := resolveDestination(cfg, d, folderIDs, req.Mode)
 		if err != nil {
 			return config.Folder{}, nil, fmt.Errorf("destination %d of %d: %w", i+1, len(req.Destinations), err)
 		}
@@ -159,7 +184,7 @@ func CreateBackup(req BackupRequest) (config.Folder, []config.Target, error) {
 	// protection, so it must not be possible to save the folder without it.
 	archivePassword := ""
 	if req.Archive != nil {
-		name, err := appendArchive(cfg, folder, attached, *req.Archive)
+		name, err := appendArchive(cfg, folders, attached, *req.Archive)
 		if err != nil {
 			return config.Folder{}, nil, err
 		}
@@ -172,32 +197,89 @@ func CreateBackup(req BackupRequest) (config.Folder, []config.Target, error) {
 	}
 
 	if len(pendingCreds) > 0 || archivePassword != "" {
-		state, err := config.LoadState()
-		if err != nil {
-			return config.Folder{}, nil, err
-		}
-		if state.ShareCredentials == nil {
-			state.ShareCredentials = map[string]string{}
-		}
-		for name, pw := range pendingCreds {
-			state.ShareCredentials[name] = pw
-		}
-		if archivePassword != "" {
-			if state.ArchivePasswords == nil {
-				state.ArchivePasswords = map[string]string{}
+		if _, err := config.UpdateState(func(s *config.State) error {
+			if s.ShareCredentials == nil {
+				s.ShareCredentials = map[string]string{}
 			}
-			state.ArchivePasswords[req.Archive.Name] = archivePassword
-		}
-		if err := state.Save(); err != nil {
+			for name, pw := range pendingCreds {
+				s.ShareCredentials[name] = pw
+			}
+			if archivePassword != "" {
+				if s.ArchivePasswords == nil {
+					s.ArchivePasswords = map[string]string{}
+				}
+				s.ArchivePasswords[req.Archive.Name] = archivePassword
+			}
+			return nil
+		}); err != nil {
 			return config.Folder{}, nil, err
 		}
 	}
-	return folder, attached, nil
+	return folders[0], attached, nil
+}
+
+// resolveFolders turns the request's selection into folders on cfg, in memory
+// and without saving, so the whole run can still be abandoned.
+//
+// ONE resolution path for both forms of the request and for every entry in it:
+// an id names a folder that already exists, a path adds one.
+func resolveFolders(cfg *config.Config, req BackupRequest) ([]config.Folder, error) {
+	var chosen []config.Folder
+	for _, ref := range req.selection() {
+		if ref.FolderID == "" && strings.TrimSpace(ref.Path) == "" {
+			return nil, errors.New("choose at least one folder to back up")
+		}
+		// The same folder twice means the caller sent a selection it did not
+		// mean, so it is refused rather than quietly collapsed: the two entries
+		// may disagree about the label or the excludes, and honouring one of
+		// them silently is how somebody ends up with a backup they did not ask
+		// for. AppendFolder catches a path that is already a folder; this
+		// catches the pair the request created between them.
+		if ref.Path != "" {
+			abs, err := filepath.Abs(ExpandHome(ref.Path))
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range chosen {
+				if f.Path == abs {
+					return nil, fmt.Errorf("the same folder was chosen twice: %s", abs)
+				}
+			}
+		}
+		var folder config.Folder
+		if ref.FolderID != "" {
+			found := false
+			for _, f := range cfg.Folders {
+				if f.ID == ref.FolderID {
+					folder, found = f, true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("no folder with id %q", ref.FolderID)
+			}
+		} else {
+			var err error
+			folder, err = AppendFolder(cfg, ref.Path, ref.Label, ref.ExtraIgnore, false)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, f := range chosen {
+			if f.ID == folder.ID {
+				return nil, fmt.Errorf("the same folder was chosen twice: %s", folder.Label)
+			}
+		}
+		chosen = append(chosen, folder)
+	}
+	return chosen, nil
 }
 
 // appendArchive adds the snapshot schedule to cfg in memory and returns the
-// name it was stored under.
-func appendArchive(cfg *config.Config, folder config.Folder, dests []config.Target, spec ArchiveSpec) (string, error) {
+// name it was stored under. ONE schedule covers the whole selection: a timed
+// backup of three folders is three folders in one run, not three schedules
+// racing each other onto the same destination.
+func appendArchive(cfg *config.Config, folders []config.Folder, dests []config.Target, spec ArchiveSpec) (string, error) {
 	if spec.Password == "" {
 		return "", errors.New("snapshots need a password — they are encrypted zips, and there is no way in without it")
 	}
@@ -206,7 +288,7 @@ func appendArchive(cfg *config.Config, folder config.Folder, dests []config.Targ
 	}
 	name := spec.Name
 	if name == "" {
-		name = folder.Label
+		name = folders[0].Label
 	}
 	for _, a := range cfg.Archives {
 		if a.Name == name {
@@ -231,18 +313,34 @@ func appendArchive(cfg *config.Config, folder config.Folder, dests []config.Targ
 	if keep <= 0 {
 		keep = config.DefaultArchiveKeep
 	}
+	// Every chosen folder, named. An empty list here would mean EVERY folder on
+	// the machine, which is why it is built from the selection and never left to
+	// default.
+	ids := make([]string, 0, len(folders))
+	for _, f := range folders {
+		ids = append(ids, f.ID)
+	}
 	cfg.Archives = append(cfg.Archives, config.Archive{
-		Name: name, Folders: []string{folder.ID}, Every: spec.Every,
+		Name: name, Folders: ids, Every: spec.Every,
 		Target: dest, Keep: keep, NoDefaultIgnores: spec.IncludeEverything,
 	})
 	return name, nil
 }
 
-// resolveDestination mutates cfg in memory: either associating the folder with
+// resolveDestination mutates cfg in memory: either associating the folders with
 // an existing target, or creating a new one. It returns the resulting target
 // and any share password that must be stored on success.
-func resolveDestination(cfg *config.Config, d Destination, folderID, mode string) (config.Target, string, error) {
+func resolveDestination(cfg *config.Config, d Destination, folderIDs []string, mode string) (config.Target, string, error) {
 	timed := mode == ModeTimed
+
+	// EVERY Target below is created or re-scoped from this list, and an empty
+	// Folders list on a mirroring target means EVERY folder. The selection is
+	// checked long before this, so an empty list here is a bug upstream — this
+	// is the last place that can still refuse it instead of widening a
+	// destination to the whole machine.
+	if len(folderIDs) == 0 {
+		return config.Target{}, "", errors.New("no folders were chosen for this destination")
+	}
 
 	if d.ExistingTarget != "" {
 		for i := range cfg.Targets {
@@ -250,7 +348,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 				continue
 			}
 			if timed {
-				// A timed backup keeps no live copy, so the folder is
+				// A timed backup keeps no live copy, so the folders are
 				// deliberately NOT attached for mirroring.
 				return cfg.Targets[i], "", nil
 			}
@@ -258,13 +356,13 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 				// Promote a snapshot-only destination to also keep a live
 				// copy. Its empty Folders list meant "mirror nothing" rather
 				// than the usual "mirror everything", so it has to be scoped
-				// explicitly — attachFolder would read the empty list as
+				// explicitly — attachFolders would read the empty list as
 				// "already covers every folder" and do nothing.
 				cfg.Targets[i].ArchivesOnly = false
-				cfg.Targets[i].Folders = []string{folderID}
+				cfg.Targets[i].Folders = append([]string(nil), folderIDs...)
 				return cfg.Targets[i], "", nil
 			}
-			attachFolder(&cfg.Targets[i], folderID)
+			attachFolders(&cfg.Targets[i], folderIDs)
 			return cfg.Targets[i], "", nil
 		}
 		return config.Target{}, "", fmt.Errorf("no target named %q", d.ExistingTarget)
@@ -276,7 +374,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 		if err != nil {
 			return config.Target{}, "", err
 		}
-		scopeNewTarget(cfg, t.Name, folderID, timed)
+		scopeNewTarget(cfg, t.Name, folderIDs, timed)
 		return t, "", nil
 
 	case d.URL != "":
@@ -306,7 +404,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 		t := config.Target{
 			Type: "share", Name: d.Name, URL: d.URL,
 			Username: d.Username, MAC: d.MAC,
-			ArchivesOnly: timed, Folders: scopeFor(folderID, timed),
+			ArchivesOnly: timed, Folders: scopeFor(folderIDs, timed),
 		}
 		if d.NoVerify {
 			f := false
@@ -330,7 +428,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 		// refuses outright — here there is an obviously better answer).
 		for i := range cfg.Targets {
 			if cfg.Targets[i].Type == "device" && cfg.Targets[i].DeviceID == deviceID {
-				attachFolder(&cfg.Targets[i], folderID)
+				attachFolders(&cfg.Targets[i], folderIDs)
 				return cfg.Targets[i], "", nil
 			}
 		}
@@ -342,7 +440,7 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 		}
 		t := config.Target{
 			Type: "device", Name: d.Name, DeviceID: deviceID,
-			MAC: d.MAC, Folders: []string{folderID},
+			MAC: d.MAC, Folders: append([]string(nil), folderIDs...),
 		}
 		cfg.Targets = append(cfg.Targets, t)
 		return t, "", nil
@@ -350,18 +448,29 @@ func resolveDestination(cfg *config.Config, d Destination, folderID, mode string
 	return config.Target{}, "", errors.New("destination has no drive, network address, or device id")
 }
 
-// attachFolder scopes an existing target to include this folder. An empty
-// Folders list already means "every folder", so it is deliberately left alone.
-func attachFolder(t *config.Target, folderID string) {
+// attachFolders EXTENDS an existing target's scope to include these folders.
+//
+// Extend, never replace: the ids already there are folders somebody asked this
+// destination to keep, and dropping one would stop backing up a folder that was
+// not part of this request. An empty Folders list already means "every folder",
+// so it is deliberately left alone — narrowing it to the selection would stop
+// every other folder from being copied here.
+func attachFolders(t *config.Target, folderIDs []string) {
 	if len(t.Folders) == 0 {
 		return
 	}
-	for _, id := range t.Folders {
-		if id == folderID {
-			return
+	for _, folderID := range folderIDs {
+		known := false
+		for _, id := range t.Folders {
+			if id == folderID {
+				known = true
+				break
+			}
+		}
+		if !known {
+			t.Folders = append(t.Folders, folderID)
 		}
 	}
-	t.Folders = append(t.Folders, folderID)
 }
 
 // setSnapshotOnly records on the folder itself whether it is here for
@@ -378,20 +487,21 @@ func setSnapshotOnly(cfg *config.Config, folderID string, timed bool) {
 	}
 }
 
-// scopeFor returns the mirror scope for a newly created destination. A timed
-// backup mirrors nothing, so the list stays empty and ArchivesOnly carries the
-// meaning — an empty list on its own would mean "every folder".
-func scopeFor(folderID string, timed bool) []string {
+// scopeFor returns the mirror scope for a newly created destination: exactly
+// the folders that were chosen, and nothing else. A timed backup mirrors
+// nothing, so the list stays empty and ArchivesOnly carries the meaning — an
+// empty list on its own would mean "every folder".
+func scopeFor(folderIDs []string, timed bool) []string {
 	if timed {
 		return []string{}
 	}
-	return []string{folderID}
+	return append([]string(nil), folderIDs...)
 }
 
-func scopeNewTarget(cfg *config.Config, name, folderID string, timed bool) {
+func scopeNewTarget(cfg *config.Config, name string, folderIDs []string, timed bool) {
 	for i := range cfg.Targets {
 		if cfg.Targets[i].Name == name {
-			cfg.Targets[i].Folders = scopeFor(folderID, timed)
+			cfg.Targets[i].Folders = scopeFor(folderIDs, timed)
 			cfg.Targets[i].ArchivesOnly = timed
 			return
 		}

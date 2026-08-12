@@ -145,102 +145,105 @@ func Adopt(m *Manifest, d AdoptDecisions) (*AdoptResult, error) {
 		cfg.Folders = append(cfg.Folders, nf)
 	}
 
-	state, err := config.LoadState()
-	if err != nil {
-		return nil, err
-	}
-	if state.DriveTargetUUIDs == nil {
-		state.DriveTargetUUIDs = map[string]string{}
-	}
-	if state.ShareCredentials == nil {
-		state.ShareCredentials = map[string]string{}
-	}
-	if state.ArchivePasswords == nil {
-		state.ArchivePasswords = map[string]string{}
-	}
-
 	var missingUUID, needPass []string
 	var needReadding []NamedTarget
-	restored := map[string]bool{}
-	for _, mt := range m.Targets {
-		// A destination this manifest only names cannot be rebuilt from it, and
-		// must not be half-rebuilt either: a drive entry with no path or a share
-		// with no url fails config validation, and one whose Folders list came
-		// out empty would mean EVERY folder rather than none. Report it and
-		// leave it to the user, who has the hardware in front of them.
-		if !mt.Locatable() {
-			needReadding = append(needReadding, NamedTarget{Name: mt.Name, Type: mt.Type})
-			continue
-		}
-		t := mt.Target
-		t.Folders = remapFolderIDs(t.Folders, idFor)
-		cfg.Targets = append(cfg.Targets, t)
-		restored[strings.ToLower(t.Name)] = true
-
-		if t.Type == "drive" || t.Type == "share" {
-			if mt.UUID != "" {
-				state.DriveTargetUUIDs[t.Name] = mt.UUID
-			} else {
-				missingUUID = append(missingUUID, t.Name)
-			}
-		}
-		if t.Type == "share" {
-			// Presence in the map is what counts, not non-emptiness: a guest
-			// share's working password IS the empty string. Absent = the user
-			// skipped it; the target stays idle until set-password.
-			if pw, ok := d.SharePasswords[t.Name]; ok {
-				state.ShareCredentials[t.Name] = pw
-			} else {
-				needPass = append(needPass, t.Name)
-			}
-		}
-	}
-
 	var skippedArchives []string
-	for _, a := range m.Archives {
-		// A schedule whose destination was not restored has nowhere to write.
-		// config.Validate refuses an archive naming an unknown target, so
-		// carrying it would fail the entire adoption rather than lose one
-		// schedule — and losing it silently is the other thing not to do, hence
-		// SkippedArchives.
-		if !restored[strings.ToLower(a.Target)] {
-			skippedArchives = append(skippedArchives, a.Name)
-			continue
+	// EVERYTHING THAT TOUCHES state.json HAPPENS INSIDE ONE UPDATE, including
+	// the config save, so an adoption is either wholly applied or wholly
+	// abandoned. The two files describe one machine: a config.toml naming
+	// destinations that state.json has no UUIDs or passwords for is a machine
+	// that looks configured and backs nothing up.
+	if _, err := config.UpdateState(func(state *config.State) error {
+		if state.DriveTargetUUIDs == nil {
+			state.DriveTargetUUIDs = map[string]string{}
 		}
-		na := a
-		na.Folders = remapFolderIDs(a.Folders, idFor)
-		cfg.Archives = append(cfg.Archives, na)
-		if pw := d.ArchivePasswords[a.Name]; pw != "" {
-			state.ArchivePasswords[a.Name] = pw
+		if state.ShareCredentials == nil {
+			state.ShareCredentials = map[string]string{}
 		}
-	}
+		if state.ArchivePasswords == nil {
+			state.ArchivePasswords = map[string]string{}
+		}
 
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("adopted configuration is invalid: %w", err)
-	}
+		restored := map[string]bool{}
+		for _, mt := range m.Targets {
+			// A destination this manifest only names cannot be rebuilt from it, and
+			// must not be half-rebuilt either: a drive entry with no path or a share
+			// with no url fails config validation, and one whose Folders list came
+			// out empty would mean EVERY folder rather than none. Report it and
+			// leave it to the user, who has the hardware in front of them.
+			if !mt.Locatable() {
+				needReadding = append(needReadding, NamedTarget{Name: mt.Name, Type: mt.Type})
+				continue
+			}
+			t := mt.Target
+			t.Folders = remapFolderIDs(t.Folders, idFor)
+			cfg.Targets = append(cfg.Targets, t)
+			restored[strings.ToLower(t.Name)] = true
 
-	// Continuing as the old machine means taking on its identity, and the
-	// claims it left in its <machine> directory on every destination are part of
-	// that. Inheriting its install id is what lets those destinations be
-	// recognised as ours when they are next plugged in — including the ones that
-	// were not present during adoption, which is the case a claim rewritten here
-	// and now could not cover.
-	//
-	// Only when continuing: a machine starting fresh gets its own directory
-	// under its own name, and must not be able to take over a claim the original
-	// still holds.
-	if d.ContinueAsMachine && m.InstallID != "" && !state.Owns(m.InstallID) {
-		state.InheritedInstallIDs = append(state.InheritedInstallIDs, m.InstallID)
-	}
-	if state.InstallID == "" {
-		state.InstallID = config.NewToken()[:16]
-	}
+			if t.Type == "drive" || t.Type == "share" {
+				if mt.UUID != "" {
+					state.DriveTargetUUIDs[t.Name] = mt.UUID
+				} else {
+					missingUUID = append(missingUUID, t.Name)
+				}
+			}
+			if t.Type == "share" {
+				// Presence in the map is what counts, not non-emptiness: a guest
+				// share's working password IS the empty string. Absent = the user
+				// skipped it; the target stays idle until set-password.
+				if pw, ok := d.SharePasswords[t.Name]; ok {
+					state.ShareCredentials[t.Name] = pw
+				} else {
+					needPass = append(needPass, t.Name)
+				}
+			}
+		}
 
-	state.SetupComplete = true
-	if err := cfg.Save(); err != nil {
-		return nil, err
-	}
-	if err := state.Save(); err != nil {
+		for _, a := range m.Archives {
+			// A schedule whose destination was not restored has nowhere to write.
+			// config.Validate refuses an archive naming an unknown target, so
+			// carrying it would fail the entire adoption rather than lose one
+			// schedule — and losing it silently is the other thing not to do, hence
+			// SkippedArchives.
+			if !restored[strings.ToLower(a.Target)] {
+				skippedArchives = append(skippedArchives, a.Name)
+				continue
+			}
+			na := a
+			na.Folders = remapFolderIDs(a.Folders, idFor)
+			cfg.Archives = append(cfg.Archives, na)
+			if pw := d.ArchivePasswords[a.Name]; pw != "" {
+				state.ArchivePasswords[a.Name] = pw
+			}
+		}
+
+		if err := cfg.Validate(); err != nil {
+			return fmt.Errorf("adopted configuration is invalid: %w", err)
+		}
+
+		// Continuing as the old machine means taking on its identity, and the
+		// claims it left in its <machine> directory on every destination are part
+		// of that. Inheriting its install id is what lets those destinations be
+		// recognised as ours when they are next plugged in — including the ones
+		// that were not present during adoption, which is the case a claim
+		// rewritten here and now could not cover.
+		//
+		// Only when continuing: a machine starting fresh gets its own directory
+		// under its own name, and must not be able to take over a claim the
+		// original still holds.
+		if d.ContinueAsMachine && m.InstallID != "" && !state.Owns(m.InstallID) {
+			state.InheritedInstallIDs = append(state.InheritedInstallIDs, m.InstallID)
+		}
+		if state.InstallID == "" {
+			state.InstallID = config.NewToken()[:16]
+		}
+
+		state.SetupComplete = true
+		// The config first, as it always was: state.json's entries are keyed by
+		// names only config.toml gives meaning to, so a state file written for a
+		// config that never landed is a set of orphans.
+		return cfg.Save()
+	}); err != nil {
 		return nil, err
 	}
 

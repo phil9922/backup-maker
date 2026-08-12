@@ -150,6 +150,13 @@ archives:
 	if err != nil {
 		return err
 	}
+	// The archive passwords this session adds and drops, kept apart from the
+	// state we loaded rather than edited into it. The wizard is interactive and
+	// can sit at a prompt for minutes; writing back a whole State read at the
+	// start of that would undo anything the daemon or another command wrote in
+	// the meantime. Only these two are replayed onto the file at the end.
+	addedPasswords := map[string]string{}
+	droppedPasswords := map[string]bool{}
 	for {
 		fmt.Println()
 		fmt.Println("Timed snapshots (password-protected zips, frozen at one moment):")
@@ -173,7 +180,7 @@ archives:
 		case choice == "":
 			goto save
 		case choice == "a":
-			if err := wizardAddArchive(cfg, state, in, readLine); err != nil {
+			if err := wizardAddArchive(cfg, addedPasswords, in, readLine); err != nil {
 				fmt.Println(" ", err)
 			}
 		case choice == "r":
@@ -183,7 +190,8 @@ archives:
 			}
 			name := cfg.Archives[idx].Name
 			cfg.Archives = append(cfg.Archives[:idx], cfg.Archives[idx+1:]...)
-			delete(state.ArchivePasswords, name)
+			delete(addedPasswords, name)
+			droppedPasswords[name] = true
 			// The keyring copy goes with it, for the reason setup.RemoveArchive
 			// gives: the two storages must forget the same thing.
 			if state.SecretsInKeyring {
@@ -199,7 +207,18 @@ save:
 	if err := cfg.Save(); err != nil {
 		return err
 	}
-	if err := state.Save(); err != nil {
+	if _, err := config.UpdateState(func(s *config.State) error {
+		for name := range droppedPasswords {
+			delete(s.ArchivePasswords, name)
+		}
+		if len(addedPasswords) > 0 && s.ArchivePasswords == nil {
+			s.ArchivePasswords = map[string]string{}
+		}
+		for name, pw := range addedPasswords {
+			s.ArchivePasswords[name] = pw
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	fmt.Println()
@@ -209,7 +228,7 @@ save:
 	return nil
 }
 
-func wizardAddArchive(cfg *config.Config, state *config.State, in *bufio.Reader, readLine func(string) string) error {
+func wizardAddArchive(cfg *config.Config, passwords map[string]string, in *bufio.Reader, readLine func(string) string) error {
 	// Eligible destinations: drive and share targets.
 	var eligible []config.Target
 	for _, t := range cfg.Targets {
@@ -300,10 +319,7 @@ func wizardAddArchive(cfg *config.Config, state *config.State, in *bufio.Reader,
 	cfg.Archives = append(cfg.Archives, config.Archive{
 		Name: name, Folders: folderIDs, Every: every, Target: eligible[idx].Name, Keep: keep,
 	})
-	if state.ArchivePasswords == nil {
-		state.ArchivePasswords = map[string]string{}
-	}
-	state.ArchivePasswords[name] = pass
+	passwords[name] = pass
 	fmt.Printf("  added %q — first run happens within a minute of the daemon seeing it.\n", name)
 	fmt.Println("  Archives can be opened with 7-Zip, WinRAR, Keka, etc. (not Windows Explorer's")
 	fmt.Println("  built-in zip viewer, which can't read AES encryption).")

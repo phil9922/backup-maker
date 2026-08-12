@@ -47,6 +47,12 @@ func StopMirroring(id string) error {
 	}
 
 	cfg.Folders[idx].SnapshotOnly = true
+	// The folder has no mirror left to pause, so any pause it was carrying is
+	// spent. Left behind, it would sit in the config waiting for somebody to give
+	// this folder a mirror again — and that new mirror would be born switched
+	// off, which is the silent no-backup state. Clearing the list is safe here in
+	// a way that clearing Target.Folders never is: empty means nothing is paused.
+	cfg.Folders[idx].PausedTargets = nil
 
 	// SnapshotOnly alone settles every destination that mirrors "every
 	// folder". A destination told explicitly to mirror THIS folder is a

@@ -71,6 +71,120 @@ func newSyncMarks(s *config.State) *syncMarks {
 	return m
 }
 
+// renamedTargets works out which destinations were renamed between two configs,
+// as old name -> new name.
+//
+// FROM WHERE THE DESTINATION IS, because that is the one thing a rename does not
+// change. Matching on the recorded UUID cannot work here: the rename has already
+// moved that entry to the new name, so the old name looks like a destination
+// nobody has ever seen. The location is what stays put.
+//
+// IT REFUSES TO GUESS. A location that appears twice in either config, a name
+// that is still live in the other one — anything that is not plainly one
+// destination that changed its name — is left out, and the pair simply keeps the
+// behaviour it had before: one unnecessary full pass, which copies nothing
+// because the files are already there. Getting it wrong would hand one
+// destination another's clock and report a drive as backed up on the strength of
+// a pass that never touched it, which is the one answer this program may never
+// give.
+func renamedTargets(before, after *config.Config) map[string]string {
+	if before == nil || after == nil {
+		return nil
+	}
+	oldByPlace, oldNames := placesAndNames(before)
+	newByPlace, newNames := placesAndNames(after)
+	renamed := map[string]string{}
+	for place, from := range oldByPlace {
+		to, still := newByPlace[place]
+		switch {
+		case !still, from == to, from == "", to == "":
+			continue
+		case newNames[from], oldNames[to]:
+			// Both names are live somewhere in the other config, so this is two
+			// destinations swapping or shuffling names rather than one being
+			// renamed. Not a case we can move clocks for safely.
+			continue
+		}
+		renamed[from] = to
+	}
+	return renamed
+}
+
+// placesAndNames indexes a config's drive and share destinations by where they
+// are, and reports every name in use. A place claimed by more than one
+// destination is dropped from the index rather than resolved — see
+// renamedTargets on why this refuses to guess.
+func placesAndNames(cfg *config.Config) (map[string]string, map[string]bool) {
+	byPlace := map[string]string{}
+	seen := map[string]int{}
+	names := map[string]bool{}
+	for _, t := range cfg.Targets {
+		names[t.Name] = true
+		var place string
+		switch t.Type {
+		case "drive":
+			place = "drive\x00" + t.Path
+		case "share":
+			place = "share\x00" + t.URL + "\x00" + t.Username
+		default:
+			continue // marks only ever cover drive and share; see prune
+		}
+		seen[place]++
+		byPlace[place] = t.Name
+	}
+	for place, n := range seen {
+		if n > 1 {
+			delete(byPlace, place)
+		}
+	}
+	return byPlace, names
+}
+
+// renameTarget moves every folder's clocks from one destination name to another,
+// in memory.
+//
+// WHY MEMORY HAS TO BE TOLD AT ALL, when setup.RenameTarget already moves the
+// clocks in state.json. Because the flush writes memory (see tally.go), and
+// memory is still keyed by the old name until something says otherwise. A flush
+// landing between the rename and the config reload therefore writes the old name
+// back over the file — and fill cannot put it right afterwards, because fill only
+// takes pairs the FILE has that memory does not, and by then the file has the old
+// name too. The pair is then lost from both, and every folder reads "never
+// synced" to a destination that has been backed up for months. That is what the
+// owner saw on 2026-08-11 after renaming a share: the dashboard said nothing was
+// backed up on a drive holding 60GB of his files.
+//
+// NEVER OVER THE TOP OF A CLOCK THE NEW NAME ALREADY HAS. A name that is somehow
+// live at both ends of this is not a rename we understand, and a clock that is
+// already there is later than one being carried across from a name that has gone.
+func (m *syncMarks) renameTarget(from, to string) bool {
+	if from == "" || to == "" || from == to {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	moved := false
+	for _, byTarget := range m.at {
+		if when, ok := byTarget[from]; ok {
+			if _, taken := byTarget[to]; !taken {
+				byTarget[to] = when
+				moved = true
+			}
+			delete(byTarget, from)
+		}
+	}
+	for _, byTarget := range m.scans {
+		if mk, ok := byTarget[from]; ok {
+			if _, taken := byTarget[to]; !taken {
+				byTarget[to] = mk
+				moved = true
+			}
+			delete(byTarget, from)
+		}
+	}
+	return moved
+}
+
 // fill takes clocks for folder × destination pairs this process has none for,
 // from a state file something else wrote while we were running.
 //
@@ -126,6 +240,17 @@ func (m *syncMarks) lastSync(folder, target string) time.Time {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.at[folder][target]
+}
+
+// lastSyncMark answers the status collector for a pair that has no engine to
+// ask — a paused mirror. The clock is the same one the engine would have been
+// seeded with, which is what lets a paused row say when it was last backed up
+// instead of "never".
+func (d *daemon) lastSyncMark(folderID, target string) time.Time {
+	if d.marks == nil {
+		return time.Time{}
+	}
+	return d.marks.lastSync(folderID, target)
 }
 
 // record stores one completed sync.

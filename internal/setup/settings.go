@@ -120,12 +120,11 @@ func ApplySettingsTo(cfg *config.Config, s Settings) {
 // An empty URL clears it, which is how the sink is un-configured without
 // having to remember what was there.
 func SetWebhookURL(url string) error {
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	state.WebhookURL = strings.TrimSpace(url)
-	return state.Save()
+	_, err := config.UpdateState(func(s *config.State) error {
+		s.WebhookURL = strings.TrimSpace(url)
+		return nil
+	})
+	return err
 }
 
 // SetNtfyTopicURL stores the ntfy topic alerts are published to.
@@ -137,12 +136,11 @@ func SetWebhookURL(url string) error {
 //
 // An empty topic clears it, which is how the sink is un-configured.
 func SetNtfyTopicURL(url string) error {
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	state.NtfyTopicURL = strings.TrimSpace(url)
-	return state.Save()
+	_, err := config.UpdateState(func(s *config.State) error {
+		s.NtfyTopicURL = strings.TrimSpace(url)
+		return nil
+	})
+	return err
 }
 
 // SetNtfyToken stores the access token for a protected ntfy topic.
@@ -155,10 +153,9 @@ func SetNtfyTopicURL(url string) error {
 // An empty token clears it, which is what a topic that stops being protected
 // needs.
 func SetNtfyToken(token string) error {
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	state.NtfyToken = strings.TrimSpace(token)
-	return state.Save()
+	_, err := config.UpdateState(func(s *config.State) error {
+		s.NtfyToken = strings.TrimSpace(token)
+		return nil
+	})
+	return err
 }

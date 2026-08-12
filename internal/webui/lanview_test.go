@@ -74,6 +74,12 @@ func TestLANViewRefusesEverythingElse(t *testing.T) {
 		{http.MethodDelete, "/api/folders/abc"},
 		{http.MethodPost, "/api/folders/abc/ignores"},
 		{http.MethodDelete, "/api/targets/nas"},
+		// The file view. Listing one publishes which folders a household backs
+		// up and what they are called on the drive — the same reconnaissance
+		// /api/browse withholds — and deleting from one removes backups. Both
+		// are decisions made at the computer, never from a phone.
+		{http.MethodGet, "/api/targets/nas/files"},
+		{http.MethodPost, "/api/targets/nas/files/delete"},
 		// Adoption reads destination manifests and rewrites the whole
 		// configuration; strictly a loopback operation.
 		{http.MethodGet, "/api/adopt/scan"},

@@ -277,7 +277,9 @@ func (d *daemon) forgetLANDevice(code string) error {
 		if strings.EqualFold(dev.Code, code) {
 			delete(d.state.LANDevices, token)
 			d.tally.touch()
-			return d.state.Save()
+			// The list itself is memory's to write (see carryOverFromMemory);
+			// everything else in the file is left exactly as it was found.
+			return d.updateState(func(*config.State) error { return nil })
 		}
 	}
 	return fmt.Errorf("no device with code %q", code)
@@ -290,7 +292,7 @@ func (d *daemon) updateLANDevice(code string, apply func(*config.LANDevice)) err
 		if strings.EqualFold(dev.Code, code) {
 			apply(dev)
 			d.tally.touch()
-			return d.state.Save()
+			return d.updateState(func(*config.State) error { return nil })
 		}
 	}
 	return fmt.Errorf("no device with code %q", code)

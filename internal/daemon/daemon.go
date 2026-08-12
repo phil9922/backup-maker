@@ -271,7 +271,19 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 			"entry", account, "err", err, "check", "backup-maker keychain status")
 	}
 
-	state, err := config.LoadState()
+	state, err := config.UpdateState(func(s *config.State) error {
+		if s.IPCToken == "" {
+			s.IPCToken = config.NewToken()
+		}
+		if s.InstallID == "" {
+			// Minted here as well as in EnsureInstallID so an install that has
+			// only ever been driven from the browser has one before the first
+			// destination is written to. Same never-rotate rule as the token.
+			s.InstallID = config.NewToken()[:16]
+		}
+		s.DashboardPort = cfg.General.DashboardPort
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("loading state: %w", err)
 	}
@@ -290,19 +302,6 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 			"entries", strings.Join(misses, ", "),
 			"check", "backup-maker keychain status",
 			"undo", "backup-maker keychain disable")
-	}
-	if state.IPCToken == "" {
-		state.IPCToken = config.NewToken()
-	}
-	if state.InstallID == "" {
-		// Minted here as well as in EnsureInstallID so an install that has only
-		// ever been driven from the browser has one before the first destination
-		// is written to. Same never-rotate rule as the token above.
-		state.InstallID = config.NewToken()[:16]
-	}
-	state.DashboardPort = cfg.General.DashboardPort
-	if err := state.Save(); err != nil {
-		return fmt.Errorf("saving state: %w", err)
 	}
 
 	d := &daemon{
@@ -375,6 +374,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		ArchiveProgress:    d.archiveProgressSnapshot,
 		HasArchivePassword: d.hasArchivePassword,
 		SetupDone:          d.setupDone,
+		LastSync:           d.lastSyncMark,
 		Space:              d.spaceSamples,
 		Descriptions:       d.targetDescriptions,
 		Totals:             d.totals,
@@ -472,6 +472,27 @@ func (d *daemon) applyConfig(ctx context.Context, cfg *config.Config) {
 		}
 		if err := pairing.ProcessPendingFolders(c, cfg, d.log); err != nil {
 			d.log.Warn("processing pending folders", "err", err)
+		}
+	}
+
+	// A destination that has been renamed since the last apply: tell the clocks
+	// in memory before anything below reads or writes them.
+	//
+	// BEFORE the state re-read, so fill sees a memory that already knows the new
+	// name, and before prune, which drops names the config no longer has. Doing
+	// it here rather than leaving it to fill is what makes the move survive a
+	// tally flush landing in the gap — see syncMarks.renameTarget for the whole
+	// of why. d.cfg is still the PREVIOUS config at this point; it is replaced
+	// further down.
+	d.mu.Lock()
+	previous := d.cfg
+	d.mu.Unlock()
+	for from, to := range renamedTargets(previous, cfg) {
+		if d.marks != nil && d.marks.renameTarget(from, to) {
+			d.log.Info("destination renamed; carrying its sync clocks across", "from", from, "to", to)
+			if d.tally != nil {
+				d.tally.touch()
+			}
 		}
 	}
 
@@ -711,6 +732,15 @@ func (d *daemon) prepareTargets(cfg *config.Config, uuids, creds map[string]stri
 			p.statusBackend = sb
 		}
 		for _, f := range cfg.FoldersForTarget(t) {
+			// A PAUSED PAIR GETS NO CONNECTION AND NO ENGINE, which is the whole
+			// of how pausing stops the copying: nothing here reads the source,
+			// writes to the destination, or removes anything from either. The
+			// pair is still configured — FoldersForTarget still returns it, so
+			// its last-synced clock is not pruned — and resuming rebuilds the
+			// engine on the next config apply, from that clock.
+			if cfg.MirrorPaused(f.ID, t.Name) {
+				continue
+			}
 			backend, offlinePoll, verify, err := d.buildBackend(t, creds)
 			if err != nil {
 				d.log.Error("cannot open target", "target", t.Name, "err", err)
@@ -742,7 +772,18 @@ func (d *daemon) refreshManifest(t config.Target, b localmirror.Backend, cfg *co
 	if !d.mayWriteAs(t.Name, status.TargetLocation(t), b, uuid, config.MachineDir(cfg.General.MachineName)) {
 		return
 	}
-	if err := setup.WriteManifest(b, cfg, d.state.DriveTargetUUIDs, d.state.InstallID, t.Name); err != nil {
+	// COPIED OUT UNDER THE LOCK, not read through d.state as the manifest is
+	// written. d.state is replaced wholesale by every writer that touches
+	// state.json — the tally's flush does it every thirty seconds — and this runs
+	// on the config-apply path with the lock deliberately free, so reading it
+	// here without the lock is a race with each of them. The hold is memory-only
+	// and ends before the write to the destination begins, which is the rule
+	// prepareTargets and lockResponsive both depend on.
+	d.mu.Lock()
+	uuids := maps.Clone(d.state.DriveTargetUUIDs)
+	installID := d.state.InstallID
+	d.mu.Unlock()
+	if err := setup.WriteManifest(b, cfg, uuids, installID, t.Name); err != nil {
 		d.log.Warn("could not write adoption manifest", "target", t.Name, "err", err)
 	}
 }
@@ -1180,25 +1221,40 @@ func buildActions(d *daemon) webui.Actions {
 		RemoveTarget:         setup.RemoveTarget,
 		RenameTarget:         setup.RenameTarget,
 		DescribeTarget:       setup.DescribeTarget,
-		SetFolderIgnores:     setup.SetFolderIgnores,
-		AddArchive:           d.addArchive,
-		CompleteSetup:        d.completeSetup,
-		AdoptAllowed:         setup.AdoptAllowed,
-		AdoptScan:            d.adoptScan,
-		AdoptInspect:         d.adoptInspect,
-		AdoptTestShare:       d.adoptTestShare,
-		Adopt:                d.adopt,
-		SetArchivePassword:   d.setArchivePassword,
-		RemoveArchive:        setup.RemoveArchive,
-		SetArchivePaused:     setup.SetArchivePaused,
-		SetArchiveSchedule:   setup.SetArchiveSchedule,
-		SetSettings:          d.setSettings,
-		TestAlert:            d.testAlert,
-		DismissAlert:         d.dismissAlert,
-		DismissAlertsBefore:  d.dismissAlertsBefore,
-		ApproveLANDevice:     d.approveLANDevice,
-		DenyLANDevice:        d.denyLANDevice,
-		ForgetLANDevice:      d.forgetLANDevice,
+		// Looking at what a destination holds, and removing what no longer
+		// belongs to any backup. Methods on the daemon because both need its
+		// way of opening a destination — the same one the mirror engines and
+		// the retired-backup delete use.
+		DestFiles:          d.destFiles,
+		DeleteDestFile:     d.deleteDestFile,
+		SetFolderIgnores:   setup.SetFolderIgnores,
+		AddArchive:         d.addArchive,
+		CompleteSetup:      d.completeSetup,
+		AdoptAllowed:       setup.AdoptAllowed,
+		AdoptScan:          d.adoptScan,
+		AdoptInspect:       d.adoptInspect,
+		AdoptTestShare:     d.adoptTestShare,
+		Adopt:              d.adopt,
+		SetArchivePassword: d.setArchivePassword,
+		RemoveArchive:      setup.RemoveArchive,
+		SetArchivePaused:   setup.SetArchivePaused,
+		// The mirror's counterpart, per folder→destination pair. Config only,
+		// like the schedule's: the engine for the pair stops being started on the
+		// next apply, and nothing on the destination is touched either way.
+		SetMirrorPaused:    setup.SetMirrorPaused,
+		SetArchiveSchedule: setup.SetArchiveSchedule,
+		// "Back up now" for each kind of task. Methods on the daemon because it
+		// is the daemon that owns the mirror engines and the snapshot runner —
+		// there is nothing for setup to write.
+		BackUpFolderNow:     d.backUpFolderNow,
+		BackUpArchiveNow:    d.backUpArchiveNow,
+		SetSettings:         d.setSettings,
+		TestAlert:           d.testAlert,
+		DismissAlert:        d.dismissAlert,
+		DismissAlertsBefore: d.dismissAlertsBefore,
+		ApproveLANDevice:    d.approveLANDevice,
+		DenyLANDevice:       d.denyLANDevice,
+		ForgetLANDevice:     d.forgetLANDevice,
 		LANGate: &webui.LANGate{
 			ApprovedOnly: d.lanViewApprovedOnly,
 			Seen:         d.lanDeviceSeen,

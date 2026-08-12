@@ -88,9 +88,13 @@ func Prune(b Backend, maxAge time.Duration, now time.Time) error {
 	}
 
 	var firstErr error
-	for _, vs := range groups {
+	for orig, vs := range groups {
 		sort.Slice(vs, func(i, j int) bool { return vs[i].ts.After(vs[j].ts) }) // newest first
+		// DECIDED IN FULL BEFORE ANYTHING IS DELETED, so the rule below can ask
+		// whether this group is about to disappear entirely.
+		keeping := make([]bool, len(vs))
 		var lastKept time.Time
+		kept := 0
 		for i, v := range vs {
 			age := now.Sub(v.ts)
 			var slot time.Duration
@@ -104,9 +108,35 @@ func Prune(b Backend, maxAge time.Duration, now time.Time) error {
 			default:
 				slot = 24 * time.Hour
 			}
-			keep := slot > 0 && (i == 0 || lastKept.Sub(v.ts) >= slot)
-			if keep {
+			if slot > 0 && (i == 0 || lastKept.Sub(v.ts) >= slot) {
+				keeping[i] = true
 				lastKept = v.ts
+				kept++
+			}
+		}
+		// THE LAST COPY IS NEVER TAKEN BY AGE ALONE.
+		//
+		// A file deleted from the source is not deleted on the destination — it is
+		// moved into this store (see keepVersion, called from scan.go). From that
+		// moment the version IS the file: there is no copy in the source and none
+		// in the live mirror. Retention then deleted it like any other old version
+		// once it passed maxAge, so a file removed from a source folder a month ago
+		// vanished from every destination too, silently and for ever. That is the
+		// one deletion this program must never perform on its own account: the
+		// whole product exists so that losing a machine does not lose the files.
+		//
+		// So when a group is about to go entirely, keep its newest. A person can
+		// still remove it by hand — retention just will not do it for them.
+		//
+		// COSTS ONE Stat, AND ONLY FOR A GROUP THAT WOULD OTHERWISE VANISH. Every
+		// version being old is the only case where the last copy is at risk, and
+		// over SMB a stat per version rather than per doomed path would be a round
+		// trip for each of them.
+		if kept == 0 && len(vs) > 0 && !liveCopyExists(b, orig) {
+			keeping[0] = true // newest
+		}
+		for i, v := range vs {
+			if keeping[i] {
 				continue
 			}
 			if err := b.Remove(v.path); err != nil && firstErr == nil {
@@ -116,6 +146,48 @@ func Prune(b Backend, maxAge time.Duration, now time.Time) error {
 	}
 	removeEmptyDirs(b, VersionsDirName)
 	return firstErr
+}
+
+// liveCopyExists reports whether the file a version was made from is still in
+// the live mirror on this destination.
+//
+// The version store is a parallel tree: .backup-maker-versions/<machine>/<label>/…
+// mirrors <machine>/<label>/…, so the live path is this one with the store's
+// prefix taken off. `orig` is a version path with its ~timestamp already
+// stripped, which is exactly the live path once un-prefixed.
+//
+// FAILS TOWARDS KEEPING. A path that is not under the store, or a Stat that
+// errors for any reason other than "not there", answers "a copy may exist" — the
+// wrong answer costs a version nobody needed, and the other wrong answer costs
+// somebody their only copy of a file.
+func liveCopyExists(b Backend, orig string) bool {
+	live, ok := LiveCopyOf(orig)
+	if !ok {
+		return true
+	}
+	_, err := b.Stat(live)
+	return !isNotExist(err)
+}
+
+// LiveCopyOf is the live mirror path a version in the store was made from, and
+// whether p is a path inside the store at all.
+//
+// EXPORTED SO THE STORE'S SHAPE HAS ONE READER. Both halves of it — the
+// VersionsDirName prefix and the name~20060102-150405.ext stamp — are written
+// by this file and nowhere else, and the file view asks the same question
+// retention asks ("is this the last copy of that file?") in order to decide
+// whether a person may delete it. A second parser of the naming scheme is how
+// the two would come to different answers about the same file.
+func LiveCopyOf(p string) (string, bool) {
+	live, ok := strings.CutPrefix(p, VersionsDirName+"/")
+	if !ok || live == "" {
+		return "", false
+	}
+	live = stampRe.ReplaceAllString(live, "")
+	if live == "" {
+		return "", false
+	}
+	return live, true
 }
 
 // removeEmptyDirs tidies a subtree after pruning (best effort).

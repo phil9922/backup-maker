@@ -502,20 +502,27 @@ func (s *State) Owns(id string) bool {
 // an id before anything else exists: they are the first thing that writes a
 // claim to a destination.
 func EnsureInstallID() (string, error) {
-	s, err := LoadState()
+	s, err := UpdateState(func(s *State) error {
+		if s.InstallID != "" {
+			return ErrStateUnchanged
+		}
+		s.InstallID = NewToken()[:16]
+		return nil
+	})
 	if err != nil {
-		return "", err
-	}
-	if s.InstallID != "" {
-		return s.InstallID, nil
-	}
-	s.InstallID = NewToken()[:16]
-	if err := s.Save(); err != nil {
 		return "", err
 	}
 	return s.InstallID, nil
 }
 
+// Save writes this State over state.json, whole.
+//
+// NOT THE WAY TO CHANGE ONE FIELD — use UpdateState, which is this plus the
+// lock and a fresh read. A State that has been held for a while is stale in
+// every field its holder does not own, and saving it puts all of them back:
+// that is how a rename was undone by the daemon's next flush. This stays
+// exported because it is one half of the keyring seam (see forFile) and because
+// tests build a state file with it.
 func (s *State) Save() error {
 	path, err := StatePath()
 	if err != nil {

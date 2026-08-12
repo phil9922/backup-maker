@@ -50,57 +50,62 @@ var keychainEnableCmd = &cobra.Command{
 		if err := refuseWhileDaemonRuns("enable"); err != nil {
 			return err
 		}
-		state, err := config.LoadState()
-		if err != nil {
-			return err
-		}
-
-		// THE FIRST THING, BEFORE ANYTHING MOVES. This is the headless-Pi path and
-		// the boot-started-daemon path, and it is a round trip rather than a
-		// capability check because every way this fails is a way that only appears
-		// when it is tried. Refusing here costs the user nothing; discovering it
-		// after the migration would cost them every password.
-		if err := config.KeyringProbe(); err != nil {
-			return fmt.Errorf(`this machine has no usable OS keyring, so the passwords stay in state.json (mode 0600, which is what they have always been):
+		// The whole migration runs inside one update, so the flag and the
+		// redacted values land together and nothing else can be writing state.json
+		// underneath it. Safe to hold for a keyring round trip per password: this
+		// command refuses to run while the daemon is up.
+		var entries []secretEntry
+		if _, err := config.UpdateState(func(state *config.State) error {
+			// THE FIRST THING, BEFORE ANYTHING MOVES. This is the headless-Pi path and
+			// the boot-started-daemon path, and it is a round trip rather than a
+			// capability check because every way this fails is a way that only appears
+			// when it is tried. Refusing here costs the user nothing; discovering it
+			// after the migration would cost them every password.
+			if err := config.KeyringProbe(); err != nil {
+				return fmt.Errorf(`this machine has no usable OS keyring, so the passwords stay in state.json (mode 0600, which is what they have always been):
   %w
 
 That is a normal answer on a headless machine, and on a daemon started at boot
 rather than at login — there is no keyring session for it to talk to. Nothing
 has been changed`, err)
-		}
+			}
 
-		entries := secretEntries(state)
+			entries = secretEntries(state)
+			if len(entries) == 0 {
+				return config.ErrStateUnchanged
+			}
+
+			// MIGRATED AND VERIFIED ONE BY ONE, AND THE FLAG SET ONLY AFTER EVERY LAST
+			// ONE READ BACK CORRECTLY. A keyring that accepts a write and returns
+			// something else on the read — a size limit silently truncating, a provider
+			// that stores per-session — would otherwise be discovered by the mirror
+			// engine, hours later, as a wrong password.
+			for _, e := range entries {
+				if err := config.KeyringPut(e.account, e.secret); err != nil {
+					return fmt.Errorf("the keyring would not accept the password for %s %q, so nothing has been changed: %w", e.kind, e.name, err)
+				}
+				back, err := config.KeyringFetch(e.account)
+				if err != nil {
+					return fmt.Errorf("the keyring took the password for %s %q but would not give it back, so nothing has been changed: %w", e.kind, e.name, err)
+				}
+				if back != e.secret {
+					return fmt.Errorf("the keyring returned a different password for %s %q than it was given, so nothing has been changed", e.kind, e.name)
+				}
+			}
+
+			// This is the flag whose save replaces the values in the file with
+			// placeholders: Save is where the redaction lives, so there is one
+			// place that does it. A failure leaves copies in the keyring and the
+			// real passwords still in the file — untidy, and nothing lost.
+			state.SecretsInKeyring = true
+			return nil
+		}); err != nil {
+			return err
+		}
 		if len(entries) == 0 {
 			fmt.Println("There are no stored passwords to move.")
 			fmt.Println("Run this again after adding a network drive or a scheduled snapshot.")
 			return nil
-		}
-
-		// MIGRATED AND VERIFIED ONE BY ONE, AND THE FLAG SET ONLY AFTER EVERY LAST
-		// ONE READ BACK CORRECTLY. A keyring that accepts a write and returns
-		// something else on the read — a size limit silently truncating, a provider
-		// that stores per-session — would otherwise be discovered by the mirror
-		// engine, hours later, as a wrong password.
-		for _, e := range entries {
-			if err := config.KeyringPut(e.account, e.secret); err != nil {
-				return fmt.Errorf("the keyring would not accept the password for %s %q, so nothing has been changed: %w", e.kind, e.name, err)
-			}
-			back, err := config.KeyringFetch(e.account)
-			if err != nil {
-				return fmt.Errorf("the keyring took the password for %s %q but would not give it back, so nothing has been changed: %w", e.kind, e.name, err)
-			}
-			if back != e.secret {
-				return fmt.Errorf("the keyring returned a different password for %s %q than it was given, so nothing has been changed", e.kind, e.name)
-			}
-		}
-
-		state.SecretsInKeyring = true
-		// This is the write that replaces the values in the file with placeholders:
-		// Save is where the redaction lives, so there is one place that does it.
-		// A failure here leaves copies in the keyring and the real passwords still
-		// in the file — untidy, and nothing lost.
-		if err := state.Save(); err != nil {
-			return err
 		}
 
 		// Worded as a statement of where things are rather than of what moved,
@@ -132,42 +137,47 @@ var keychainDisableCmd = &cobra.Command{
 		if err := refuseWhileDaemonRuns("disable"); err != nil {
 			return err
 		}
-		// Loading is what reads every secret back out of the keyring, so by the
-		// next line this State either holds them all or knows which it could not
-		// get.
-		state, err := config.LoadState()
-		if err != nil {
-			return err
-		}
-		if !state.SecretsInKeyring {
-			fmt.Println("Passwords are already stored in state.json (mode 0600). Nothing to do.")
-			return nil
-		}
+		// The update's load is what reads every secret back out of the keyring, so
+		// inside the closure this State either holds them all or knows which it
+		// could not get.
+		var entries []secretEntry
+		alreadyOff := false
+		if _, err := config.UpdateState(func(state *config.State) error {
+			if !state.SecretsInKeyring {
+				alreadyOff = true
+				return config.ErrStateUnchanged
+			}
 
-		// REFUSED RATHER THAN DONE PARTIALLY. Switching off means writing the real
-		// passwords back into the file, and a password that cannot be read out of
-		// the keyring cannot be written back. Carrying on would produce a file that
-		// says the passwords are in state.json with those ones simply absent, and
-		// the keyring entries deleted below — which is the one outcome that loses a
-		// password for good.
-		if misses := state.KeyringMisses(); len(misses) > 0 {
-			return fmt.Errorf(`%d stored password(s) cannot be read out of the OS keyring right now:
+			// REFUSED RATHER THAN DONE PARTIALLY. Switching off means writing the
+			// real passwords back into the file, and a password that cannot be read
+			// out of the keyring cannot be written back. Carrying on would produce a
+			// file that says the passwords are in state.json with those ones simply
+			// absent, and the keyring entries deleted below — which is the one
+			// outcome that loses a password for good.
+			if misses := state.KeyringMisses(); len(misses) > 0 {
+				return fmt.Errorf(`%d stored password(s) cannot be read out of the OS keyring right now:
   %s
 
 Switching keyring storage off would have to write them back into state.json, and
 they are not available to write. Unlock the keyring (or run this from a normal
 login session rather than at boot) and try again. Nothing has been changed`,
-				len(misses), strings.Join(misses, "\n  "))
-		}
+					len(misses), strings.Join(misses, "\n  "))
+			}
 
-		entries := secretEntries(state)
-		state.SecretsInKeyring = false
-		// The file first, with the real values in it. Only once that has landed is
-		// there a second copy to delete: the reverse order would leave a window in
-		// which neither storage holds the password.
-		if err := state.Save(); err != nil {
+			entries = secretEntries(state)
+			state.SecretsInKeyring = false
+			return nil
+		}); err != nil {
 			return err
 		}
+		if alreadyOff {
+			fmt.Println("Passwords are already stored in state.json (mode 0600). Nothing to do.")
+			return nil
+		}
+
+		// The file first, with the real values in it — that is the save above.
+		// Only once it has landed is there a second copy to delete: the reverse
+		// order would leave a window in which neither storage holds the password.
 		var stale []string
 		for _, e := range entries {
 			if err := config.KeyringForget(e.account); err != nil {

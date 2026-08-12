@@ -49,15 +49,13 @@ var setPasswordCmd = &cobra.Command{
 			return err
 		}
 
-		state, err := config.LoadState()
-		if err != nil {
-			return err
-		}
-		if state.ShareCredentials == nil {
-			state.ShareCredentials = map[string]string{}
-		}
-		state.ShareCredentials[name] = pass
-		if err := state.Save(); err != nil {
+		if _, err := config.UpdateState(func(s *config.State) error {
+			if s.ShareCredentials == nil {
+				s.ShareCredentials = map[string]string{}
+			}
+			s.ShareCredentials[name] = pass
+			return nil
+		}); err != nil {
 			return err
 		}
 		// Re-save the config (even if unchanged) so a running daemon reloads

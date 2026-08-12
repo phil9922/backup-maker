@@ -13,6 +13,12 @@ func historyDaemon(t *testing.T, recs ...config.AlertRecord) *daemon {
 	t.Helper()
 	d := gatedDaemon(t)
 	d.state.RecentAlerts = recs
+	// On disk as well as in memory, because that is the only state a daemon can
+	// actually be in: the history is saved the moment an alert is raised, and
+	// dismissing reads the file back so a record written since is not lost.
+	if err := d.state.Save(); err != nil {
+		t.Fatal(err)
+	}
 	return d
 }
 
@@ -92,6 +98,9 @@ func TestADismissalIsPersisted(t *testing.T) {
 
 	first := &daemon{state: &config.State{}, cfg: config.New()}
 	first.state.RecordAlert(raised(at, "backup-pi has been stale"))
+	if err := first.state.Save(); err != nil { // as recordAlert would have
+		t.Fatal(err)
+	}
 	if err := first.dismissAlert(at); err != nil {
 		t.Fatal(err)
 	}

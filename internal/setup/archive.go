@@ -69,15 +69,14 @@ func AddArchive(name string, folderIDs []string, every, target string, keep int,
 		return err
 	}
 
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	if state.ArchivePasswords == nil {
-		state.ArchivePasswords = map[string]string{}
-	}
-	state.ArchivePasswords[name] = password
-	return state.Save()
+	_, err = config.UpdateState(func(s *config.State) error {
+		if s.ArchivePasswords == nil {
+			s.ArchivePasswords = map[string]string{}
+		}
+		s.ArchivePasswords[name] = password
+		return nil
+	})
+	return err
 }
 
 // RemoveArchive stops a snapshot schedule from ever running again.
@@ -110,12 +109,14 @@ func RemoveArchive(name string) error {
 	}
 	// Only after the config change is durable, so a failed save never leaves a
 	// live job separated from the password it cannot run without.
-	state, err := config.LoadState()
+	state, err := config.UpdateState(func(s *config.State) error {
+		delete(s.ArchivePasswords, name)
+		delete(s.ArchiveLastRun, name)
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	delete(state.ArchivePasswords, name)
-	delete(state.ArchiveLastRun, name)
 	// And out of the OS keyring if the passwords are kept there, so the two
 	// storages forget the same thing: the line above has always dropped the
 	// password on removal, and leaving a keyring copy behind would mean whether an
@@ -125,7 +126,7 @@ func RemoveArchive(name string) error {
 	if state.SecretsInKeyring {
 		_ = config.KeyringForget(config.ArchiveKeyringAccount(name))
 	}
-	return state.Save()
+	return nil
 }
 
 // SetArchivePaused stops or resumes a schedule without touching anything else.

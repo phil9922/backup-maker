@@ -148,6 +148,19 @@ func RemoveTarget(name string) error {
 		return fmt.Errorf("no target named %q", name)
 	}
 	cfg.Targets = append(cfg.Targets[:idx], cfg.Targets[idx+1:]...)
+	// A pause aimed at this destination goes with it. Left behind, it would sit
+	// in the config waiting for a destination of the same name to be added later
+	// and then silently refuse to back up to it.
+	//
+	// EMPTYING THIS LIST IS SAFE AND IS THE POINT: an empty PausedTargets means
+	// nothing is paused. It is not Target.Folders, where an emptied list would
+	// widen a destination to every folder on the machine.
+	for i := range cfg.Folders {
+		cfg.Folders[i].PausedTargets = withoutString(cfg.Folders[i].PausedTargets, name)
+		if len(cfg.Folders[i].PausedTargets) == 0 {
+			cfg.Folders[i].PausedTargets = nil
+		}
+	}
 
 	var keptArchives []config.Archive
 	var orphaned []string
@@ -167,15 +180,17 @@ func RemoveTarget(name string) error {
 	// Forget the secrets that belonged to this target only after the config
 	// change is durable, so a failed save never orphans a live target from its
 	// credentials.
-	state, err := config.LoadState()
+	state, err := config.UpdateState(func(s *config.State) error {
+		delete(s.ShareCredentials, name)
+		delete(s.DriveTargetUUIDs, name)
+		for _, an := range orphaned {
+			delete(s.ArchivePasswords, an)
+			delete(s.ArchiveLastRun, an)
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	delete(state.ShareCredentials, name)
-	delete(state.DriveTargetUUIDs, name)
-	for _, an := range orphaned {
-		delete(state.ArchivePasswords, an)
-		delete(state.ArchiveLastRun, an)
 	}
 	// And out of the OS keyring, where the same secrets are kept when that is
 	// switched on. Best-effort and never fatal: the destination is gone from the
@@ -183,13 +198,16 @@ func RemoveTarget(name string) error {
 	// user's keyring app with nothing in backup-maker naming it — untidy, not
 	// dangerous. Nothing on a destination is touched by any of this; this is one
 	// machine forgetting a credential.
+	//
+	// After the save rather than before it, so the keyring entry is only dropped
+	// once the file that names it has actually been written.
 	if state.SecretsInKeyring {
 		_ = config.KeyringForget(config.ShareKeyringAccount(name))
 		for _, an := range orphaned {
 			_ = config.KeyringForget(config.ArchiveKeyringAccount(an))
 		}
 	}
-	return state.Save()
+	return nil
 }
 
 func withoutString(list []string, s string) []string {

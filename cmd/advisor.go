@@ -38,12 +38,17 @@ func maybeOfferAdvisor() {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return
 	}
-	state, err := config.LoadState()
-	if err != nil || state.AdvisorSeen {
+	offered := false
+	if _, err := config.UpdateState(func(s *config.State) error {
+		if s.AdvisorSeen {
+			return config.ErrStateUnchanged
+		}
+		s.AdvisorSeen = true
+		offered = true
+		return nil
+	}); err != nil || !offered {
 		return
 	}
-	state.AdvisorSeen = true
-	_ = state.Save()
 
 	fmt.Println()
 	fmt.Print("Optional: a 60-second quiz can point out the biggest gap in your backup plan.\n" +

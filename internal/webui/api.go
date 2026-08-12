@@ -509,6 +509,56 @@ func (s *Server) handleDescribeTarget(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "message": "saved onto the destination"})
 }
 
+// handleDestFiles lists one directory of what a destination holds.
+//
+// A GET with the directory in a query parameter, because it is a read and
+// because the page walks back up it — but it is behind the token like every
+// other read here, and it is NOT on the network view's allow-list: which
+// directories a person's backups are filed under is the same reconnaissance
+// /api/browse withholds, and this one describes the drive as well.
+//
+// The daemon decides what is inside the backup roots. An empty path is the top
+// level, which is synthesised rather than listed.
+func (s *Server) handleDestFiles(w http.ResponseWriter, r *http.Request) {
+	if s.actions.DestFiles == nil {
+		unavailable(w, "looking at what a destination holds")
+		return
+	}
+	out, err := s.actions.DestFiles(r.PathValue("name"), r.URL.Query().Get("path"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// handleDeleteDestFile removes one thing a destination holds.
+//
+// The second route on this API that removes a user's backups. As with the
+// first, the confirmation is re-checked by the daemon against the path it
+// resolved itself: a page can be reloaded, scripted, or simply wrong, and the
+// check that matters is the one nearest the deletion.
+func (s *Server) handleDeleteDestFile(w http.ResponseWriter, r *http.Request) {
+	if s.actions.DeleteDestFile == nil {
+		unavailable(w, "deleting from a destination")
+		return
+	}
+	var req DestFileDeleteRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Confirm) == "" {
+		http.Error(w, "nothing was deleted: type the name of the thing you want to delete to confirm", http.StatusUnprocessableEntity)
+		return
+	}
+	out, err := s.actions.DeleteDestFile(r.PathValue("name"), req.Path, req.Confirm)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
 func (s *Server) handleAddArchive(w http.ResponseWriter, r *http.Request) {
 	var req ArchiveRequest
 	if !decodeJSON(w, r, &req) {
@@ -838,6 +888,73 @@ func (s *Server) handleSetArchivePaused(w http.ResponseWriter, r *http.Request) 
 		msg = "paused; nothing about it is lost, and the snapshots already written stay where they are"
 	}
 	writeJSON(w, map[string]any{"ok": true, "message": msg})
+}
+
+// handleSetMirrorPaused stops or resumes one folder's mirror to one destination.
+//
+// The folder is in the path and the destination in the body, and BOTH have to
+// arrive: a folder with three destinations has three of these switches, and a
+// dropped target would pause whichever one the daemon guessed — which is to say
+// it would stop backing up something nobody asked it to stop.
+func (s *Server) handleSetMirrorPaused(w http.ResponseWriter, r *http.Request) {
+	if s.actions.SetMirrorPaused == nil {
+		unavailable(w, "pausing a backup to one destination")
+		return
+	}
+	var req MirrorPausedRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.actions.SetMirrorPaused(r.PathValue("id"), req.Target, req.Paused); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	msg := "resumed — this folder starts copying to " + req.Target + " again within a few seconds, carrying on from where it left off"
+	if req.Paused {
+		msg = "paused; everything already backed up to " + req.Target + " stays exactly where it is, and nothing new is copied there until you resume it"
+	}
+	writeJSON(w, map[string]any{"ok": true, "message": msg})
+}
+
+// handleBackUpFolderNow forces a continuous mirror's next pass to happen now.
+//
+// It answers as soon as the pass is REQUESTED. The engine that owns this pair
+// runs it on its own goroutine — that is what keeps two passes over one
+// destination from ever overlapping — so there is nothing here to wait for, and
+// waiting would hold an HTTP request open for the minutes a share can take.
+func (s *Server) handleBackUpFolderNow(w http.ResponseWriter, r *http.Request) {
+	if s.actions.BackUpFolderNow == nil {
+		unavailable(w, "backing up a folder now")
+		return
+	}
+	var req BackUpFolderNowRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	out, err := s.actions.BackUpFolderNow(r.PathValue("id"), req.Target)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
+}
+
+// handleBackUpArchiveNow writes one schedule's snapshot now.
+//
+// Same contract as the mirror above, and it matters more here: a snapshot of a
+// real folder is gigabytes and takes tens of minutes. The daemon starts it in
+// the background and this says so — it must never read as "done".
+func (s *Server) handleBackUpArchiveNow(w http.ResponseWriter, r *http.Request) {
+	if s.actions.BackUpArchiveNow == nil {
+		unavailable(w, "writing a snapshot now")
+		return
+	}
+	out, err := s.actions.BackUpArchiveNow(r.PathValue("name"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	writeJSON(w, out)
 }
 
 // handleRemoveArchive stops a schedule for good. The zips it wrote survive.

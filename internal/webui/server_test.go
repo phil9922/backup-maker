@@ -394,6 +394,23 @@ func newDashboard(t *testing.T) *dashboard {
 		SetFolderIgnores: func(string, []string, bool) error { touch(); return nil },
 		CreateBackup:     func(BackupRequest) (any, error) { touch(); return map[string]bool{"ok": true}, nil },
 		AddArchive:       func(ArchiveRequest) error { touch(); return nil },
+		BackUpFolderNow: func(string, string) (any, error) {
+			touch()
+			return map[string]any{"ok": true, "message": "Checking photos against laptopcard now."}, nil
+		},
+		BackUpArchiveNow: func(string) (any, error) {
+			touch()
+			return map[string]any{"ok": true, "message": "Writing a snapshot for \"nightly\" now."}, nil
+		},
+		SetMirrorPaused: func(string, string, bool) error { touch(); return nil },
+		DestFiles: func(string, string) (any, error) {
+			touch()
+			return map[string]any{"entries": []any{}}, nil
+		},
+		DeleteDestFile: func(string, string, string) (any, error) {
+			touch()
+			return map[string]any{"ok": true}, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("starting the dashboard: %v", err)
@@ -443,6 +460,18 @@ var mutatingRoutes = []struct{ method, path, body string }{
 	{http.MethodPost, "/api/folders/abc/ignores", `{"ignores":[]}`},
 	{http.MethodDelete, "/api/folders/abc", ``},
 	{http.MethodDelete, "/api/targets/nas", ``},
+	// Running a backup starts work on this machine, so it is guarded exactly
+	// like the routes that change configuration.
+	{http.MethodPost, "/api/folders/abc/backup-now", `{"target":"laptopcard"}`},
+	{http.MethodPost, "/api/archives/nightly/backup-now", ``},
+	// Pausing STOPS a backup, so it is guarded exactly like the routes that
+	// start one: a page on another local port must not be able to switch
+	// somebody's backups off without a click.
+	{http.MethodPost, "/api/folders/abc/paused", `{"target":"laptopcard","paused":true}`},
+	// Deleting something a destination holds. The second route that removes
+	// backups, so it carries the same guard suite as the first.
+	{http.MethodPost, "/api/targets/laptopcard/files/delete",
+		`{"path":"backup-maker-archives/my-laptop/nightly","confirm":"nightly"}`},
 }
 
 // A page on ANY other loopback port must not be able to change anything here,

@@ -174,9 +174,14 @@ func pinnedVersion(v string, dirty bool) string {
 // pseudo-version, nothing that would build a download URL that 404s.
 var plainRelease = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
-// createBackup runs the wizard's commit step. setup.CreateBackup validates
-// every destination before writing anything, so a failure here leaves the
-// configuration untouched rather than half-applied.
+// createBackup runs the wizard's commit step. setup.CreateBackup resolves every
+// chosen folder and validates every destination before writing anything, so a
+// failure here leaves the configuration untouched rather than half-applied —
+// with several folders in one request that is the difference between all of them
+// being protected and the user being told about only the one that failed.
+//
+// The reported folder is the first of the selection; the names come back one per
+// destination in the order they were sent, which the wizard maps back by index.
 func (d *daemon) createBackup(req webui.BackupRequest) (any, error) {
 	dests := make([]setup.Destination, 0, len(req.Destinations))
 	for _, x := range req.Destinations {
@@ -194,6 +199,15 @@ func (d *daemon) createBackup(req webui.BackupRequest) (any, error) {
 			TakeOver:       x.TakeOver,
 		})
 	}
+	folders := make([]setup.FolderRef, 0, len(req.Folders))
+	for _, f := range req.Folders {
+		folders = append(folders, setup.FolderRef{
+			FolderID:    f.FolderID,
+			Path:        f.Path,
+			Label:       f.Label,
+			ExtraIgnore: f.ExtraIgnore,
+		})
+	}
 	var spec *setup.ArchiveSpec
 	if req.Archive != nil {
 		spec = &setup.ArchiveSpec{
@@ -205,6 +219,7 @@ func (d *daemon) createBackup(req webui.BackupRequest) (any, error) {
 		}
 	}
 	folder, targets, err := setup.CreateBackup(setup.BackupRequest{
+		Folders:      folders,
 		FolderID:     req.FolderID,
 		Path:         req.Path,
 		Label:        req.Label,
@@ -235,24 +250,19 @@ func (d *daemon) addArchive(req webui.ArchiveRequest) error {
 }
 
 // completeSetup records that the wizard was finished or deliberately skipped.
-// It reloads state first so it never clobbers changes another command wrote
-// while the daemon was running.
+// Through updateState, so the flag is set on the state.json that is actually on
+// disk and nothing else another command wrote while the daemon was running is
+// carried away with it.
 func (d *daemon) completeSetup() error {
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	if state.SetupComplete {
-		return nil
-	}
-	state.SetupComplete = true
-	if err := state.Save(); err != nil {
-		return err
-	}
 	d.mu.Lock()
-	d.state.SetupComplete = true
-	d.mu.Unlock()
-	return nil
+	defer d.mu.Unlock()
+	return d.updateState(func(s *config.State) error {
+		if s.SetupComplete {
+			return config.ErrStateUnchanged
+		}
+		s.SetupComplete = true
+		return nil
+	})
 }
 
 // setupDone reports the persisted flag for the status model.

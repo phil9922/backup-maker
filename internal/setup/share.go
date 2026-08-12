@@ -49,15 +49,13 @@ func AddShareTargetAs(url, username, password, name string, verify, takeOver boo
 		return locate(err, "share", url)
 	}
 
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	if state.ShareCredentials == nil {
-		state.ShareCredentials = map[string]string{}
-	}
-	state.ShareCredentials[name] = password
-	if err := state.Save(); err != nil {
+	if _, err := config.UpdateState(func(s *config.State) error {
+		if s.ShareCredentials == nil {
+			s.ShareCredentials = map[string]string{}
+		}
+		s.ShareCredentials[name] = password
+		return nil
+	}); err != nil {
 		return err
 	}
 
@@ -100,7 +98,15 @@ func EnsureTargetMarkerAs(b localmirror.Backend, targetName, machineName string,
 		return err
 	}
 	if state.InstallID == "" {
-		state.InstallID = config.NewToken()[:16]
+		// Minted and SAVED here rather than carried to the save at the bottom,
+		// because the id is about to be written into a claim file on the
+		// destination and the two have to be the same id. EnsureInstallID is
+		// the atomic version of "mint one if there isn't one".
+		id, err := config.EnsureInstallID()
+		if err != nil {
+			return err
+		}
+		state.InstallID = id
 	}
 	uuid := ""
 	if m, err := localmirror.ReadMarker(b); err == nil {
@@ -133,11 +139,18 @@ func EnsureTargetMarkerAs(b localmirror.Backend, targetName, machineName string,
 		}
 	}
 
-	if state.DriveTargetUUIDs == nil {
-		state.DriveTargetUUIDs = map[string]string{}
-	}
-	state.DriveTargetUUIDs[targetName] = uuid
-	return state.Save()
+	// The recorded UUID, written on its own and last. Everything above it is I/O
+	// to the destination, which on a share can take a minute, and holding the
+	// state lock across that would stall every other writer on the machine —
+	// including the daemon's flush.
+	_, err = config.UpdateState(func(s *config.State) error {
+		if s.DriveTargetUUIDs == nil {
+			s.DriveTargetUUIDs = map[string]string{}
+		}
+		s.DriveTargetUUIDs[targetName] = uuid
+		return nil
+	})
+	return err
 }
 
 // claimConflict builds the error the caller shows, carrying enough for the

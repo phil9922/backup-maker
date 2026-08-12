@@ -29,6 +29,20 @@ import (
 // mirror engine: <target root>/backup-maker-archives/<machine>/<job>/.
 const DirName = "backup-maker-archives"
 
+// PathFor is the directory one snapshot job writes into on a destination, both
+// parts made safe for FAT, NTFS and SMB.
+//
+// EXPORTED SO THERE IS EXACTLY ONE OF IT, for the reason config.DestRoot was:
+// this expression used to live inline in Run(), which was fine while the writer
+// was the only thing that needed to know. It is not fine now that the file view
+// classifies a directory on a destination by asking which job wrote it, and
+// offers to delete the ones no job did. A second, subtly different spelling of
+// the same path is how such a delete decides a live schedule's snapshots belong
+// to nobody.
+func PathFor(machineName, jobName string) string {
+	return path.Join(DirName, sanitize(machineName), sanitize(jobName))
+}
+
 const stampLayout = "20060102-150405"
 
 // writeBufferSize is how much is gathered before anything is handed to the
@@ -94,7 +108,7 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 		return fail(fmt.Errorf("no folders selected"))
 	}
 
-	dir := path.Join(DirName, sanitize(cfg.General.MachineName), sanitize(job.Name))
+	dir := PathFor(cfg.General.MachineName, job.Name)
 	if err := b.MkdirAll(dir); err != nil {
 		return fail(fmt.Errorf("creating %s on target: %w", dir, err))
 	}

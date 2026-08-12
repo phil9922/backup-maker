@@ -62,6 +62,18 @@ type Engine struct {
 	// go and look properly".
 	kick chan []string
 
+	// asked marks a pass somebody requested by hand ("Back up now"), and is
+	// carried BESIDE the channel rather than in it.
+	//
+	// It has to be separate because kick has room for one item: if the watcher
+	// has already queued a two-file batch, a manual send is dropped, and the
+	// queued batch would take the fast path — so the button would copy the two
+	// files the watcher happened to see and call that a backup. Somebody
+	// pressing it is asking for a real check, so the flag makes whichever kick
+	// arrives next a FULL pass. Read and cleared by the run loop, which is the
+	// only caller of sync().
+	asked atomic.Bool
+
 	mu           sync.Mutex
 	state        string // scanning | in sync | syncing | offline | wrong-drive | name-clash
 	lastSync     time.Time
@@ -306,15 +318,11 @@ func (e *Engine) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case changed := <-e.kick:
-			// A handful of changed files gets copied straight over; anything else
-			// — a burst, or a folder that has never completed a pass — gets the
-			// full pass. The full pass still runs on the hourly ticker either way,
-			// so nothing here is load-bearing for correctness.
-			if e.fastPathUsable(changed) {
-				e.propagate(changed)
+			if e.fullPassWanted(changed) {
+				e.sync()
 				continue
 			}
-			e.sync()
+			e.propagate(changed)
 		case <-rescan.C:
 			e.sync()
 			e.pruneIfDue()
@@ -328,6 +336,54 @@ func (e *Engine) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// fullPassWanted decides what one kick off e.kick means: a full reconcile, or
+// the fast path that copies the named files straight over.
+//
+// A handful of changed files gets copied straight over; anything else — a
+// burst, a folder that has never completed a pass, or a pass somebody asked
+// for by hand — gets the full pass. The full pass still runs on the hourly
+// ticker either way, so only the manual case is load-bearing here.
+//
+// The manual flag is CLEARED here and nowhere else, so one press buys exactly
+// one full pass rather than turning the fast path off for good.
+func (e *Engine) fullPassWanted(changed []string) bool {
+	if e.asked.Swap(false) {
+		return true
+	}
+	return !e.fastPathUsable(changed)
+}
+
+// BackUpNow asks for a full pass as soon as this engine can run one, instead of
+// waiting for the hourly rescan. It returns immediately; the pass itself may
+// take minutes.
+//
+// A NUDGE INTO THE RUN LOOP, NEVER A SECOND CALL SITE FOR sync(). Everything
+// that copies runs on the one goroutine started by Run, which is what makes
+// passes non-overlapping — two reconciles of the same pair at once would race
+// each other over the same destination files. So this only ever sets the flag
+// and pokes the channel; whether a pass is in flight is decided by that
+// goroutine, on its own time.
+//
+// Dropping the send when the channel is full is correct: a kick is already
+// queued, and e.asked has already made it a full pass.
+func (e *Engine) BackUpNow() {
+	// Before the send, so that whichever kick the loop reads next — the one
+	// queued here, or one already waiting — sees it.
+	e.asked.Store(true)
+	select {
+	case e.kick <- nil:
+	default:
+	}
+}
+
+// Busy reports whether a pass is running right now, so a caller can say "it is
+// already working" rather than implying a press started something.
+func (e *Engine) Busy() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.state == "scanning" || e.state == "syncing"
 }
 
 // pruneIfDue applies the staggered retention if a day has passed since this

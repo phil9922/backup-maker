@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-// The browser setup wizard: one backup per run — choose a folder, choose where
-// copies go, optionally schedule snapshots, confirm.
+// The browser setup wizard: one run — choose the folders, choose where copies
+// go, optionally schedule snapshots, confirm.
 //
 // It deliberately does not ask the user to know the difference between a local
 // drive, an SMB share and a paired machine. Step 2 shows computers; you drill
@@ -19,8 +19,8 @@ const Wizard = (() => {
     },
     folder: {
       chip: "Folder",
-      title: "Which folder should be protected?",
-      lede: "Everything inside it is included. Junk like node_modules is skipped automatically.",
+      title: "Which folders should be protected?",
+      lede: "Pick as many as you like — press Protect this on each one. Everything inside them is included, and junk like node_modules is skipped automatically.",
     },
     dest: {
       chip: "Destinations",
@@ -43,8 +43,26 @@ const Wizard = (() => {
   let index = 0;
   let firstRun = false;
   let model = null;
-  let chosenFolder = "";
-  let chosenFolderID = "";   // set when reusing an already-protected folder
+  // The folders picked on step 1, keyed by path with the trailing slash trimmed
+  // so the same folder cannot be held twice under two spellings. The value keeps
+  // the path as the user's system gave it, plus the id of the folder record when
+  // one already exists — that is what turns "protect this" into "add another
+  // kind of backup to the folder you already have", instead of hitting the
+  // duplicate-path refusal.
+  //
+  // A MAP RATHER THAN ONE PATH, because this step used to allow exactly one and
+  // said so nowhere: picking a second folder silently replaced the first.
+  const picked = new Map();
+
+  // What the server is sent, and what the review step reads. One shape, so the
+  // summary cannot describe something other than what is saved.
+  function pickedFolders() {
+    return [...picked.values()].map(({ path, id }) => ({ path, folder_id: id || undefined }));
+  }
+
+  function isPicked(path) {
+    return picked.has(trimSlash(path));
+  }
   const chosen = new Map();
 
   function mode() {
@@ -79,8 +97,7 @@ const Wizard = (() => {
     model = st || null;
     firstRun = !!(opts && opts.firstRun);
     index = 0;
-    chosenFolder = "";
-    chosenFolderID = "";
+    picked.clear();
     chosen.clear();
     const inc = document.querySelector('input[name="mode"][value="incremental"]');
     if (inc) inc.checked = true;
@@ -94,8 +111,8 @@ const Wizard = (() => {
     // record that already owns it. Opening blank from a button that names a
     // folder was a trap.
     if (opts && opts.folder && opts.folder.path) {
-      chosenFolder = opts.folder.path;
-      chosenFolderID = opts.folder.id || "";
+      picked.set(trimSlash(opts.folder.path),
+        { path: opts.folder.path, id: opts.folder.id || "" });
     }
     renderChosenFolder(); // clears the line left by a previous run
     $("dest-count").hidden = true;
@@ -147,7 +164,13 @@ const Wizard = (() => {
       prog.appendChild(li);
     });
 
-    $("wiz-back").disabled = index === 0;
+    // Back on the first step LEAVES the wizard, the same escape adopt.js gives
+    // (adopt.js:112). Opened from the dashboard there is no other way out — the
+    // skip link is hidden once setup is done — so disabling it here dead-ended
+    // anyone who opened the wizard to look. On a first run there is nothing
+    // behind the wizard to go back TO, and the skip link is the way out instead.
+    $("wiz-back").disabled = index === 0 && firstRun;
+    $("wiz-back").textContent = index === 0 && !firstRun ? "Back to dashboard" : "Back";
     const last = index === order.length - 1;
     $("wiz-next").hidden = last;
     $("wiz-finish").hidden = !last;
@@ -157,7 +180,7 @@ const Wizard = (() => {
   function canAdvance() {
     switch (order[index]) {
       case "folder":
-        if (!chosenFolder) return "Choose a folder first.";
+        if (picked.size === 0) return "Choose at least one folder first.";
         break;
       case "dest":
         if (chosen.size === 0) return "Choose at least one place to back up to.";
@@ -199,6 +222,10 @@ const Wizard = (() => {
     // where somebody who has navigated into what they want expects to press.
     $('pick-here').hidden = false;
     $('pick-here').dataset.path = data.path;
+    // Navigating INTO the folder you already picked must find the button green,
+    // not reset to "Protect this folder" — the choice did not change, only what
+    // is on screen.
+    syncPickButtons();
     $('pick-truncated').hidden = !data.truncated;
     const list = $('pick-list');
     list.replaceChildren();
@@ -220,10 +247,50 @@ const Wizard = (() => {
     openBtn.title = 'Open ' + entry.name;
     openBtn.onclick = () => loadDir(entry.path);
     const useBtn = mk('button', 'pick-use', 'Protect this');
-    useBtn.title = 'Back up ' + entry.path;
-    useBtn.onclick = () => chooseFolder(entry.path);
+    useBtn.dataset.path = entry.path;
+    useBtn.onclick = () => toggleFolder(entry.path);
     li.append(openBtn, mk('span', 'pick-gap'), useBtn);
     list.appendChild(li);
+    syncPickButtons();
+  }
+
+  // WHICH FOLDER IS ACTUALLY PICKED, SAID ON THE BUTTON THAT PICKED IT.
+  //
+  // Choosing one used to change a line of text above the list and nothing else,
+  // so every button in the list went on reading "Protect this" — including the
+  // one that had just been pressed. On the step where being wrong matters most,
+  // the only feedback was somewhere other than where you were looking, and a
+  // second press on a different row silently replaced the first choice with no
+  // sign that it had.
+  //
+  // Green and "Protected" for the chosen one; everything else back to default.
+  // The colour is the same --ok the dashboard uses for "backed up", which is the
+  // one it should mean here too.
+  function syncPickButtons() {
+    const mark = (btn, offLabel) => {
+      if (!btn) return;
+      const on = isPicked(btn.dataset.path || '');
+      btn.classList.toggle('pick-chosen', on);
+      btn.textContent = on ? 'Protected' : offLabel;
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.title = on
+        ? 'Picked. Press again to leave it out. You can pick as many folders as you like.'
+        : 'Back up ' + (btn.dataset.path || 'this folder');
+    };
+    for (const b of document.querySelectorAll('#pick-list .pick-use')) mark(b, 'Protect this');
+    mark($('pick-here'), 'Protect this folder');
+  }
+
+  // Pressing the green one again lets it go. A button that says "Protected" and
+  // does nothing when pressed reads as stuck, and the only other way back was a
+  // Deselect control somewhere else on the step.
+  function toggleFolder(path) {
+    if (isPicked(path)) {
+      picked.delete(trimSlash(path));
+      renderChosenFolder();
+      return;
+    }
+    chooseFolder(path);
   }
 
   // Offer folders already under protection, so a second kind of backup can be
@@ -278,8 +345,7 @@ const Wizard = (() => {
   // unreachable from here: the request becomes "add a kind of backup to this
   // folder", which is what was meant.
   function chooseFolder(path, folderID) {
-    chosenFolderID = folderID || folderIDForPath(path);
-    chosenFolder = path;
+    picked.set(trimSlash(path), { path, id: folderID || folderIDForPath(path) });
     renderChosenFolder();
   }
 
@@ -301,29 +367,52 @@ const Wizard = (() => {
   // the one step where being wrong matters most. Every other choice in this
   // wizard can be taken back; this one now can too.
   function clearChosenFolder() {
-    chosenFolder = "";
-    chosenFolderID = "";
+    picked.clear();
     renderChosenFolder();
   }
 
   function renderChosenFolder() {
+    // The buttons in the list are the other half of this, and they must not be
+    // allowed to disagree with the list below: both are drawn from `picked`,
+    // every time it changes.
+    syncPickButtons();
     const p = $('pick-chosen');
     p.replaceChildren();
-    if (!chosenFolder) {
+    if (picked.size === 0) {
       p.hidden = true;
       return;
     }
     p.hidden = false;
-    p.appendChild(mk('span', null,
-      (chosenFolderID ? 'Adding a backup for: ' : 'Protecting: ') + chosenFolder));
-    // "Deselect", quiet rather than red: it undoes a selection and destroys
-    // nothing — nothing has even been saved yet. Red is what this dashboard
-    // uses for deleting backups and erasing a drive, and it only keeps that
-    // meaning if it is not also worn by un-picking a folder.
-    const undo = mk('button', 'small-btn quiet', 'Deselect');
-    undo.title = 'Deselect this folder and pick a different one. Nothing on disk is touched.';
-    undo.onclick = clearChosenFolder;
-    p.appendChild(undo);
+    // EVERY PICKED FOLDER IS NAMED, not just a count. "3 folders selected" is
+    // the version of this that lets somebody carry a folder they did not mean
+    // through four more steps: the whole point of the summary is to be checked.
+    p.appendChild(mk('strong', null,
+      picked.size === 1 ? 'Protecting this folder:' : `Protecting these ${picked.size} folders:`));
+    const list = mk('ul', 'picked-list');
+    for (const { path, id } of picked.values()) {
+      const li = mk('li');
+      // The distinction the single-folder version drew, kept per folder: one
+      // that already exists is having a second kind of backup added to it, not
+      // being protected for the first time.
+      li.appendChild(mk('span', 'mono', path));
+      if (id) li.appendChild(mk('span', 'muted small', ' — adding to the backup it already has'));
+      // "Deselect", quiet rather than red: it undoes a selection and destroys
+      // nothing — nothing has even been saved yet. Red is what this dashboard
+      // uses for deleting backups and erasing a drive, and it only keeps that
+      // meaning if it is not also worn by un-picking a folder.
+      const undo = mk('button', 'small-btn quiet', 'Deselect');
+      undo.title = 'Leave ' + path + ' out. Nothing on disk is touched.';
+      undo.onclick = () => toggleFolder(path);
+      li.appendChild(undo);
+      list.appendChild(li);
+    }
+    p.appendChild(list);
+    if (picked.size > 1) {
+      const all = mk('button', 'small-btn quiet', 'Deselect all');
+      all.title = 'Start the selection again. Nothing on disk is touched.';
+      all.onclick = clearChosenFolder;
+      p.appendChild(all);
+    }
   }
 
   // --- step 2: machines and their storage -------------------------------
@@ -905,7 +994,10 @@ const Wizard = (() => {
     add("Kind", timed
       ? "Timed — a full encrypted snapshot on a schedule"
       : "Incremental — a live copy, updated within seconds");
-    add("Folder", chosenFolder);
+    // Named one per line, however many. A count here would be the last chance
+    // to notice a folder nobody meant to include, spent.
+    const paths = [...picked.values()].map((f) => f.path);
+    add(picked.size === 1 ? "Folder" : `Folders (${picked.size})`, paths.join("\n"));
     const dests = [...chosen.values()].map((d) => d._label).join("\n");
     add(chosen.size === 1 ? "Copy kept on" : `Copies kept on (${chosen.size})`, dests);
     if (timed) {
@@ -927,8 +1019,11 @@ const Wizard = (() => {
     try {
       const dests = [...chosen.values()];
       const body = {
-        folder_id: chosenFolderID || undefined,
-        path: chosenFolder,
+        // The whole selection, in one request. Looping a request per folder
+        // would break the guarantee below: a timed backup whose schedule failed
+        // on the third folder would have left the first two saved and
+        // unprotected.
+        folders: pickedFolders(),
         mode: mode(),
         destinations: dests.map(({ _label, ...rest }) => rest),
       };
@@ -1126,7 +1221,12 @@ const Wizard = (() => {
       index = Math.min(order.length - 1, index + 1);
       render();
     };
-    $('wiz-back').onclick = () => { index = Math.max(0, index - 1); render(); };
+    $('wiz-back').onclick = () => {
+      if (index === 0) { close(); return; }
+      index -= 1;
+      $('wiz-error').hidden = true;
+      render();
+    };
     // Switching kind adds or removes the schedule step.
     document.querySelectorAll('input[name="mode"]').forEach((r) => {
       r.addEventListener('change', () => { rebuildOrder(); render(); });
@@ -1137,8 +1237,10 @@ const Wizard = (() => {
       if (parent) loadDir(parent); else loadRoots();
     };
     $('pick-here').onclick = (e) => {
-      const path = e.target.dataset.path;
-      if (path) chooseFolder(path);
+      // currentTarget, not target: the label inside is what gets clicked once
+      // this button has a state, and dataset.path lives on the button.
+      const path = e.currentTarget.dataset.path;
+      if (path) toggleFolder(path);
     };
     $('pick-manual-go').onclick = () => {
       const v = $('pick-manual').value.trim();

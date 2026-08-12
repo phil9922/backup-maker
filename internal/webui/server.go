@@ -95,6 +95,25 @@ type Actions struct {
 	// user's own words. It writes to the destination's marker file, so it needs
 	// that destination to be reachable — and travels with the drive.
 	DescribeTarget func(name, description string) error
+	// DestFiles lists ONE directory of what backup-maker has put on a
+	// destination, so the owner can see what is actually there and what still
+	// belongs to a live backup.
+	//
+	// IT IS NOT A FILE BROWSER FOR THE STORAGE. The top level is synthesised
+	// from the three places backup-maker writes — this machine's directories,
+	// the version store and the snapshot folder — and a path that does not
+	// resolve under one of them is refused by the daemon. Lazy: one directory
+	// per request, never a walk.
+	DestFiles func(target, path string) (any, error)
+	// DeleteDestFile removes one thing a destination holds.
+	//
+	// THE SECOND ACTION IN THIS PROGRAM THAT DELETES A BACKUP ON PURPOSE, with
+	// the same guards as the first: the storage must be recognised, the path
+	// must resolve inside one of the backup roots and be deep enough to name
+	// one task's data, anything a live folder or schedule owns is refused, and
+	// confirm must be the entry's own name — checked in the daemon, not in the
+	// page.
+	DeleteDestFile func(target, path, confirm string) (any, error)
 	// RemoveArchive stops a snapshot schedule from running again. Config only:
 	// the zips it already wrote stay where they are, like every other removal
 	// on this API.
@@ -102,9 +121,28 @@ type Actions struct {
 	// SetArchivePaused stops or resumes a schedule, keeping everything about
 	// it — including the password, which cannot be recovered if thrown away.
 	SetArchivePaused func(name string, paused bool) error
+	// SetMirrorPaused stops or resumes ONE folder's continuous copy to ONE
+	// destination, leaving that folder's other destinations running.
+	//
+	// IT COPIES NOTHING AND DELETES NOTHING. Like removing a folder or a
+	// destination, this is a change of intent: everything already on that
+	// destination stays exactly where it is, and the pair keeps its sync clock
+	// so resuming carries on instead of starting the backup again.
+	SetMirrorPaused func(folderID, target string, paused bool) error
 	// SetArchiveSchedule changes how often a snapshot runs and how many are
 	// kept.
 	SetArchiveSchedule func(name, every string, keep int, noDefaultIgnores *bool) error
+	// BackUpFolderNow and BackUpArchiveNow run one existing backup task now
+	// rather than at its next slot — a continuous mirror pass for one
+	// folder→destination pair, and one schedule's encrypted snapshot.
+	//
+	// BOTH RETURN THE MOMENT THE WORK IS STARTED, NOT WHEN IT IS DONE. A
+	// snapshot of a real folder takes tens of minutes and a mirror pass over a
+	// share takes several, so the message each returns says what has begun and
+	// leaves the row to report progress. Neither changes configuration: they
+	// run the task exactly as it is already set up.
+	BackUpFolderNow  func(folderID, target string) (any, error)
+	BackUpArchiveNow func(name string) (any, error)
 	// ReenableFolder puts a stopped folder back into service. It never copies
 	// anything: the destination layout is keyed by label, so the mirror
 	// reconciles against the copy already there.
@@ -221,6 +259,23 @@ type ArchivePausedRequest struct {
 	Paused bool `json:"paused"`
 }
 
+// MirrorPausedRequest stops or resumes one folder's mirror to one destination.
+// The folder is in the path; the destination is in the body for the reason
+// BackUpFolderNowRequest gives — a folder may have several, each is its own row
+// with its own control, and "all of them" is not what a row-level switch means.
+type MirrorPausedRequest struct {
+	Target string `json:"target"`
+	Paused bool   `json:"paused"`
+}
+
+// BackUpFolderNowRequest names which destination of a folder to copy to now.
+// The folder is in the path; the destination is in the body because a folder
+// may have several, and each is its own row and its own button — running "all
+// of them" is not what a row-level control means.
+type BackUpFolderNowRequest struct {
+	Target string `json:"target"`
+}
+
 // TargetNameRequest is a destination's new name. The old one is in the path.
 type TargetNameRequest struct {
 	Name string `json:"name"`
@@ -238,6 +293,20 @@ type TargetDescriptionRequest struct {
 // typing the folder's own label is not something done by accident, and it is
 // re-checked in the daemon so the guarantee does not live in the browser.
 type RetiredDeleteRequest struct {
+	Confirm string `json:"confirm"`
+}
+
+// DestFileDeleteRequest names one thing on a destination and confirms it by
+// typing its own name back.
+//
+// The path is the one the file view handed out, and it is re-derived and
+// re-checked in the daemon against the destination itself — a browser's idea of
+// where a backup lives is not something a recursive delete may be aimed by. The
+// confirmation is the entry's last path segment for the same reason
+// RetiredDeleteRequest asks for a folder's label: "are you sure" is answered
+// yes by reflex, and typing the name of the thing is not.
+type DestFileDeleteRequest struct {
+	Path    string `json:"path"`
 	Confirm string `json:"confirm"`
 }
 
@@ -300,9 +369,27 @@ type PrepareDriveRequest struct {
 	Confirm string `json:"confirm"`
 }
 
+// FolderRef is one folder in a wizard selection: an id for a folder that is
+// already protected, a path for one that is not.
+type FolderRef struct {
+	FolderID    string   `json:"folder_id,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Label       string   `json:"label,omitempty"`
+	ExtraIgnore []string `json:"extra_ignore,omitempty"`
+}
+
 // BackupRequest mirrors setup.BackupRequest; kept as its own type so webui
 // doesn't force an import cycle and the JSON contract stays explicit.
 type BackupRequest struct {
+	// Folders is every folder chosen in one pass of the wizard. When it is
+	// present and non-empty the single FolderID/Path pair below is ignored;
+	// when it is absent they are used, which is the older form of this request.
+	//
+	// The wizard sends the whole selection in ONE request deliberately: for a
+	// timed backup the schedule is the protection, so a folder must not be
+	// saveable without it, and a browser looping over single requests could
+	// stop half way.
+	Folders []FolderRef `json:"folders,omitempty"`
 	// FolderID gives a second kind of backup to a folder that is already
 	// protected, instead of adding a new one.
 	FolderID    string   `json:"folder_id,omitempty"`
@@ -442,6 +529,15 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	// changes how a folder is protected rather than removing it.
 	mux.HandleFunc("POST /api/folders/{id}/stop-mirror", s.requireToken(s.handleStopMirroring))
 	mux.HandleFunc("POST /api/folders/{id}/ignores", s.requireToken(s.handleSetFolderIgnores))
+	// Running a backup that is already set up, now instead of at its next slot.
+	// A POST because it starts work, on a path that says which task — and, like
+	// every mutating route here, loopback-only and behind the token, so the
+	// read-only network view cannot reach it.
+	mux.HandleFunc("POST /api/folders/{id}/backup-now", s.requireToken(s.handleBackUpFolderNow))
+	// Pausing ONE folder→destination mirror. A POST beside the schedule's
+	// /paused route and shaped identically, because it is the same idea applied
+	// to the other kind of backup: a deliberate stop that keeps everything.
+	mux.HandleFunc("POST /api/folders/{id}/paused", s.requireToken(s.handleSetMirrorPaused))
 	// Stopped folders. NOTE THE ASYMMETRY, WHICH IS DELIBERATE: every DELETE on
 	// this API is config-only and removes no data, here included. The one route
 	// that removes files is a POST to a path that says so, carrying a typed
@@ -450,6 +546,13 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("POST /api/retired/{id}/delete", s.requireToken(s.handleDeleteRetiredBackups))
 	mux.HandleFunc("DELETE /api/retired/{id}", s.requireToken(s.handleForgetRetired))
 	mux.HandleFunc("DELETE /api/targets/{name}", s.requireToken(s.handleRemoveTarget))
+	// Looking at what a destination holds, and removing what no longer belongs
+	// to any backup. NOTE THE SAME ASYMMETRY AS THE STOPPED-FOLDER ROUTES
+	// ABOVE: the DELETE on this destination is config-only, and the route that
+	// removes files is a POST to a path that says so, carrying a typed
+	// confirmation in its body.
+	mux.HandleFunc("GET /api/targets/{name}/files", s.requireToken(s.handleDestFiles))
+	mux.HandleFunc("POST /api/targets/{name}/files/delete", s.requireToken(s.handleDeleteDestFile))
 	// Both are edits to a destination's identity rather than to its data: a
 	// POST to a path that says which one, like the archive routes below.
 	mux.HandleFunc("POST /api/targets/{name}/name", s.requireToken(s.handleRenameTarget))
@@ -463,6 +566,7 @@ func New(cfg *config.Config, state *config.State, log *slog.Logger, statusFn fun
 	mux.HandleFunc("POST /api/archives/{name}/password", s.requireToken(s.handleArchivePassword))
 	mux.HandleFunc("POST /api/archives/{name}/schedule", s.requireToken(s.handleSetArchiveSchedule))
 	mux.HandleFunc("POST /api/archives/{name}/paused", s.requireToken(s.handleSetArchivePaused))
+	mux.HandleFunc("POST /api/archives/{name}/backup-now", s.requireToken(s.handleBackUpArchiveNow))
 	// Config only — the snapshots already written are left alone, which is
 	// what every DELETE on this API means.
 	mux.HandleFunc("DELETE /api/archives/{name}", s.requireToken(s.handleRemoveArchive))

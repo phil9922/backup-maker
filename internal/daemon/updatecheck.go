@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/update"
 	"github.com/phil9922/backup-maker/internal/version"
 )
@@ -135,14 +136,16 @@ func (d *daemon) checker() update.Checker {
 func (d *daemon) recordUpdateCheck(at time.Time, latest, announced string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.state.UpdateLastCheck = at
-	if latest != "" {
-		d.state.UpdateLatest = latest
-	}
-	if announced != "" {
-		d.state.UpdateAnnounced = announced
-	}
-	if err := d.state.Save(); err != nil {
+	if err := d.updateState(func(s *config.State) error {
+		s.UpdateLastCheck = at
+		if latest != "" {
+			s.UpdateLatest = latest
+		}
+		if announced != "" {
+			s.UpdateAnnounced = announced
+		}
+		return nil
+	}); err != nil {
 		d.log.Debug("could not record the update check", "err", err)
 	}
 }

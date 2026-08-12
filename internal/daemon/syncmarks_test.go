@@ -368,3 +368,92 @@ func TestFillNeverWindsAClockBackwards(t *testing.T) {
 		t.Errorf("the clock went backwards to %v, want %v", got, newer)
 	}
 }
+
+// THE CASE THE ONE ABOVE DOES NOT COVER, and the one that actually happened.
+//
+// TestARenamedDestinationKeepsItsSyncClocks starts from a state file that still
+// carries the rename. On a real machine the tally's flush can land in the gap
+// between the rename and the config reload, and the flush writes MEMORY — which
+// is still keyed by the old name. The file is then back to the old name too, so
+// fill has nothing to take and the clocks are gone from both. Every folder reads
+// "never synced" to a destination that has been backed up for months, which is
+// what the owner reported on 2026-08-11 about a share holding 60GB of his files.
+func TestARenamedDestinationKeepsItsClocksWhenAFlushLandsFirst(t *testing.T) {
+	synced := time.Date(2026, 8, 11, 17, 34, 0, 0, time.UTC)
+	scan := config.ScanMark{TargetUUID: "e92d10cab3f6d6bd"}
+	m := newSyncMarks(&config.State{
+		MirrorLastSync:  map[string]map[string]time.Time{"code": {"backup-pi": synced}},
+		MirrorScanState: map[string]map[string]config.ScanMark{"code": {"backup-pi": scan}},
+	})
+
+	before := &config.Config{
+		Folders: []config.Folder{{ID: "code"}},
+		Targets: []config.Target{{Type: "share", Name: "backup-pi", URL: "//192.168.1.23/backups", Username: "alex"}},
+	}
+	after := &config.Config{
+		Folders: []config.Folder{{ID: "code"}},
+		Targets: []config.Target{{Type: "share", Name: "crucial-pi", URL: "//192.168.1.23/backups", Username: "alex"}},
+	}
+
+	renamed := renamedTargets(before, after)
+	if renamed["backup-pi"] != "crucial-pi" {
+		t.Fatalf("the rename was not recognised from the two configs: %v", renamed)
+	}
+	if !m.renameTarget("backup-pi", "crucial-pi") {
+		t.Fatal("no clock was carried across, so the destination reads as never synced")
+	}
+
+	// The flush that landed in the gap: the file is back to the old name. fill
+	// must not undo the move, and prune then drops the name the config has lost.
+	m.fill(&config.State{
+		MirrorLastSync:  map[string]map[string]time.Time{"code": {"backup-pi": synced}},
+		MirrorScanState: map[string]map[string]config.ScanMark{"code": {"backup-pi": scan}},
+	})
+	m.prune(after)
+
+	if got := m.lastSync("code", "crucial-pi"); !got.Equal(synced) {
+		t.Errorf("the renamed destination's clock is %v, want %v: the dashboard would say nothing is backed up on it", got, synced)
+	}
+	if got := m.scanMark("code", "crucial-pi", "e92d10cab3f6d6bd"); got.TargetUUID != "e92d10cab3f6d6bd" {
+		t.Error("the renamed destination lost what its last pass learned, so the next pass is a full one for nothing")
+	}
+	if got := m.snapshot(); !got["code"]["backup-pi"].IsZero() {
+		t.Error("the old name still has a clock, which state.json would carry for ever")
+	}
+}
+
+// IT REFUSES TO GUESS. Handing one destination another's clock would report a
+// drive as backed up on the strength of a pass that never touched it.
+func TestClocksAreNotCarriedAcrossWhenTheRenameIsAmbiguous(t *testing.T) {
+	share := func(name, url string) config.Target {
+		return config.Target{Type: "share", Name: name, URL: url, Username: "alex"}
+	}
+	cases := []struct {
+		what          string
+		before, after []config.Target
+	}{
+		{
+			what:   "two destinations swapping names",
+			before: []config.Target{share("card", "//nas/a"), share("pi", "//nas/b")},
+			after:  []config.Target{share("pi", "//nas/a"), share("card", "//nas/b")},
+		},
+		{
+			what:   "two destinations at the same place",
+			before: []config.Target{share("one", "//nas/a"), share("two", "//nas/a")},
+			after:  []config.Target{share("three", "//nas/a"), share("four", "//nas/a")},
+		},
+		{
+			what:   "a destination that moved rather than being renamed",
+			before: []config.Target{share("pi", "//nas/a")},
+			after:  []config.Target{share("pi-new", "//somewhere-else/a")},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.what, func(t *testing.T) {
+			got := renamedTargets(&config.Config{Targets: c.before}, &config.Config{Targets: c.after})
+			if len(got) != 0 {
+				t.Errorf("guessed a rename from %s: %v", c.what, got)
+			}
+		})
+	}
+}

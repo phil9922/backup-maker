@@ -28,6 +28,12 @@ function stateClass(state, row) {
   // which is the permanent and correct state of an archives_only destination.
   // Keep in step with RowHealth in internal/status/vocabulary.go.
   if (state === 'no folders assigned') return 'muted';
+  // Paused is deliberate, so it is neither green nor red — the same treatment a
+  // paused schedule gets. Muted says "switched off on purpose" where green would
+  // claim a protection that is not running and red would report a fault that has
+  // not happened. Keep in step with RowHealth in internal/status/vocabulary.go,
+  // which returns 'muted' for this state.
+  if (state === 'paused') return 'muted';
   if (state === 'syncing' || state === 'scanning') {
     // Green once there is a copy on the destination: the dot answers the same
     // question the label does, and amber next to "backed up" would take the
@@ -198,7 +204,7 @@ function updateRow(tr, r, folder, first) {
   tr.dataset.folder = r.folder_label || r.folder_id || '';
   setText(c.folderPath, first && folder && folder.path ? folder.path : '');
   tr.classList.toggle('grouped', !first);
-  renderRowActions(c.actions, first ? folder : null, tr);
+  renderRowActions(c.actions, first ? folder : null, tr, r);
   setText(c.target, r.target_name || '—');
   // The dot goes on an inner span rather than the cell itself. A cell has one
   // ::before, and on a narrow screen that is spent on the "State" label — with
@@ -311,6 +317,11 @@ let editingIgnoresFor = null;
 // leaves somebody looking at a card that says something they did not finish
 // saying.
 let editingTarget = null;
+// And the file view on a destination, for the same reason and one more: it is a
+// place somebody NAVIGATES. Rebuilding the card list under it would throw them
+// back to the top level every second, which makes browsing to a snapshot four
+// directories down impossible rather than merely annoying.
+let browsingTarget = null;
 // The archives table rebuilds on every poll too, so an open editor there needs
 // the same freeze the exclude editor has: a form that vanishes mid-sentence
 // once a second is not a form.
@@ -398,22 +409,249 @@ function renderRows(st) {
 // rebuilds them solely when the folder they belong to changes — this runs on
 // every poll, and replacing a button under a pointer that is hovering it is
 // how a click lands on nothing.
-function renderRowActions(cell, folder, tr) {
+//
+// "Back up now" is the exception to "once per folder": it belongs to THIS
+// destination, not to the folder, because a folder with three destinations has
+// three separate mirrors that can each be behind on their own. So every row
+// gets one, and it goes first so the column lines up down a grouped block.
+function renderRowActions(cell, folder, tr, r) {
   const want = folder && !readOnly ? folder.id : '';
-  if (cell.dataset.for === want) return;
-  cell.dataset.for = want;
-  cell.replaceChildren();
-  if (!want) return;
-  const edit = el('button', 'small-btn', 'Edit');
-  edit.title = 'Change what this folder excludes';
-  edit.onclick = () => openIgnoreEditor(tr, folder, lastModel);
-  cell.appendChild(edit);
-  const stop = el('button', 'small-btn danger', 'Stop');
-  stop.title = folder.snapshotted
-    ? 'Stop one or both kinds of backup of this folder'
-    : 'Stop backing up this folder. The copies already made are kept.';
-  stop.onclick = () => (folder.snapshotted ? openStopChooser(tr, folder) : removeFolder(folder));
-  cell.appendChild(stop);
+  if (cell.dataset.for !== want) {
+    cell.dataset.for = want;
+    cell.replaceChildren();
+    cell._backNow = null;
+    if (want) {
+      const edit = iconButton('edit', 'Edit what this folder leaves out');
+      edit.onclick = () => openIgnoreEditor(tr, folder, lastModel);
+      cell.appendChild(edit);
+      // THE TRASH REMOVES THE TASK, NOT THE BACKUPS, and the label says so
+      // before it is pressed rather than only in the confirmation. A folder that
+      // stops being backed up moves to "No longer protected" with every copy it
+      // already has; deleting those copies is a separate, deliberate action
+      // there that makes you type the folder's name back.
+      const remove = iconButton('remove', folder.snapshotted
+        ? 'Stop backing up this folder — choose which kind. Every copy already made is kept.'
+        : 'Stop backing up this folder. Every copy already made is kept.', 'danger');
+      remove.onclick = () => (folder.snapshotted ? openStopChooser(tr, folder) : removeFolder(folder));
+      cell.appendChild(remove);
+    }
+  }
+  renderBackUpNow(cell, r);
+  renderMirrorPause(cell, r);
+}
+
+// Why this row's mirror cannot be run on demand, or '' when it can.
+//
+// Computed here and checked again in the daemon. The page can be minutes old,
+// so this decides what to SHOW; the daemon decides what actually happens, and
+// the two say the same thing on purpose.
+function mirrorRunBlocked(r) {
+  if (r.state === 'offline') {
+    return 'This destination is not reachable right now. backup-maker checks for it ' +
+      'every few seconds and catches up on its own the moment it is back.';
+  }
+  if (r.state === 'wrong-drive') {
+    return 'The storage at this destination is not the storage it was set up against, ' +
+      'so nothing may be written to it.';
+  }
+  if (r.state === 'name-clash') {
+    return 'Another computer holds this destination under the same machine name, ' +
+      'so nothing may be written there.';
+  }
+  return '';
+}
+
+// The row controls, as icons.
+//
+// WHY ICONS AND NOT WORDS. Four controls spelled out ran to ~460px on a row of
+// six columns, which is what pushed both tables off the right-hand edge of their
+// cards and cut the last button off entirely. Icons are ~34px each and the same
+// four fit anywhere down to a phone.
+//
+// EVERY ONE CARRIES ITS WORDS ANYWAY, in `title` and `aria-label` — an icon
+// nobody can name is worse than a long button, and on this page the controls
+// stop backups. The sentence is the label, not a decoration on top of it.
+//
+// Drawn with `currentColor` so the colour rules in style.css reach the shape.
+const ROW_ICONS = {
+  // A circular arrow: run this again, now.
+  run: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>',
+  resume: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.12 2.12 0 0 0-3-3L5 17z"/><path d="M14.5 6.5l3 3"/></svg>',
+  // An open folder: look at what is actually on this drive.
+  files: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2.5h6A1.5 1.5 0 0 1 18.5 10v.5"/><path d="M3.2 19.5 5.6 12h15.2l-2.4 7.5z"/></svg>',
+  remove: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 7V5h4v2"/><path d="M6.5 7l1 12h9l1-12"/><path d="M10.5 10.5v6M13.5 10.5v6"/></svg>',
+};
+
+// One row control. `label` is the whole sentence — it is the accessible name and
+// the tooltip, and it is never truncated to fit.
+function iconButton(kind, label, extraClass) {
+  const b = el('button', 'icon-btn act-' + kind + (extraClass ? ' ' + extraClass : ''));
+  // A fixed string from the table above; nothing here comes from the daemon.
+  b.innerHTML = ROW_ICONS[kind];
+  setIconLabel(b, label);
+  return b;
+}
+
+// The label lives in two places that must not drift: the tooltip a mouse finds
+// and the name a screen reader reads.
+function setIconLabel(btn, label) {
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+// The per-row "Back up now" for a continuous mirror, created once and then only
+// enabled/disabled in place — the same reason the buttons above are not rebuilt
+// every poll.
+function renderBackUpNow(cell, r) {
+  // A row with no destination has no pair to copy. A paired computer is kept up
+  // to date by the sync engine rather than by a mirror pass, so there is nothing
+  // here to force — showing a button that would be refused is worse than none.
+  const wanted = !readOnly && r && r.target_name && r.target_type !== 'device';
+  if (!wanted) {
+    if (cell._backNow) { cell._backNow.remove(); cell._backNow = null; }
+    return;
+  }
+  let btn = cell._backNow;
+  if (!btn) {
+    btn = iconButton('run', 'Back up now');
+    btn.onclick = () => backUpFolderNow(r, btn);
+    cell.prepend(btn);
+    cell._backNow = btn;
+  }
+  // The row it was built from moves on; the click must use the current one.
+  btn.onclick = () => backUpFolderNow(r, btn);
+  // Left alone while it is reporting that it just started, or the poll would
+  // wipe the only feedback the press produced.
+  if (btn._pending) return;
+  const why = mirrorRunBlocked(r);
+  btn.disabled = !!why;
+  setIconLabel(btn, why || ('Back up now — look for changes in this folder and copy them to ' +
+    (r.target_name || 'this destination') + ' now, instead of waiting for the next check.'));
+}
+
+// Pause or resume this one folder→destination mirror.
+//
+// PER PAIR, AND SO ON EVERY ROW, unlike Edit and Delete which belong to the
+// folder and sit on the row that names it. Pausing the Pi while the card in the
+// machine keeps running is the case this exists for, and a control that only
+// appeared on the first destination could not express it.
+//
+// PAUSING COPIES NOTHING AND DELETES NOTHING. Everything already on the
+// destination stays exactly where it is; this stops new work reaching it until
+// it is resumed, and the row says "paused" rather than claiming to be backed up.
+function renderMirrorPause(cell, r) {
+  // A PAIRED COMPUTER IS INCLUDED HERE, unlike "Back up now" just above. That
+  // one is off for a device because the sync engine keeps the pair up to date
+  // and there is no pass to force — a button that would only ever be refused.
+  // Pausing a device is a real thing the daemon does (it stops offering the
+  // folder to that machine), so leaving the control off would be a row with no
+  // way to switch off the copying it describes.
+  const wanted = !readOnly && r && r.target_name;
+  if (!wanted) {
+    if (cell._pause) { cell._pause.remove(); cell._pause = null; }
+    return;
+  }
+  const paused = !!r.paused;
+  let btn = cell._pause;
+  // The icon itself changes with the state, so the button is rebuilt when it
+  // flips rather than being left showing the action it no longer offers.
+  if (btn && btn.dataset.paused !== String(paused)) { btn.remove(); btn = null; }
+  if (!btn) {
+    btn = iconButton(paused ? 'resume' : 'pause', '');
+    btn.dataset.paused = String(paused);
+    cell.insertBefore(btn, cell._backNow ? cell._backNow.nextSibling : cell.firstChild);
+    cell._pause = btn;
+  }
+  const where = r.target_name || 'this destination';
+  setIconLabel(btn, paused
+    ? `Resume backing this folder up to ${where}. It carries on from where it left off.`
+    : `Pause backing this folder up to ${where}. Nothing already copied there is removed.`);
+  btn.onclick = () => setMirrorPaused(r, !paused, btn);
+}
+
+// No confirmation either way: pausing removes nothing and is undone by pressing
+// the button again, which is the test for whether a question is worth asking.
+async function setMirrorPaused(r, paused, btn) {
+  btn.disabled = true;
+  const resp = await mutate('/api/folders/' + encodeURIComponent(r.folder_id) + '/paused', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target: r.target_name, paused }),
+  });
+  btn.disabled = false;
+  await reportAndRefresh(resp);
+}
+
+// Copy one folder to one destination now. No confirmation: it copies changed
+// files to a destination that is already set up for exactly that, deletes
+// nothing on this computer, and is the same pass that runs every hour anyway.
+async function backUpFolderNow(r, btn) {
+  await startAndReport(btn, '/api/folders/' + encodeURIComponent(r.folder_id) + '/backup-now',
+    { target: r.target_name });
+}
+
+// Feedback for a button that STARTS work rather than doing it.
+//
+// The distinction is the whole of it. A mirror pass over a share takes minutes
+// and a snapshot of a real folder takes tens of them, so this must never read
+// as "backed up" — it says "Started", keeps the daemon's own sentence on the
+// button as a tooltip, and then gets out of the way and lets the row report
+// what is actually happening. A failure is the one case worth interrupting for,
+// because nothing at all will happen and the row will not say why.
+async function startAndReport(btn, url, body) {
+  // An icon button says it differently. Writing "Starting…" into it would throw
+  // the SVG away and leave a permanently wordless button once the text was
+  // restored, so the state goes on a class and the words stay in the label —
+  // which is where an icon button's words live anyway.
+  const icon = btn.classList.contains('icon-btn');
+  const wasText = icon ? '' : btn.textContent;
+  const wasTitle = btn.title;
+  btn._pending = true;
+  btn.disabled = true;
+  if (icon) btn.classList.add('working'); else btn.textContent = 'Starting…';
+  const restore = () => {
+    btn._pending = false;
+    btn.disabled = false;
+    if (icon) btn.classList.remove('working', 'started'); else btn.textContent = wasText;
+    setIconLabel(btn, wasTitle);
+  };
+
+  let resp;
+  try {
+    resp = await mutate(url, body === undefined
+      ? { method: 'POST' }
+      : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch {
+    restore();
+    alert('Could not reach the backup daemon — your backups may not be running.');
+    return;
+  }
+
+  let said = '';
+  try {
+    const parsed = await resp.clone().json();
+    said = parsed && parsed.message ? parsed.message : '';
+  } catch { said = (await resp.text()).trim(); }
+
+  if (!resp.ok) {
+    restore();
+    alert(said || 'That did not work.');
+    return;
+  }
+  if (icon) {
+    btn.classList.remove('working');
+    btn.classList.add('started');
+  } else {
+    btn.textContent = 'Started';
+  }
+  // Still never "backed up": the daemon's own sentence says what was started.
+  setIconLabel(btn, said || (icon ? 'Started.' : btn.title));
+  // Long enough to be read, short enough that the button is usable again by the
+  // time somebody wants it. The row is the real progress report from here.
+  setTimeout(restore, 4000);
+  refresh();
 }
 
 // A folder with both kinds of backup needs to be asked WHICH to stop.
@@ -821,9 +1059,10 @@ function renderSpace(li, t) {
 }
 
 function renderTargets(st) {
-  // See editingTarget: rebuilding this list would take the open editor away
-  // mid-word. Everything else on the page keeps updating.
-  if (editingTarget !== null) return;
+  // See editingTarget and browsingTarget: rebuilding this list would take the
+  // open editor away mid-word, or throw the file view back to its top level
+  // every poll. Everything else on the page keeps updating.
+  if (editingTarget !== null || browsingTarget !== null) return;
   const sec = document.getElementById('targets-section');
   const list = document.getElementById('target-list');
   const targets = st.targets || [];
@@ -884,11 +1123,27 @@ function renderTargets(st) {
     }
     const actions = el('div', 'card-actions');
     if (!readOnly) {
-      const edit = el('button', 'small-btn quiet', 'Rename…');
-      edit.title = 'Change what this destination is called, and say which drive it is';
+      // What is actually ON this drive. First, because it is the only one of
+      // the three that changes nothing.
+      const files = iconButton('files',
+        `See what is backed up on ${t.name}, and remove anything left behind by a backup you no longer have.`);
+      files.onclick = () => openDestFiles(li, t, files);
+      actions.appendChild(files);
+      // The same two icons, in the same colours, as the rows above: a
+      // destination and a backup task are different things, but "change this"
+      // and "stop this" are the same two decisions and should not have to be
+      // learned twice on one page.
+      const edit = iconButton('edit',
+        `Rename ${t.name} — change what this destination is called, and say which drive it is.`);
       edit.onclick = () => openTargetEditor(li, t);
       actions.appendChild(edit);
-      const btn = el('button', 'small-btn danger', 'Remove');
+      // The label says what it does before it is pressed, not only in the
+      // confirmation: removing a destination stops future copying and leaves
+      // every backup already on the drive exactly where it is. A trash can on
+      // its own promises something far more final than that.
+      const btn = iconButton('remove',
+        `Stop backing up to ${t.name}. The backups already on it are left exactly where they are.`,
+        'danger');
       btn.onclick = () => removeTarget(t);
       actions.appendChild(btn);
     }
@@ -986,6 +1241,169 @@ function openTargetEditor(li, t) {
   name.select();
 }
 
+// --- what is actually on a destination -----------------------------------
+//
+// WHY THIS EXISTS. Backups outlive the task that made them. Delete a snapshot
+// schedule and its zips stay on the drive; remove a destination and every folder
+// it held stays; a machine that stops backing up here leaves its whole
+// directory. Only one of those cases had a way out — "Delete backups…" under
+// No longer protected, for a stopped folder — so the rest was unreachable: on
+// this machine, 9.9GB of snapshots from a schedule that no longer existed.
+//
+// WHAT IT MAY SHOW, AND NOTHING ELSE. The daemon synthesises the top level from
+// the three roots backup-maker owns on a destination — the machine directories,
+// the version store and the snapshots — and refuses any path that does not
+// resolve under one of them. It is not a file manager: the rest of the drive is
+// invisible here and unreachable by the delete below. That containment is
+// enforced server-side; this page only ever sends back a path the daemon gave it.
+// THE ICON IS THE SWITCH. Pressing it opens the view and turns green; pressing
+// it again closes it. There is no Close button and no Up button, because the
+// control that opened a panel is the obvious thing to press to be rid of it,
+// and a row of chrome above a list is chrome you have to read before you can
+// read the list.
+//
+// GOING UP IS THE PATH ITSELF. Losing the Up button would otherwise leave a
+// one-way trip into a directory, so each segment of the breadcrumb is a link to
+// that level — which also says where you are, which the button never did.
+function openDestFiles(li, t, btn) {
+  if (browsingTarget === t.name) { closeDestFiles(); return; }
+  browsingTarget = t.name;
+  if (btn) btn.classList.add('open');
+  // card-wide, because a card is a four-column grid: without it this lands in
+  // the 1rem icon column and wraps one word per line.
+  // NOT .ignore-editor, which every other in-card panel uses: that is a flex
+  // ROW built for a form of a label, a box and two buttons. A bar, a list and a
+  // note laid out as flex items sit side by side, so the list sized to its own
+  // content and took about half the card while the rest wrapped. This one
+  // stacks — see .destfiles.
+  const box = el('div', 'card-wide destfiles');
+  const where = el('div', 'destfiles-bar');
+  box.appendChild(where);
+  const list = el('ul', 'destfiles-list');
+  box.appendChild(list);
+  const note = el('p', 'hint', '');
+  box.appendChild(note);
+  li.appendChild(box);
+  loadDestDir(t, '', { where, list, note });
+}
+
+function closeDestFiles() {
+  browsingTarget = null;
+  refresh(); // rebuilds the cards, taking the panel and the green with it
+}
+
+// The breadcrumb: the destination, then one link per level, the last of them
+// plain text because you are already there.
+function renderDestCrumbs(t, path, ui) {
+  ui.where.replaceChildren();
+  const parts = path ? path.split('/') : [];
+  const root = el('button', 'link', t.name);
+  root.title = 'Back to the top of this destination';
+  root.onclick = () => loadDestDir(t, '', ui);
+  ui.where.appendChild(root);
+  let so_far = '';
+  parts.forEach((seg, i) => {
+    ui.where.appendChild(el('span', 'muted', '/'));
+    so_far = so_far ? so_far + '/' + seg : seg;
+    if (i === parts.length - 1) {
+      ui.where.appendChild(el('span', 'mono', seg));
+      return;
+    }
+    const at = so_far;
+    const step = el('button', 'link mono', seg);
+    step.onclick = () => loadDestDir(t, at, ui);
+    ui.where.appendChild(step);
+  });
+}
+
+async function loadDestDir(t, path, ui) {
+  ui.list.replaceChildren(el('li', 'muted', 'Reading…'));
+  const resp = await fetch('/api/targets/' + encodeURIComponent(t.name) +
+    '/files?path=' + encodeURIComponent(path));
+  if (!resp.ok) {
+    ui.list.replaceChildren(el('li', 'bad', (await resp.text()).trim() ||
+      'That could not be read.'));
+    return;
+  }
+  const data = await resp.json();
+  // The crumbs stop at the destination: there is nothing above the three roots
+  // to climb to, and offering it would imply the rest of the drive is in here.
+  renderDestCrumbs(t, data.path || '', ui);
+
+  const entries = data.entries || [];
+  ui.list.replaceChildren();
+  if (entries.length === 0) {
+    ui.list.appendChild(el('li', 'muted', 'Nothing here.'));
+  }
+  for (const e of entries) {
+    const row = el('li', 'destfiles-row');
+    // A DIRECTORY SAYS IT OPENS. button.link is drawn in the body colour with
+    // no underline, which is fine in the wizard's picker where the whole step is
+    // obviously a chooser — and wrong here, where the rest of the panel reads as
+    // a report. The owner read this list as a dead end and asked where his
+    // snapshots were; they were two clicks down. The chevron and the colour are
+    // the fix, and neither is decoration.
+    const name = e.dir
+      ? el('button', 'link', '📁 ' + e.name + ' ›')
+      : el('span', 'mono', e.name);
+    if (e.dir) {
+      name.title = 'Open ' + e.name;
+      name.onclick = () => loadDestDir(t, e.rel, ui);
+    }
+    row.appendChild(name);
+    // WHOSE IT IS, on every line. This is the whole point of the view: what is
+    // still being backed up here, and what is left over from something you no
+    // longer have. Without it, "delete" is a guess.
+    const badge = el('span', 'destfiles-owner own-' + (e.owner || 'leftover'),
+      OWNER_WORDS[e.owner] || e.owner || '');
+    if (e.why) badge.title = e.why;
+    row.appendChild(badge);
+    if (!e.dir && e.size) row.appendChild(el('span', 'muted small', humanBytes(e.size)));
+    if (e.modified) row.appendChild(el('span', 'muted small', humanTime(e.modified)));
+    if (!readOnly) {
+      const del = iconButton('remove', e.deletable
+        ? `Delete ${e.name} from ${t.name}. Nothing on this computer is touched.`
+        : (e.why || 'This is still being backed up here.'), 'danger');
+      del.disabled = !e.deletable;
+      del.onclick = () => deleteDestPath(t, e, ui);
+      row.appendChild(del);
+    }
+    ui.list.appendChild(row);
+  }
+  ui.note.textContent = 'Only what backup-maker put on this drive is listed. ' +
+    'Deleting here never touches the folders on this computer.';
+}
+
+const OWNER_WORDS = {
+  'in-use': 'being backed up',
+  stopped: 'stopped — kept on purpose',
+  kept: 'kept — no longer in your source',
+  leftover: 'left over',
+};
+
+// Deleting from a destination. The daemon checks every one of these again —
+// this is the explanation, not the guard.
+async function deleteDestPath(t, e, ui) {
+  if (!confirm(
+    `PERMANENTLY DELETE "${e.name}" from ${t.name}?\n\n` +
+    (e.why ? e.why + '\n\n' : '') +
+    `This removes it from the destination only. The folders on this computer are NOT touched.\n\n` +
+    `There is no undo.`)) return;
+  const typed = prompt(`To confirm, type its name exactly:\n\n${e.name}`);
+  if (typed === null) return;
+  if (typed.trim() !== e.name) { alert('That did not match. Nothing was deleted.'); return; }
+
+  const resp = await mutate('/api/targets/' + encodeURIComponent(t.name) + '/files/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: e.rel, confirm: typed.trim() }),
+  });
+  if (!resp.ok) { alert((await resp.text()).trim() || 'That did not work.'); return; }
+  // Back to the directory it was in, so the result is visible where it happened.
+  const at = e.rel.includes('/') ? e.rel.slice(0, e.rel.lastIndexOf('/')) : '';
+  loadDestDir(t, at, ui);
+}
+
 async function removeTarget(t) {
   if (!confirm(`Stop backing up to ${t.name}?\n\nThe backups already on it are left exactly where they are — this only stops future copying.`)) return;
   const resp = await mutate('/api/targets/' + encodeURIComponent(t.name), { method: 'DELETE' });
@@ -1075,19 +1493,35 @@ function renderArchives(st) {
         actions.appendChild(back);
       }
 
-      const pause = el('button', 'small-btn', a.paused ? 'Resume' : 'Pause');
+      // Run this schedule's own snapshot now rather than at its next slot.
+      // First in the row, matching the mirror table above, so the same action
+      // sits in the same place on both kinds of backup.
+      const now = iconButton('run', '');
+      const why = snapshotRunBlocked(a);
+      now.disabled = !!why;
+      setIconLabel(now, why || `Back up now — write this snapshot now instead of waiting for its next slot (${a.every}).`);
+      now.onclick = () => backUpArchiveNow(a, covers, now);
+      actions.appendChild(now);
+
+      const pause = iconButton(a.paused ? 'resume' : 'pause', a.paused
+        ? 'Resume this schedule, so it runs at its next slot again.'
+        : 'Pause this schedule. It stops running; the snapshots it has already written are kept.');
       pause.onclick = () => setArchivePaused(a, !a.paused);
       actions.appendChild(pause);
 
-      // "Edit", the same word the mirror table uses for the same idea. It used
-      // to say "Change…" and open two browser prompt() boxes.
-      const edit = el('button', 'small-btn', 'Edit');
+      // The same four controls, in the same order, as the mirror table above:
+      // the two kinds of backup should not need to be learned separately.
+      const edit = iconButton('edit', 'Edit this schedule — what it packs, how often, where it goes.');
       edit.onclick = () => openArchiveEditor(tr, a);
       actions.appendChild(edit);
 
-      const stop = el('button', 'danger small-btn', 'Stop');
-      stop.onclick = () => removeArchive(a);
-      actions.appendChild(stop);
+      // Removes the SCHEDULE. The zips it has already written stay where they
+      // are and still open with the password that made them — which the
+      // confirmation says, because a trash can does not.
+      const remove = iconButton('remove',
+        'Stop this schedule. The snapshots it has already written are kept.', 'danger');
+      remove.onclick = () => removeArchive(a);
+      actions.appendChild(remove);
     }
     tr.appendChild(actions);
     // Files that were being written while the snapshot read them. Said on the
@@ -1113,6 +1547,49 @@ function renderArchives(st) {
     if (a.detail) tr.title = a.detail;
     body.appendChild(tr);
   }
+}
+
+// Why this schedule cannot be run on demand, or '' when it can. The same
+// refusals the daemon makes, said before the press rather than after it.
+function snapshotRunBlocked(a) {
+  if (a.paused) {
+    return 'This schedule is paused. Resume it first — a paused schedule does not run, ' +
+      'by hand or on its timer.';
+  }
+  if (a.needs_password) {
+    return 'This schedule has no stored password, so it cannot write a snapshot. ' +
+      'Enter its password first.';
+  }
+  if (!a.covers_everything && !(a.folders && a.folders.length)) {
+    return 'This schedule covers no folder that is still being backed up, so there is ' +
+      'nothing to put in a snapshot.';
+  }
+  // "preparing" is deliberately NOT here: it means a brand-new schedule whose
+  // first run is up to 30 seconds away, and "start it now" is a perfectly good
+  // answer to that. The daemon's claim is what stops the two colliding.
+  if (a.state === 'running') {
+    return 'This schedule is writing a snapshot right now.';
+  }
+  return '';
+}
+
+// Write one schedule's snapshot now.
+//
+// CONFIRMED, unlike the mirror button beside it, because this is not the same
+// kind of ask. A mirror pass copies what changed; a snapshot packs, encrypts
+// and then re-reads a complete copy of the folder — gigabytes and tens of
+// minutes on a real one — it may delete the oldest kept snapshot to stay within
+// the retention count, and it moves the schedule's clock. A yes/no question
+// with consequences worth reading is exactly what the other confirms on this
+// page are for.
+async function backUpArchiveNow(a, covers, btn) {
+  if (!confirm(
+    `Write a snapshot for "${a.name}" now?\n\n` +
+    `It seals ${covers} into one encrypted zip on ${a.target}. That is the whole folder ` +
+    `every time, not just what changed, so it can take tens of minutes and write gigabytes.\n\n` +
+    `Only the newest ${a.keep || 5} snapshots of this schedule are kept, so this may delete the oldest one.\n\n` +
+    `It counts as this schedule's latest run, so the next one is then due a full "${a.every}" from now.`)) return;
+  await startAndReport(btn, '/api/archives/' + encodeURIComponent(a.name) + '/backup-now');
 }
 
 // The state column answers the same question the mirror's does — are the files
@@ -1832,6 +2309,10 @@ function renderVerdict(st) {
   const working = rows.some((r) => r.state === 'syncing' || r.state === 'scanning');
   const offline = targets.filter((t) => t.state === 'offline');
 
+  // Read from the row's own flag rather than from its state word, so a row the
+  // daemon paints some other way while it is being torn down still counts.
+  const paused = rows.filter((r) => r.paused);
+
   const folders = st.folders || [];
   const unprotected = folders.filter((f) => f.protected === false);
 
@@ -1864,6 +2345,27 @@ function renderVerdict(st) {
     text = broken.length === 1
       ? `${broken[0].name} needs attention`
       : `${broken.length} destinations need attention`;
+  } else if (paused.length > 0) {
+    // AHEAD OF "Backing up now" AND OF THE ALL-CLEAR, because a pause is a
+    // standing reduction in what is protected and the other two are passing
+    // conditions. Without this branch a paused destination falls straight
+    // through to "Everything is backed up" — which is the exact shape of the
+    // bug that once let a refused destination read as healthy: the one line
+    // this page exists to get right, contradicting the table underneath it.
+    //
+    // Muted, not red. Nothing has failed; somebody switched it off, and the
+    // headline's job here is to make sure they remember they did.
+    state = 'muted';
+    if (paused.length === rows.length) {
+      text = 'Every backup is paused — nothing is being copied';
+    } else {
+      const n = `${paused.length} backup${paused.length > 1 ? 's are' : ' is'} paused`;
+      // "everything else is backed up" is only claimed when there is nothing
+      // else to say about the rest. An unconnected destination is not backed up
+      // and not paused, and lumping it into "everything else" would be the
+      // vacuous kind of true this headline has been wrong with before.
+      text = (offline.length > 0 || working) ? n : `${n} — everything else is backed up`;
+    }
   } else if (working) {
     state = 'busy';
     text = 'Backing up now';

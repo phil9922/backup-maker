@@ -18,6 +18,21 @@ package status
 // THE DASHBOARD IS STILL SEPARATE, and cannot be otherwise: it is JavaScript.
 // `stateLabel`/`stateClass` in app.js must be changed in step with this file, and
 // TestEveryStateHasTheSameWordsInTheBrowser reads app.js to check they agree.
+//
+// WHAT "paused" OWES THE DASHBOARD, recorded here because this is where the
+// mapping lives and app.js has to be brought along by hand:
+//
+//   - stateClass must return 'paused' (drawn muted) for it. Everything that
+//     falls off the end of that function is 'bad', and a deliberate stop drawn
+//     red sends somebody hunting a fault nobody has.
+//   - renderVerdict must not reach "Everything is backed up" while any row
+//     carries paused:true. It derives faults from stateClass, and muting the
+//     state — correctly — takes a paused destination out of `broken`, so the
+//     headline needs a branch of its own from `rows.filter(r => r.paused)`,
+//     after the broken/unprotected branches and before "Backing up now":
+//     "N backups are paused; everything else is backed up", drawn muted. A
+//     headline claiming everything is backed up above a row that is not being
+//     copied to is the one line this page exists to get right.
 
 // RowLabel answers the only question this column is ever read for: are the files
 // safe.
@@ -39,6 +54,15 @@ func RowLabel(r Row) string {
 		return "backed up"
 	case "in sync":
 		return "backed up"
+	case "paused":
+		// SAID OUT LOUD RATHER THAN LEFT TO THE FALLTHROUGH BELOW, which exists
+		// to stop faults being softened — and this is not a fault. A paused
+		// mirror is also the one state here that must never borrow "backed up":
+		// what is on the destination stays there, but nothing saved since is
+		// going anywhere, and this column answers "are my files safe", not "was
+		// there ever a copy". The same word the snapshot side uses for the same
+		// deliberate stop.
+		return "paused"
 	}
 	// EVERYTHING ELSE KEEPS ITS OWN NAME, and that is the other half of the rule:
 	// reframing must not swallow the states that mean something is wrong. Only
@@ -83,6 +107,18 @@ func RowHealth(r Row) string {
 		// broken destination whose snapshots are arriving on schedule, and the
 		// dashboard's verdict counts every "bad" target, so it also puts "needs
 		// attention" at the top of a healthy page.
+		return "muted"
+	case "paused":
+		// A PAUSED MIRROR IS NEITHER WORKING NOR BROKEN, so it gets neither
+		// colour — the same reading ArchiveHealth gives a paused schedule, for
+		// the same reason. Green would say this destination is up to date and
+		// red would send somebody hunting a fault that nobody has. Muted says
+		// what is true: somebody switched this off, and it is waiting for them.
+		//
+		// AND IT MUST BE SAID HERE. Everything that falls off the end of this
+		// switch is red, which is how "no folders assigned" once reddened every
+		// healthy destination on the machine and put "needs attention" at the top
+		// of a page with nothing wrong on it.
 		return "muted"
 	}
 	return "bad" // offline, stale, full, wrong-drive, name-clash, error

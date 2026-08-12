@@ -45,26 +45,51 @@ func (d *daemon) runDueArchives() {
 		if !last.IsZero() && time.Since(last) < every {
 			continue
 		}
-		d.markArchiveRunning(job.Name, true)
-		d.runArchive(cfg, job)
-		d.markArchiveRunning(job.Name, false)
+		// Skipped rather than waited for: a manual "Back up now" of this same
+		// schedule is already writing it, and the next tick is 30 seconds away.
+		if !d.claimArchiveRun(job.Name) {
+			continue
+		}
+		func() {
+			defer d.releaseArchiveRun(job.Name)
+			d.runArchive(cfg, job)
+		}()
 	}
 }
 
-// markArchiveRunning records that a schedule is executing, so the dashboard can
-// say so. LastRun is only written when a run COMPLETES, which left a job
-// part-way through a multi-gigabyte zip reporting "never run" — the state of a
-// job that has not started, said about one that is running.
-func (d *daemon) markArchiveRunning(name string, running bool) {
+// claimArchiveRun records that a schedule is executing and reports whether the
+// claim was granted.
+//
+// A LOCK, NOT JUST A DASHBOARD FLAG. It began as the latter — a way for the
+// panel to say "running", because LastRun is only written when a run COMPLETES
+// and a job part-way through a multi-gigabyte zip otherwise reported "never
+// run". Nothing needed it to exclude anything, because the scheduler ran jobs
+// one at a time on its own goroutine.
+//
+// "Back up now" ends that: it starts a run from a dashboard request while the
+// scheduler may be starting the same one. Two runs of one job write the same
+// temp file (archive.Run derives it from the job name and the second), so each
+// would corrupt the other's zip and one would delete the file the other was
+// still writing. Every run — scheduled or by hand — goes through this, and the
+// loser does not run.
+func (d *daemon) claimArchiveRun(name string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.archiveRunning == nil {
 		d.archiveRunning = map[string]time.Time{}
 	}
-	if running {
-		d.archiveRunning[name] = time.Now()
-		return
+	if _, running := d.archiveRunning[name]; running {
+		return false
 	}
+	d.archiveRunning[name] = time.Now()
+	return true
+}
+
+// releaseArchiveRun ends a claim. Every caller defers it: a claim left behind
+// by a panicking run would stop that schedule for the life of the daemon.
+func (d *daemon) releaseArchiveRun(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	delete(d.archiveRunning, name)
 }
 
@@ -190,11 +215,13 @@ func (d *daemon) recordArchiveResult(res archive.Result, ok bool) {
 	}
 	d.archiveResults[res.ArchiveName] = res
 	if ok {
-		if d.state.ArchiveLastRun == nil {
-			d.state.ArchiveLastRun = map[string]time.Time{}
-		}
-		d.state.ArchiveLastRun[res.ArchiveName] = res.When
-		_ = d.state.Save()
+		_ = d.updateState(func(s *config.State) error {
+			if s.ArchiveLastRun == nil {
+				s.ArchiveLastRun = map[string]time.Time{}
+			}
+			s.ArchiveLastRun[res.ArchiveName] = res.When
+			return nil
+		})
 	}
 }
 

@@ -377,6 +377,16 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
 .progress-cell .progress-wrap { display: flex; align-items: center; gap: var(--s3); }
 .progress-cell .bar { flex: 1 1 auto; }
 .bar-label { flex: 0 0 5.5rem; text-align: right; }
+/* AND IT WRAPS, because every cell on the page is `white-space: nowrap` (see the
+   `th, td` rule near the top) and this label is the one that holds a sentence.
+   "100%" is four characters; "checking for changes: 18,422 of 72,510" is not,
+   and while it could not wrap it made its column 370px wide — which pushed the
+   whole mirror table past its card, so the last button in every row was cut off
+   the right-hand edge. It is the same fault the snapshots table had. Wrapping
+   costs a taller row while a pass is mid-phase and nothing at all the rest of
+   the time; the fixed basis above is untouched, so the percentages still line up
+   down the column. */
+.bar-label { white-space: normal; }
 /* The snapshot bar says "1.2GB of 4.1GB", which needs more room than a
    percentage. Scoped to that table so the mirror's column keeps its width and
    its figures keep lining up down the page. */
@@ -432,6 +442,29 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
 .card-meta .busy { color: var(--busy); }
 .card-meta .bad { color: var(--bad); }
 .card-actions { display: flex; align-items: center; gap: var(--s2); justify-self: end; }
+
+/* THE METADATA TAKES THE WHOLE CARD ONCE THE MIDDLE COLUMN GETS TIGHT.
+   A card is four columns, two of them fixed: the name is up to 9rem and the
+   controls take what they take. On a window around 900px that leaves the middle
+   column about 494px of an 850px card, so the line broke after "backed up" at
+   under half the card's width and left one item alone on a second row with the
+   rest of the card empty. Nothing was too long — the space was simply somewhere
+   else. Below this width the metadata gets its own full-width row under the
+   name, which is the room it needed all along.
+   64rem and not 40rem: the card layout at 40rem is the phone one, and this
+   band is a half-screen browser window on a desktop, which is where the owner
+   found it.
+
+   A RANGE, not a plain max-width: the phone layout stacks these into one
+   column, and `grid-row: 1` below would survive into it and put the controls
+   back on the name's row, on top of it. Bounded here so the two layouts cannot
+   reach each other. */
+@media (min-width: 40.01rem) and (max-width: 64rem) {
+  .card { grid-template-columns: 1rem minmax(0, 1fr) auto; }
+  .card > strong { grid-column: 2; }
+  .card-actions { grid-column: 3; grid-row: 1; }
+  .card-meta, .card-wide { grid-column: 2 / -1; }
+}
 .card .mono { font-size: 0.85rem; }
 /* Anything that needs the full width of the card — the storage bar, the
    exclude editor — says so once, here. */
@@ -604,6 +637,58 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
    The class survives as spacing alone: it is what separates two buttons
    sharing a cell. */
 .small-btn { margin-left: 0.6rem; }
+
+/* THE ROW CONTROLS. Square, icon-only, and 44px of hit area — the size a finger
+   or a hurried pointer can actually land on, which is the same reason the button
+   above stopped being a link wearing a box.
+
+   Wordless ON THE SCREEN ONLY. Every one carries its whole sentence in `title`
+   and `aria-label` (see iconButton in app.js), so the tooltip and the screen
+   reader both get the words the button no longer shows. Four of these fit where
+   two spelled-out controls did, which is what stopped these tables running off
+   the edge of their cards.
+
+   The colour is on the STROKE, not on a filled background: a row of solid red
+   and amber blocks down a dense table would shout over the state dots, and the
+   state dots are the part of this page that has to be seen first. */
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.4rem; height: 2.4rem; padding: 0;
+  border: 1px solid #2a3240; border-radius: 8px;
+  background: #1b222c; color: var(--muted);
+  cursor: pointer; vertical-align: middle;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.icon-btn + .icon-btn { margin-left: 0.35rem; }
+/* .card-actions already spaces its children with a gap, so the margin above
+   would be counted twice and the drives would sit further apart than the rows. */
+.card-actions .icon-btn + .icon-btn { margin-left: 0; }
+.icon-btn svg {
+  width: 1.15rem; height: 1.15rem;
+  fill: none; stroke: currentColor; stroke-width: 1.9;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+/* Resume is the one solid shape: a play triangle drawn in outline reads as a
+   direction sign rather than a button you press to start something. */
+.icon-btn.act-resume svg { fill: currentColor; stroke: currentColor; stroke-width: 1; }
+
+/* Colour says what each control is FOR, and only on hover/focus does it fill
+   in — at rest the row is quiet and the states are what stands out. */
+.icon-btn:hover:not(:disabled), .icon-btn:focus-visible { border-color: currentColor; background: #222b37; }
+.icon-btn.act-run { color: var(--accent); }
+.icon-btn.act-pause { color: var(--busy); }
+.icon-btn.act-resume { color: var(--ok); }
+.icon-btn.act-edit { color: var(--muted); }
+.icon-btn.act-remove, .icon-btn.danger { color: var(--bad); }
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* "Starting…" and "Started" for a button with no room for either word. The
+   press has to register visibly or it reads as nothing having happened — and it
+   must never imply the backup FINISHED, which is why this is a brief pulse and
+   a tick of colour rather than a green fill. */
+.icon-btn.working { opacity: 0.6; }
+.icon-btn.started { color: var(--ok); border-color: var(--ok); }
+
 .notice.warn { background: #2b1a1a; border-color: #6d2f2f; }
 .notice.subtle { background: #151b23; border-color: #232a34; color: var(--muted); margin-top: 0.75rem; }
 
@@ -662,6 +747,105 @@ button.link:active:not(:disabled) { transform: none; box-shadow: none; }
 .picker-list button.link.pick-open { flex: 0 1 auto; min-width: 0; }
 .picker-list .pick-gap { flex: 1 1 2.5rem; min-width: 1.5rem; }
 .picker-list .pick-use { flex: 0 0 auto; }
+
+/* THE FOLDER THAT IS ACTUALLY PICKED. Green, and it says "Protected" — the
+   colour the dashboard already uses for a backup that exists, meaning the same
+   thing here one step earlier.
+
+   THE TEXT COLOUR IS SET EXPLICITLY AND THAT IS THE POINT. This exact button
+   shipped as accent text on an accent background — a contrast ratio of 1:1, an
+   invisible label — and it stayed that way for three releases because nothing
+   that runs on a build looks at a colour. #06131c on --ok is the same near-black
+   button.primary puts on its accent fill, and the screenshot harness refuses a
+   shot where any text matches what is behind it. */
+.picker-list .pick-use.pick-chosen,
+#pick-here.pick-chosen {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #06131c;
+  font-weight: 600;
+}
+.picker-list .pick-use.pick-chosen:hover,
+#pick-here.pick-chosen:hover {
+  background: color-mix(in srgb, var(--ok) 88%, white);
+  border-color: color-mix(in srgb, var(--ok) 88%, white);
+}
+
+/* .chosen is a flex ROW, written when this said one line — "Protecting: /path"
+   and a button. Holding a list of folders, that row put the heading, the list
+   and Deselect all side by side across the step. It stacks here instead; the
+   green stays on the heading, where it means "picked", and the paths are read
+   as ordinary text because they are the thing being checked. */
+#pick-chosen { display: block; }
+#pick-chosen > strong { display: block; color: var(--ok); }
+#pick-chosen .picked-list .mono { color: var(--fg); }
+#pick-chosen > .small-btn { margin-top: var(--s2); }
+
+/* The file view on a destination: where you are, then one line per thing that
+   is actually on the drive.
+
+   A BLOCK, AND DELIBERATELY NOT .ignore-editor. Every other panel inside a card
+   borrows that class, but it is a flex row meant for a label, an input and two
+   buttons — and a breadcrumb, a list and a note dropped into a flex row become
+   three items side by side: the list shrank to its own content, took about half
+   the card, and wrapped every row inside it while the rest of the card sat
+   empty. A list is not a form. */
+.destfiles { display: block; width: 100%; margin-top: var(--s2); }
+.destfiles-bar {
+  display: flex; align-items: baseline; gap: 0.25rem;
+  flex-wrap: wrap; overflow-wrap: anywhere;
+}
+.destfiles-bar .link { padding: 0; }
+
+/* The file-view icon while its panel is open: green, and pressing it again
+   closes the panel. The button that opened a thing is the obvious thing to
+   press to be rid of it, which is why there is no Close beside it. */
+.icon-btn.act-files.open {
+  color: var(--ok);
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 14%, #1b222c);
+}
+.destfiles-list { list-style: none; margin: var(--s3) 0 0; padding: 0; }
+.destfiles-row {
+  display: flex; align-items: center; gap: var(--s2);
+  flex-wrap: wrap; padding: 0.25rem 0;
+  border-top: 1px solid #232a34;
+}
+.destfiles-row > .link, .destfiles-row > .mono { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; text-align: left; }
+/* Openable, and it has to look it — see the note in app.js. */
+.destfiles-row > .link { color: var(--accent); }
+.destfiles-row > .link:hover { text-decoration: underline; }
+.destfiles-row .small { font-size: var(--fs-small); }
+.destfiles-row .icon-btn { margin-left: auto; }
+
+/* WHOSE IT IS, in a word and a colour. The distinction this view exists to draw
+   is "still being backed up" against "left over from something you no longer
+   have", and a reader deciding whether to delete 9GB should not have to work it
+   out from the path. Muted for the two deliberate states, amber for leftovers —
+   not red: nothing is wrong with a leftover, it is just nobody's any more. */
+.destfiles-owner { font-size: var(--fs-small); white-space: nowrap; }
+.destfiles-owner.own-in-use { color: var(--ok); }
+.destfiles-owner.own-stopped, .destfiles-owner.own-kept { color: var(--muted); }
+.destfiles-owner.own-leftover { color: var(--busy); }
+
+/* The running list of what has been picked. One line per folder, each with its
+   own way out — a count would be the last chance to notice a folder nobody
+   meant to include, spent.
+
+   Each Deselect sits directly after the path it removes, rather than aligned
+   down a right-hand edge. That is deliberate: this panel is a flex item of the
+   step around it and sizes to its longest path, so a right edge here is
+   wherever the longest folder happens to end rather than anywhere meaningful —
+   and a button next to the thing it acts on needs no edge to explain it. The
+   path wraps if it must; the button never splits. */
+.picked-list { list-style: none; margin: var(--s2) 0 0; padding: 0; }
+.picked-list li {
+  display: flex; align-items: baseline; gap: var(--s2);
+  flex-wrap: wrap; padding: 0.2rem 0;
+}
+.picked-list li .mono { overflow-wrap: anywhere; min-width: 0; }
+.picked-list li .small { font-size: var(--fs-small); }
+.picked-list li button { flex: 0 0 auto; }
 
 /* The bar above the list: where you are, and the button that protects it.
    Pushed to the far end so it is nowhere near the row buttons below. */
@@ -932,6 +1116,10 @@ select {
 .verdict.ok .verdict-dot { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 18%, transparent); }
 .verdict.busy .verdict-dot { background: var(--busy); box-shadow: 0 0 0 4px color-mix(in srgb, var(--busy) 18%, transparent); }
 .verdict.bad .verdict-dot { background: var(--bad); box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 18%, transparent); }
+/* Something is switched off on purpose. Grey rather than green, because green
+   is the word "protected" in colour form and a paused backup is not; grey
+   rather than red, because nothing has gone wrong. */
+.verdict.muted .verdict-dot { background: var(--muted); box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 18%, transparent); }
 .verdict-text { min-width: 0; }
 .verdict-line { font-size: 1.15rem; font-weight: 600; line-height: 1.3; }
 .verdict-line + p { margin-top: var(--s1); }
@@ -1172,14 +1360,104 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
   .delivery-state { margin-left: 0; }
 }
 
-/* The per-schedule actions column. Buttons on one line, hard right, so the
-   table still reads as columns of facts with the controls out of the way. */
+/* The per-schedule actions column. Hard right, so the table still reads as
+   columns of facts with the controls out of the way.
+
+   THEY WRAP RATHER THAN STAYING ON ONE LINE, and that is not a preference.
+   This cell used to be `white-space: nowrap`, which makes its minimum width the
+   sum of every button in it — and a table cannot be narrower than its cells. At
+   three buttons that fitted. "Back up now" made it four, and against this
+   table's eight columns the minimum overflowed the page's content column: the
+   whole Timed snapshots section grew ~90px wider than every other section on
+   the page and the last button was cut off the edge of the shipped screenshot.
+   Nothing caught it — the page itself does not scroll sideways, so it was
+   invisible to `go test`, to node --check, and to the screenshot guards; it was
+   only visible by looking at the picture.
+
+   THE COLUMN THAT GIVES WAY IS THE FOLDER LIST, not these buttons. Every cell
+   is `white-space: nowrap` (see the `th, td` rule near the top), so each column
+   demands its whole text and the table can only grow. The folder cell is the one
+   whose content has no bound — it is every folder the schedule covers, joined
+   with commas, so a schedule over five folders would have burst this table on
+   its own with no button involved. Letting that one wrap is what buys the room;
+   the actions stay on a single line, which is what makes them read as a set. */
 #archive-rows .row-actions { white-space: nowrap; text-align: right; }
 #archive-rows .row-actions button + button { margin-left: var(--s2); }
+#archive-rows td:first-child, #archive-rows td:nth-child(2) { white-space: normal; }
+/* And the last of the room comes from the padding. Eight columns pay the
+   standard 0.9rem each side, which is 230px of this table spent on gaps; the
+   mirror table next to it has five. Tightening the densest table on the page is
+   what puts the four buttons back on one line inside the card. The vertical
+   padding is untouched, so the rows keep their height and the two tables still
+   read as the same kind of thing. */
+#archive-rows th, #archive-rows td { padding-left: 0.6rem; padding-right: 0.6rem; }
+#archive-rows th:first-child, #archive-rows td:first-child { padding-left: 0.9rem; }
+#archive-rows th:last-child, #archive-rows td:last-child { padding-right: 0.9rem; }
 /* A paused schedule is neither working nor broken, so it gets neither colour.
    Muted says "deliberately not running" where green would imply it is about to
    and red would imply something went wrong. */
 #archive-rows td.paused, #archive-rows td .paused { color: var(--muted); }
+
+/* BETWEEN THE PHONE LAYOUT AND A WIDE WINDOW, THE CONTROLS WRAP.
+   The card layout below only starts at 40rem, so every window from a phone's
+   width up to about 1300px draws these as real tables — and in that band there
+   is not room for a row of facts and three or four buttons on one line. The
+   overflow does not scroll the page, it just cuts the last button off the right
+   edge, which is indistinguishable from that button not existing. This was
+   already true of a laptop at 1024px before "Back up now" was added; the extra
+   button made it reach the wide window too. Wrapping is the honest degradation:
+   the controls stack, nothing is hidden, and the row simply gets taller. */
+@media (max-width: 80rem) {
+  /* The controls themselves need no help: four icons are ~11rem all in, and they
+     wrap between themselves if it ever comes to that. */
+  #rows td.row-actions, #archive-rows td.row-actions { white-space: normal; }
+  /* AND NO CELL MAY HOLD THE TABLE OPEN. `th, td` sets white-space: nowrap for
+     the whole page, which makes every column's minimum its entire text — so a
+     table can only grow, and a window narrower than the sum of them cuts the
+     right-hand column off instead of reflowing. The folder path, "first backup
+     running" and the state words are the ones long enough to matter. Released
+     only in this band: above it there is room, and below 40rem these stop being
+     tables at all. */
+  #rows th, #rows td, #archive-rows th, #archive-rows td { white-space: normal; }
+  /* EXCEPT THE STATE WORD, which stays whole. It is the answer to "are my files
+     safe" and it is two words — "backed up", "first backup", "wrong drive" —
+     so it is exactly the sort of thing the rule above breaks in half. A state
+     split across two lines beside a coloured dot reads as two states. */
+  #rows td .dot, #archive-rows td .dot { white-space: nowrap; }
+  /* The progress column reserves 13rem so the figures line up down the page.
+     That reservation is worth more than the space it costs on a wide window and
+     less than it on a narrow one — where it was spending 208px to draw "—".
+     The bar is `flex: 1 1 auto` and shrinks with it. */
+  #rows .progress-cell, #archive-rows .progress-cell { min-width: 6rem; }
+  #archive-rows .bar-label, #rows .bar-label { flex-basis: 4.5rem; }
+  /* The bar keeps a 6rem minimum so it still reads as a bar rather than a dot;
+     down here that minimum plus its label IS the column, so it comes down too.
+     A short bar still shows a proportion, which is all it is for. */
+  #rows .bar, #archive-rows .bar { min-width: 3rem; }
+  /* A path has no spaces in it, so wrapping alone cannot break
+     "/home/alex/Documents" — it stays one unbreakable 224px token and holds the
+     column open on its own. This is the only place in the page that says break
+     inside a word, and it is here because the alternative is the row's buttons
+     disappearing off the edge. */
+  #rows td:first-child, #archive-rows td:first-child,
+  #rows td:first-child code, #rows td:first-child .path { overflow-wrap: anywhere; }
+  /* And the folder column's own 14rem reservation, which is what the 224px
+     above actually was. It buys a folder name and its path on two tidy lines
+     where there is room; where there is not, it was buying them at the cost of
+     the row's controls. */
+  #rows .folder-cell { min-width: 7rem; }
+  /* The last of it is the gaps. Six to eight columns each paying 0.9rem a side
+     is ~110-230px of a narrow window spent on air, and air is the cheapest
+     thing on the page to give up when the alternative is a control nobody can
+     see. Vertical padding is untouched, so the rows keep their rhythm. */
+  #rows th, #rows td, #archive-rows th, #archive-rows td {
+    padding-left: 0.4rem; padding-right: 0.4rem;
+  }
+  #rows th:first-child, #rows td:first-child,
+  #archive-rows th:first-child, #archive-rows td:first-child { padding-left: 0.9rem; }
+  #rows th:last-child, #rows td:last-child,
+  #archive-rows th:last-child, #archive-rows td:last-child { padding-right: 0.9rem; }
+}
 
 /* Somebody who has asked their system not to animate things has asked for a
    reason. The press still registers — it just stops sliding. */
@@ -1211,6 +1489,12 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
    Each row becomes a block, each cell a label-and-value line, and the header
    row goes — its job is done by the labels. Nothing is hidden: the same facts
    are present, stacked instead of ranged. */
+/* WHERE THESE STOP BEING TABLES.
+   This was briefly raised to 48rem, when the row controls were four spelled-out
+   buttons and no amount of shrinking the columns could fit them; making the
+   controls icons removed the reason, and it is back where it was. Left recorded
+   because "the table does not fit, move the breakpoint" is the obvious fix and
+   it treats the symptom — the controls were the size problem, not the width. */
 @media (max-width: 40rem) {
   /* Nothing left to scroll sideways. */
   #rows, #archive-rows { display: block; }
@@ -1287,7 +1571,11 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
   #rows tbody tr + tr td, #archive-rows tbody tr + tr td { border-top: none; }
   /* The bar needs the width more than the figure needs its own column. */
   .progress-cell .progress-wrap { flex-wrap: wrap; }
-  #archive-rows .bar-label, .bar-label { flex-basis: auto; text-align: left; }
+  /* #rows named explicitly: the band rules above scope this by id, which beats a
+     bare .bar-label at equal specificity and would otherwise pin the label into
+     a 4.5rem column here — a phase sentence stacked one word per line beside a
+     bar with room to spare. */
+  #archive-rows .bar-label, #rows .bar-label, .bar-label { flex-basis: auto; text-align: left; }
   /* The editors open as a full-width row; they are forms, not cells. */
   tr.ignore-row td { display: block; }
   tr.ignore-row td::before { content: none; }

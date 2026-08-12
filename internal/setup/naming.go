@@ -182,6 +182,15 @@ func ValidTargetName(name string) error {
 //     "never synced" to that destination, so a drive nobody has plugged in for
 //     months looks merely offline).
 //
+// config.toml IS THE SOURCE OF TRUTH FOR A DESTINATION'S NAME. state.json only
+// ever holds entries KEYED by that name, so a name in state.json that the config
+// does not list is a leftover, while a name in the config that state.json has no
+// entry for is a destination that cannot be backed up to. That asymmetry decides
+// the order here — state.json gains the new keys first, the config is switched
+// over, and only then are the old keys dropped — and it decides what happens
+// when the config save fails: the new keys are taken back out, so the two files
+// agree, and the failure is reported rather than half-applied.
+//
 // TestRenamingADestinationLeavesNothingBehindUnderTheOldName is what keeps that
 // list honest, and it fails when a new destination-keyed map is added to State.
 func RenameTarget(from, to string) error {
@@ -211,40 +220,42 @@ func RenameTarget(from, to string) error {
 		return err
 	}
 
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	// REFUSED OUTRIGHT when this destination's password lives in the OS keyring
-	// and the keyring would not give it up (locked, or no keyring session — see
-	// internal/config/keyring.go).
-	//
-	// Everything below is a map move, and there is nothing in the map to move: the
-	// rename would report success, config.toml would name the destination
-	// "pi-drive1", and the password would still be filed in the keyring under
-	// "share/backups" with nothing left on the machine pointing at it. That is
-	// data loss, on a flow that looks like it worked, and it stays invisible until
-	// the day the share stops logging in and the password nobody has written down
-	// is asked for. Renaming is never urgent; unlocking a keyring is a moment's
-	// work; so this waits.
-	if state.SecretMissing(config.ShareKeyringAccount(from)) {
-		return fmt.Errorf("%q keeps its password in the OS keyring, and the keyring is locked or unavailable right now: unlock it (or start a keyring session) and try again — renaming now would leave the password filed under the old name with nothing pointing at it. Check with: backup-maker keychain status", from)
-	}
 	// COPIED UNDER THE NEW NAME FIRST, and the old keys removed only after the
 	// config is safely saved. A rename is two files, and a failure between them
 	// is the one outcome that must not lose a destination: with both names
 	// present in state.json, whichever file is the older one still finds the
 	// UUID and the password it needs. The tidy-up afterwards is worth nothing on
 	// its own, so its failure is not worth reporting.
-	copyKey(state.DriveTargetUUIDs, from, to)
-	copyKey(state.ShareCredentials, from, to)
-	for _, byTarget := range state.MirrorLastSync {
-		copyKey(byTarget, from, to)
-	}
-	for _, byTarget := range state.MirrorScanState {
-		copyKey(byTarget, from, to)
-	}
-	if err := state.Save(); err != nil {
+	state, err := config.UpdateState(func(s *config.State) error {
+		// REFUSED OUTRIGHT when this destination's password lives in the OS
+		// keyring and the keyring would not give it up (locked, or no keyring
+		// session — see internal/config/keyring.go).
+		//
+		// Everything below is a map move, and there is nothing in the map to
+		// move: the rename would report success, config.toml would name the
+		// destination "pi-drive1", and the password would still be filed in the
+		// keyring under "share/backups" with nothing left on the machine
+		// pointing at it. That is data loss, on a flow that looks like it
+		// worked, and it stays invisible until the day the share stops logging
+		// in and the password nobody has written down is asked for. Renaming is
+		// never urgent; unlocking a keyring is a moment's work; so this waits.
+		//
+		// Inside the update, so the answer comes from the file as it is at the
+		// moment of writing rather than from a copy read earlier.
+		if s.SecretMissing(config.ShareKeyringAccount(from)) {
+			return fmt.Errorf("%q keeps its password in the OS keyring, and the keyring is locked or unavailable right now: unlock it (or start a keyring session) and try again — renaming now would leave the password filed under the old name with nothing pointing at it. Check with: backup-maker keychain status", from)
+		}
+		copyKey(s.DriveTargetUUIDs, from, to)
+		copyKey(s.ShareCredentials, from, to)
+		for _, byTarget := range s.MirrorLastSync {
+			copyKey(byTarget, from, to)
+		}
+		for _, byTarget := range s.MirrorScanState {
+			copyKey(byTarget, from, to)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
@@ -265,19 +276,41 @@ func RenameTarget(from, to string) error {
 			}
 		}
 	}
+	// A paused mirror names its destination too. Missing this would leave the
+	// pause pointing at a name nothing answers to, and the mirror would quietly
+	// start copying again under the new one — a backup resuming itself is the
+	// safe direction to fail in, but it is still not what anybody asked for.
+	for i := range cfg.Folders {
+		for j := range cfg.Folders[i].PausedTargets {
+			if cfg.Folders[i].PausedTargets[j] == from {
+				cfg.Folders[i].PausedTargets[j] = to
+			}
+		}
+	}
 	if err := cfg.Save(); err != nil {
+		// PUT state.json BACK, so the rename is all-or-nothing across the two
+		// files. Nothing has moved yet as far as config.toml is concerned, and
+		// leaving the new name's UUID and password behind would be a set of keys
+		// belonging to a destination that does not exist — which the next rename
+		// INTO that name would silently inherit, handing one destination another
+		// one's identity and password.
+		if _, undoErr := config.UpdateState(func(s *config.State) error {
+			dropKey(s, to)
+			return nil
+		}); undoErr != nil {
+			return fmt.Errorf("renaming %q to %q failed while saving the configuration (%w), and state.json could not be put back either (%v): both names are recorded there now, which is harmless, but check the destination list before renaming again", from, to, err, undoErr)
+		}
 		return err
 	}
 
-	delete(state.DriveTargetUUIDs, from)
-	delete(state.ShareCredentials, from)
-	for _, byTarget := range state.MirrorLastSync {
-		delete(byTarget, from)
+	if _, err := config.UpdateState(func(s *config.State) error {
+		dropKey(s, from)
+		return nil
+	}); err != nil {
+		// Not reported: the rename itself has landed in both files, and what is
+		// left is a duplicate set of entries under a name nothing points at.
+		_ = err
 	}
-	for _, byTarget := range state.MirrorScanState {
-		delete(byTarget, from)
-	}
-	_ = state.Save()
 
 	// The orphaned keyring entry, last and best-effort. The entry under the NEW
 	// name was already written by the first save above — putting secrets in the
@@ -290,6 +323,21 @@ func RenameTarget(from, to string) error {
 		_ = config.KeyringForget(config.ShareKeyringAccount(from))
 	}
 	return nil
+}
+
+// dropKey removes every destination-keyed entry filed under one name. The
+// counterpart to the copyKey calls above, and it has to stay in step with them:
+// TestEveryMapInStateIsClassifiedAsDestinationKeyedOrNot is what catches a map
+// that arrives in State without being classified into one of these two.
+func dropKey(s *config.State, name string) {
+	delete(s.DriveTargetUUIDs, name)
+	delete(s.ShareCredentials, name)
+	for _, byTarget := range s.MirrorLastSync {
+		delete(byTarget, name)
+	}
+	for _, byTarget := range s.MirrorScanState {
+		delete(byTarget, name)
+	}
 }
 
 // copyKey duplicates one entry under a new key, leaving the old one in place.

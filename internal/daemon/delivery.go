@@ -82,8 +82,14 @@ func (d *deliveryLog) snapshot() []status.DeliveryInfo {
 func (d *daemon) recordAlert(r config.AlertRecord) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.state.RecordAlert(r)
-	if err := d.state.Save(); err != nil {
+	// Recorded onto the history AS THE FILE HAS IT, not onto ours: another
+	// process may have dismissed a row since we last read it, and re-appending
+	// our copy would put it back. RecordAlert already keeps the list in time
+	// order, so a record arriving beside one written elsewhere lands correctly.
+	if err := d.updateState(func(s *config.State) error {
+		s.RecordAlert(r)
+		return nil
+	}); err != nil {
 		d.log.Debug("could not save the alert history", "err", err)
 	}
 }
@@ -95,17 +101,22 @@ func (d *daemon) recordAlert(r config.AlertRecord) {
 func (d *daemon) dismissAlert(at time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	changed, found := d.state.DismissAlertsAt(at, time.Now())
-	if found == 0 {
-		// Saying so rather than answering ok: a dashboard whose Dismiss button
-		// reports success while the row stays put is the shape of bug that gets
-		// reported as "it doesn't work" with nothing in any log.
-		return fmt.Errorf("no alert was raised at %s", at.Format(time.RFC3339Nano))
-	}
-	if changed == 0 {
-		return nil // already dismissed — nothing to do, and not a failure
-	}
-	return d.state.Save()
+	// Dismissed on the history as the FILE has it: `backup-maker alerts` may
+	// have recorded one since we last read, and the whole point of dismissing is
+	// that it sticks.
+	return d.updateState(func(s *config.State) error {
+		changed, found := s.DismissAlertsAt(at, time.Now())
+		if found == 0 {
+			// Saying so rather than answering ok: a dashboard whose Dismiss
+			// button reports success while the row stays put is the shape of bug
+			// that gets reported as "it doesn't work" with nothing in any log.
+			return fmt.Errorf("no alert was raised at %s", at.Format(time.RFC3339Nano))
+		}
+		if changed == 0 {
+			return config.ErrStateUnchanged // already dismissed, and not a failure
+		}
+		return nil
+	})
 }
 
 // dismissAlertsBefore hides everything raised up to a moment — "Dismiss all",
@@ -114,10 +125,12 @@ func (d *daemon) dismissAlert(at time.Time) error {
 func (d *daemon) dismissAlertsBefore(cutoff time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.state.DismissAlertsBefore(cutoff, time.Now()) == 0 {
-		return nil // nothing to do is not a failure
-	}
-	return d.state.Save()
+	return d.updateState(func(s *config.State) error {
+		if s.DismissAlertsBefore(cutoff, time.Now()) == 0 {
+			return config.ErrStateUnchanged // nothing to do is not a failure
+		}
+		return nil
+	})
 }
 
 // alertHistory is what the dashboard and `backup-maker alerts` read, newest

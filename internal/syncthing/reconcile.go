@@ -126,6 +126,35 @@ func reconcileDevices(c *Client, cfg *config.Config, log *slog.Logger) error {
 	return nil
 }
 
+// folderDeviceMap answers which paired machines each folder is shared with.
+//
+// A PAUSED PAIR IS NOT OFFERED TO THAT MACHINE AT ALL, which is how pausing
+// stops the copying on this side: a paired computer is fed by the sync engine,
+// not by the mirror engines, so leaving it shared would keep sending changes to
+// a destination the dashboard is calling paused.
+//
+// NOTHING IS DELETED BY IT. What that machine holds is its own folder on its own
+// disk; un-sharing simply stops it being sent changes, and syncthing removes no
+// files over it. Resuming shares the folder again, and the two exchange indexes
+// rather than data, because the copy on the far end never went anywhere.
+//
+// Its own function so the rule can be read and tested without a live engine.
+func folderDeviceMap(cfg *config.Config) map[string][]FolderDevice {
+	folderDevices := map[string][]FolderDevice{}
+	for _, t := range cfg.Targets {
+		if t.Type != "device" {
+			continue
+		}
+		for _, f := range cfg.FoldersForTarget(t) {
+			if cfg.MirrorPaused(f.ID, t.Name) {
+				continue
+			}
+			folderDevices[f.ID] = append(folderDevices[f.ID], FolderDevice{DeviceID: t.DeviceID})
+		}
+	}
+	return folderDevices
+}
+
 func reconcileSendFolders(c *Client, cfg *config.Config, log *slog.Logger) error {
 	raw, err := c.RawFolders()
 	if err != nil {
@@ -140,16 +169,7 @@ func reconcileSendFolders(c *Client, cfg *config.Config, log *slog.Logger) error
 		existingRaw[f.ID] = r
 	}
 
-	// Which device targets back up each folder?
-	folderDevices := map[string][]FolderDevice{}
-	for _, t := range cfg.Targets {
-		if t.Type != "device" {
-			continue
-		}
-		for _, f := range cfg.FoldersForTarget(t) {
-			folderDevices[f.ID] = append(folderDevices[f.ID], FolderDevice{DeviceID: t.DeviceID})
-		}
-	}
+	folderDevices := folderDeviceMap(cfg)
 
 	ours := map[string]bool{}
 	for _, f := range cfg.Folders {

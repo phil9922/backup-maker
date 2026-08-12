@@ -3,6 +3,7 @@
 package setup
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -418,5 +419,70 @@ func TestDescribingADestinationThatIsNotThereFails(t *testing.T) {
 	}
 	if err := DescribeTarget("card", strings.Repeat("x", 201)); err == nil {
 		t.Error("a description too long to show anywhere was accepted")
+	}
+}
+
+// THE GUARANTEE: a rename that cannot finish leaves the two files agreeing with
+// each other.
+//
+// A rename is two files. config.toml is the source of truth for a destination's
+// NAME, and state.json only holds entries keyed by it — so if the state write
+// lands and the config write does not, state.json is carrying a UUID and a share
+// password filed under a name no destination has. That is not merely untidy:
+// the next rename INTO that name would inherit them, handing one destination
+// another one's identity and password. So the state write is taken back out and
+// the failure reported, rather than half-applied and reported as success.
+//
+// The config save is made to fail by leaving a DIRECTORY where it writes its
+// temporary file — the least invasive way to break exactly one of the two saves.
+func TestARenameThatCannotSaveTheConfigLeavesNothingHalfDone(t *testing.T) {
+	isolate(t)
+	cfg := config.New()
+	cfg.General.MachineName = "my-laptop"
+	cfg.Targets = []config.Target{
+		{Type: "share", Name: "backups", URL: "//pi/backups", Username: "alex", Folders: []string{}},
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.UpdateState(func(s *config.State) error {
+		s.DriveTargetUUIDs = map[string]string{"backups": "uuid-pi"}
+		s.ShareCredentials = map[string]string{"backups": "the-password"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := config.ConfigPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path+".tmp", 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RenameTarget("backups", "pi-drive1"); err == nil {
+		t.Fatal("a rename that could not save the configuration reported success")
+	}
+
+	after, err := config.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, orphaned := after.DriveTargetUUIDs["pi-drive1"]; orphaned {
+		t.Errorf("a UUID is filed under a name no destination has: %v", after.DriveTargetUUIDs)
+	}
+	if _, orphaned := after.ShareCredentials["pi-drive1"]; orphaned {
+		t.Error("a share password is filed under a name no destination has")
+	}
+	if after.DriveTargetUUIDs["backups"] != "uuid-pi" || after.ShareCredentials["backups"] != "the-password" {
+		t.Error("the destination that still exists lost its identity or its password")
+	}
+	got, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Targets[0].Name != "backups" {
+		t.Errorf("config.toml was renamed after all: %q", got.Targets[0].Name)
 	}
 }

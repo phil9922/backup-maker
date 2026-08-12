@@ -93,26 +93,16 @@ func (d *daemon) setArchivePassword(name, password string) error {
 	if !found {
 		return fmt.Errorf("no scheduled snapshot named %q", name)
 	}
-	// Reload-modify-save so a concurrent CLI write is never clobbered.
-	state, err := config.LoadState()
-	if err != nil {
-		return err
-	}
-	if state.ArchivePasswords == nil {
-		state.ArchivePasswords = map[string]string{}
-	}
-	state.ArchivePasswords[name] = password
-	if err := state.Save(); err != nil {
-		return err
-	}
-	// The archive runner reads the daemon's in-memory state; update it too.
+	// Read-modify-write under the state lock, so a concurrent CLI write is
+	// never clobbered — and the archive runner reads the daemon's in-memory
+	// state, which updateState replaces with what was just written.
 	d.mu.Lock()
-	if d.state != nil {
-		if d.state.ArchivePasswords == nil {
-			d.state.ArchivePasswords = map[string]string{}
+	defer d.mu.Unlock()
+	return d.updateState(func(s *config.State) error {
+		if s.ArchivePasswords == nil {
+			s.ArchivePasswords = map[string]string{}
 		}
-		d.state.ArchivePasswords[name] = password
-	}
-	d.mu.Unlock()
-	return nil
+		s.ArchivePasswords[name] = password
+		return nil
+	})
 }

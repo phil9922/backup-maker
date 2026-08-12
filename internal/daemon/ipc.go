@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -121,6 +122,50 @@ func (c *Client) RevertFolder(folderID string) (string, error) {
 		Message string `json:"message"`
 	}
 	if err := c.post("/api/receive/revert", map[string]string{"folder_id": folderID}, &out); err != nil {
+		return "", err
+	}
+	return out.Message, nil
+}
+
+// BackUpFolderNow asks the daemon to run a full mirror pass for one
+// folder→destination pair now. A nil error means the pass was STARTED, not that
+// it has finished — it is run by the engine that owns that pair, and may take
+// minutes on a network destination.
+func (c *Client) BackUpFolderNow(folderID, target string) (string, error) {
+	var out struct {
+		Message string `json:"message"`
+	}
+	err := c.post("/api/folders/"+url.PathEscape(folderID)+"/backup-now",
+		map[string]string{"target": target}, &out)
+	if err != nil {
+		return "", err
+	}
+	return out.Message, nil
+}
+
+// SetMirrorPaused stops or resumes one folder's continuous copy to one
+// destination. Config only: nothing on that destination is copied or deleted,
+// and the pair keeps its sync clock, so resuming carries on where it left off.
+func (c *Client) SetMirrorPaused(folderID, target string, paused bool) (string, error) {
+	var out struct {
+		Message string `json:"message"`
+	}
+	err := c.post("/api/folders/"+url.PathEscape(folderID)+"/paused",
+		map[string]any{"target": target, "paused": paused}, &out)
+	if err != nil {
+		return "", err
+	}
+	return out.Message, nil
+}
+
+// BackUpArchiveNow asks the daemon to write one schedule's encrypted snapshot
+// now. A nil error means the snapshot was STARTED; a real folder takes tens of
+// minutes to pack, encrypt and verify.
+func (c *Client) BackUpArchiveNow(name string) (string, error) {
+	var out struct {
+		Message string `json:"message"`
+	}
+	if err := c.post("/api/archives/"+url.PathEscape(name)+"/backup-now", nil, &out); err != nil {
 		return "", err
 	}
 	return out.Message, nil

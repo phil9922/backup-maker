@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/phil9922/backup-maker/internal/archive"
 	"github.com/phil9922/backup-maker/internal/config"
 	"github.com/phil9922/backup-maker/internal/localmirror"
 )
@@ -49,9 +50,14 @@ func TestNothingInThisPackageEverDeletesFromASource(t *testing.T) {
 	if err := AddArchive("nightly", []string{folder.ID}, "daily", targets[0].Name, 3, "pw"); err != nil {
 		t.Fatal(err)
 	}
-	// Something for the delete path to actually find and remove.
+	// Something for the delete paths to actually find and remove.
 	writeUnder(t, dest, config.DestRoot(machine, folder.Label)+"/copy.txt", "a backup")
 	writeUnder(t, dest, config.VersionRoot(machine, folder.Label)+"/copy~20260101-000000.txt", "an old backup")
+	writeUnder(t, dest, archive.PathFor(machine, "nightly")+"/nightly-20260101-020000.zip", "a snapshot")
+
+	// Both deleting paths open the destination through this seam, so both are
+	// aimed at the temp directory above and never at anything else.
+	open := func(config.Target) (localmirror.Backend, error) { return localmirror.NewLocalFS(dest), nil }
 
 	stillThere := func(t *testing.T, after string) {
 		t.Helper()
@@ -89,14 +95,24 @@ func TestNothingInThisPackageEverDeletesFromASource(t *testing.T) {
 	}
 	stillThere(t, "RemoveArchive")
 
+	// The file view's delete — the second path in this package that hands a
+	// path to RemoveAll on a destination. The schedule is gone, so its zips
+	// belong to nothing and this removes them.
+	if _, err := DeleteDestFile(targets[0].Name, archive.PathFor(machine, "nightly"), "nightly", open); err != nil {
+		t.Fatal(err)
+	}
+	stillThere(t, "DeleteDestFile")
+	if exists(t, dest, archive.PathFor(machine, "nightly")) {
+		t.Error("the orphaned snapshots were not deleted, so this proves nothing about the source surviving a real deletion")
+	}
+
 	if err := RemoveFolder(folder.ID); err != nil {
 		t.Fatal(err)
 	}
 	stillThere(t, "RemoveFolder")
 
-	// The one action that deletes backups on purpose — the sharpest test of
+	// The other action that deletes backups on purpose — the sharpest test of
 	// the rule, since it really does call RemoveAll.
-	open := func(config.Target) (localmirror.Backend, error) { return localmirror.NewLocalFS(dest), nil }
 	if _, err := DeleteRetiredBackups(folder.ID, folder.Label, open); err != nil {
 		t.Fatal(err)
 	}

@@ -42,31 +42,39 @@ func NewSupervisor(state *config.State, log *slog.Logger) (*Supervisor, error) {
 		return nil, err
 	}
 
-	changed := false
-	if state.SyncthingAPIKey == "" {
-		state.SyncthingAPIKey = config.NewToken()
-		changed = true
+	// The API key and the port are this supervisor's two fields, and they are
+	// written on their own: the caller hands us the daemon's long-lived State,
+	// and saving the whole of that would put every other field back to whatever
+	// it held when the daemon started (see config.UpdateState). The caller's copy
+	// is updated too, because it goes on being read after this returns.
+	apiKey, guiPort := state.SyncthingAPIKey, state.SyncthingGUIPort
+	if apiKey == "" {
+		apiKey = config.NewToken()
 	}
-	if state.SyncthingGUIPort == 0 || !portFree(state.SyncthingGUIPort) {
+	if guiPort == 0 || !portFree(guiPort) {
 		port, err := freePort()
 		if err != nil {
 			return nil, err
 		}
-		state.SyncthingGUIPort = port
-		changed = true
+		guiPort = port
 	}
-	if changed {
-		if err := state.Save(); err != nil {
+	if apiKey != state.SyncthingAPIKey || guiPort != state.SyncthingGUIPort {
+		if _, err := config.UpdateState(func(s *config.State) error {
+			s.SyncthingAPIKey = apiKey
+			s.SyncthingGUIPort = guiPort
+			return nil
+		}); err != nil {
 			return nil, err
 		}
+		state.SyncthingAPIKey, state.SyncthingGUIPort = apiKey, guiPort
 	}
 
 	s := &Supervisor{
 		log:     log.With("sub", "syncthing"),
 		binPath: bin,
 		homeDir: home,
-		apiKey:  state.SyncthingAPIKey,
-		guiPort: state.SyncthingGUIPort,
+		apiKey:  apiKey,
+		guiPort: guiPort,
 	}
 	s.Client = NewClient(s.guiPort, s.apiKey)
 	return s, nil

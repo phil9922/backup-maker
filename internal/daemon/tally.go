@@ -146,17 +146,27 @@ func (t *tally) run(ctx context.Context) {
 // second chance to tear it for no gain. Memory wins over the file for both, so a
 // state.json a setup command rewrote behind our back cannot wind either
 // backwards.
+//
+// AND NOTHING ELSE, which is the half that was missing. This used to save the
+// whole of the daemon's in-memory State, so every thirty seconds it also put
+// back its stale copy of the UUIDs, the share passwords and the alert history —
+// and a rename that landed in the gap was simply undone, leaving a destination
+// named in config.toml with no password and no recorded UUID. Only the five
+// fields listed below are this writer's to set; the rest come off the disk
+// inside the lock. See daemon.updateState and config.UpdateState.
 func (d *daemon) saveState(bytes, files uint64, since time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.state.BytesCopiedTotal = bytes
-	d.state.FilesCopiedTotal = files
-	d.state.CountingSince = since
-	if d.marks != nil {
-		d.state.MirrorLastSync = d.marks.snapshot()
-		d.state.MirrorScanState = d.marks.scanSnapshot()
-	}
-	return d.state.Save()
+	return d.updateState(func(s *config.State) error {
+		s.BytesCopiedTotal = bytes
+		s.FilesCopiedTotal = files
+		s.CountingSince = since
+		if d.marks != nil {
+			s.MirrorLastSync = d.marks.snapshot()
+			s.MirrorScanState = d.marks.scanSnapshot()
+		}
+		return nil
+	})
 }
 
 // countCopied is handed to every mirror engine as Options.Counted. Nil-safe

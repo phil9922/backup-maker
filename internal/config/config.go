@@ -202,6 +202,22 @@ type Folder struct {
 	// got a continuous second copy of the folder on every drive they own,
 	// without being asked and without being told.
 	SnapshotOnly bool `toml:"snapshot_only,omitempty"`
+	// PausedTargets names the destinations whose continuous mirror OF THIS
+	// FOLDER is switched off. Everything else about the pair survives: the
+	// files already on that destination, its last-synced clock, its row on the
+	// dashboard. It simply stops being copied to until it is resumed.
+	//
+	// AN EMPTY LIST MEANS NOTHING IS PAUSED — the exact opposite of the
+	// convention on Target.Folders, and the reason this list lives here rather
+	// than beside that one. Target.Folders is a list of FOLDER IDS on a TARGET
+	// where empty means EVERY folder, and this project has three times shipped
+	// or nearly shipped a widened backup from a list of that kind quietly
+	// emptying. This is a list of TARGET NAMES on a FOLDER, where empty means
+	// "carry on backing up everywhere" — the safe direction, and the direction
+	// a dropped entry falls in. The two must never be read through one code
+	// path, resolved by one helper, or moved from one struct to the other.
+	// See TestAnEmptyPausedListMeansNothingIsPausedNotEverything.
+	PausedTargets []string `toml:"paused_targets,omitempty"`
 }
 
 // Retired is a folder that has been stopped but whose backups are still out
@@ -709,6 +725,33 @@ func (c *Config) FoldersForTarget(t Target) []Folder {
 		}
 	}
 	return out
+}
+
+// MirrorPaused reports whether this folder's continuous copy to this
+// destination has been switched off.
+//
+// DELIBERATELY NOT FOLDED INTO FoldersForTarget, and this is the important part.
+// That function answers "which folders does this destination hold copies of",
+// and pausing does not change the answer: the copies are still sitting there,
+// the pair's last-synced clock is pruned from state.json the moment
+// FoldersForTarget stops returning it (see daemon.syncMarks.prune, which would
+// make a resumed pair read "never synced"), and stopping the folder must still
+// record a copy on a destination that is holding one. Pausing decides whether an
+// engine RUNS — a different question, asked separately at each of the few places
+// that start work.
+func (c *Config) MirrorPaused(folderID, target string) bool {
+	for _, f := range c.Folders {
+		if f.ID != folderID {
+			continue
+		}
+		for _, name := range f.PausedTargets {
+			if name == target {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 // Configured reports that this machine has evidently been set up: it protects
