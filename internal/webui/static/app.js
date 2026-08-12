@@ -481,6 +481,9 @@ const ROW_ICONS = {
   edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.12 2.12 0 0 0-3-3L5 17z"/><path d="M14.5 6.5l3 3"/></svg>',
   // An open folder: look at what is actually on this drive.
   files: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2.5h6A1.5 1.5 0 0 1 18.5 10v.5"/><path d="M3.2 19.5 5.6 12h15.2l-2.4 7.5z"/></svg>',
+  // A floppy disk: write down what has been typed. Only ever on a text field —
+  // every switch in the settings saves the moment it is moved.
+  save: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4h7v5H8z"/><path d="M8 13h8v7H8z"/></svg>',
   remove: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16"/><path d="M10 7V5h4v2"/><path d="M6.5 7l1 12h9l1-12"/><path d="M10.5 10.5v6M13.5 10.5v6"/></svg>',
 };
 
@@ -499,6 +502,17 @@ function iconButton(kind, label, extraClass) {
 function setIconLabel(btn, label) {
   btn.title = label;
   btn.setAttribute('aria-label', label);
+}
+
+// Turn a button already in the markup into one of the icons above, so the SVGs
+// stay in one place rather than being copied into index.html. The handler on it
+// is untouched.
+function toIconButton(btn, kind, label) {
+  if (!btn || !ROW_ICONS[kind]) return btn;
+  btn.className = 'icon-btn act-' + kind;
+  btn.innerHTML = ROW_ICONS[kind];
+  setIconLabel(btn, label);
+  return btn;
 }
 
 // The per-row "Back up now" for a continuous mirror, created once and then only
@@ -2907,6 +2921,17 @@ function wireCredentialSave(buttonId, inputId, key, savedMsg, stateId) {
 wireCredentialSave('save-webhook-url', 'set-webhook-url', 'webhook_url', 'Address saved.', 'webhook-url-state');
 wireCredentialSave('save-ntfy-topic', 'set-ntfy-topic', 'ntfy_topic_url', 'Topic saved.', 'ntfy-topic-state');
 wireCredentialSave('save-ntfy-token', 'set-ntfy-token', 'ntfy_token', 'Token saved.', 'ntfy-token-state');
+
+// The three text fields in the settings are the ONLY things here with a Save:
+// every switch applies the moment it is moved, which is why none of them has
+// one. Named individually rather than swept up by a selector, so a Save added
+// somewhere else does not silently become a wordless icon.
+toIconButton(document.getElementById('save-webhook-url'), 'save',
+  'Save this address');
+toIconButton(document.getElementById('save-ntfy-topic'), 'save',
+  'Save this topic');
+toIconButton(document.getElementById('save-ntfy-token'), 'save',
+  'Save this token');
 
 // How each delivery method last performed, shown under that method.
 //

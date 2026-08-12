@@ -680,6 +680,10 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
 .icon-btn.act-resume { color: var(--ok); }
 .icon-btn.act-edit { color: var(--muted); }
 .icon-btn.act-remove, .icon-btn.danger { color: var(--bad); }
+/* Writing down what was typed, so it takes the same accent as the other action
+   that starts something rather than the muted grey of the ones that only open a
+   panel. */
+.icon-btn.act-save { color: var(--accent); }
 .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* "Starting…" and "Started" for a button with no room for either word. The
@@ -969,6 +973,61 @@ select {
    thing it explains. */
 .row-check { display: flex; align-items: flex-start; gap: 0.7rem; padding: 0.4rem 0; cursor: pointer; }
 .row-check input { margin-top: 0.3rem; flex: none; }
+
+/* THE SETTINGS SWITCHES. Still <input type="checkbox"> underneath — the element
+   carries the state, the keyboard behaviour and the accessible role for free,
+   and every one of these already saves the moment it changes, so there is
+   nothing here to submit.
+   Scoped to #settings-section deliberately: the wizard's tickboxes are part of
+   a form somebody is filling in and reviewing before it is saved, which is a
+   tickbox's job and not a switch's. */
+/* The switch's own measurements, named so the lines that have to line up with
+   its words can be worked out from them rather than guessed at. */
+#settings-section { --switch-w: 2.5rem; --switch-gap: 0.7rem; }
+#settings-section .row-check { gap: var(--switch-gap); }
+
+/* A LINE THAT REPORTS ON THE SWITCH ABOVE IT BELONGS UNDER ITS WORDS.
+   "This build has no release version…" and "Reachable at http://…" are
+   siblings of the label, so they started at the panel's left edge while the
+   sentence they continue started a switch-width further in. They read as new
+   settings rather than as remarks about the one above.
+   Their colour is left alone: it already changes with what they say — the
+   update line is green when there is actually a new version to fetch. */
+#settings-section .row-check + p {
+  margin-left: calc(var(--switch-w) + var(--switch-gap));
+}
+
+#settings-section input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  position: relative; flex: none;
+  width: var(--switch-w); height: 1.4rem; margin-top: 0.15rem;
+  border-radius: 999px; border: 1px solid #2b3542;
+  /* OFF IS MUTED, NOT RED. Red on this page means a backup is broken, and a
+     setting somebody deliberately switched off is not a fault — the same reason
+     a paused schedule is drawn muted rather than red. Mixed down from --muted
+     rather than used neat so the near-white knob still reads against it. */
+  background: color-mix(in srgb, var(--muted) 45%, #10141a);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+#settings-section input[type="checkbox"]::after {
+  content: ""; position: absolute; top: 50%; left: 3px;
+  width: 1rem; height: 1rem; border-radius: 50%;
+  background: #f3f6fa; transform: translateY(-50%);
+  transition: left 0.15s ease;
+}
+#settings-section input[type="checkbox"]:checked { background: var(--ok); }
+#settings-section input[type="checkbox"]:checked::after { left: calc(100% - 1rem - 3px); }
+#settings-section input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+#settings-section input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
+/* Somebody who asked their system not to animate things has asked for a
+   reason; the switch still moves, it just stops sliding. */
+@media (prefers-reduced-motion: reduce) {
+  #settings-section input[type="checkbox"],
+  #settings-section input[type="checkbox"]::after { transition: none; }
+}
 .row-check span { display: block; }
 /* The sentence under a switch. Bigger than a table caption and set on its own
    line-height: this is the text that says what the setting actually does, and
