@@ -98,6 +98,7 @@ const Wizard = (() => {
     firstRun = !!(opts && opts.firstRun);
     index = 0;
     picked.clear();
+    showPickNote('');
     chosen.clear();
     const inc = document.querySelector('input[name="mode"][value="incremental"]');
     if (inc) inc.checked = true;
@@ -287,6 +288,7 @@ const Wizard = (() => {
   function toggleFolder(path) {
     if (isPicked(path)) {
       picked.delete(trimSlash(path));
+      showPickNote('');
       renderChosenFolder();
       return;
     }
@@ -344,9 +346,56 @@ const Wizard = (() => {
   // Resolving the path to the folder that already owns it makes the refusal
   // unreachable from here: the request becomes "add a kind of backup to this
   // folder", which is what was meant.
+  // NOTHING MAY BE PICKED INSIDE SOMETHING ELSE THAT IS PICKED.
+  //
+  // The picker offers Home beside Documents, Pictures and the rest, which reads
+  // as a list of siblings and is not one: Home is their parent. Picking both
+  // used to be allowed, and meant copying those files twice — once as
+  // themselves and once inside Home — to every destination, for ever, with two
+  // rows on the dashboard both claiming to protect them and a snapshot holding
+  // two copies of each file.
+  //
+  // Picking a parent SWALLOWS the children already chosen, because that is
+  // plainly what was meant. Picking a child of something already chosen is
+  // refused instead of silently ignored: the folder is already protected, and
+  // saying so is more use than appearing to add it.
   function chooseFolder(path, folderID) {
-    picked.set(trimSlash(path), { path, id: folderID || folderIDForPath(path) });
+    const want = trimSlash(path);
+    for (const { path: have } of picked.values()) {
+      if (contains(trimSlash(have), want)) {
+        showPickNote(`${want} is already inside ${trimSlash(have)}, which you have picked. ` +
+          `Everything in it is backed up already.`);
+        return;
+      }
+    }
+    const swallowed = [];
+    for (const [key, f] of [...picked.entries()]) {
+      if (contains(want, trimSlash(f.path))) {
+        picked.delete(key);
+        swallowed.push(trimSlash(f.path));
+      }
+    }
+    picked.set(want, { path, id: folderID || folderIDForPath(path) });
+    showPickNote(swallowed.length
+      ? `${swallowed.join(' and ')} ${swallowed.length > 1 ? 'are' : 'is'} inside ${want}, ` +
+        `so ${swallowed.length > 1 ? 'they have' : 'it has'} been folded into it — nothing is left out.`
+      : '');
     renderChosenFolder();
+  }
+
+  // contains reports whether parent is an ancestor of child. Compared segment by
+  // segment rather than by prefix, so /home/alexandra is not treated as living
+  // inside /home/alex.
+  function contains(parent, child) {
+    return parent !== child && child.startsWith(parent + '/');
+  }
+
+  // One line under the picker explaining what a press just did, or nothing.
+  function showPickNote(text) {
+    const p = $('pick-note');
+    if (!p) return;
+    p.textContent = text;
+    p.hidden = !text;
   }
 
   function folderIDForPath(path) {
@@ -368,6 +417,7 @@ const Wizard = (() => {
   // wizard can be taken back; this one now can too.
   function clearChosenFolder() {
     picked.clear();
+    showPickNote('');
     renderChosenFolder();
   }
 

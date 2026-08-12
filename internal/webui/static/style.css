@@ -609,7 +609,24 @@ details summary { cursor: pointer; margin-top: 0.5rem; }
 .wiz-panel h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
 .wiz-nav { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .wiz-nav .skip { margin-left: auto; font-size: 0.85rem; }
-#wiz-finish, #adopt-finish { color: var(--ok); border-color: #2b4030; }
+/* The button that actually starts backing up, in the green that means
+   "protected" everywhere else on this page — the one action in the wizard worth
+   telling apart from Continue.
+   IT FILLS WITH THE GREEN RATHER THAN WRITING IN IT. This rule used to set only
+   the text colour, back when the button had no fill; it was later given
+   class="primary", which fills it accent blue — and because an id beats a
+   class, the green text stayed and sat on the blue. Mid-green on mid-blue is
+   not quite invisible, so nothing caught it, and it shipped in the README's own
+   tour of the wizard. The dark ink is the same one .primary uses. */
+#wiz-finish, #adopt-finish {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #06131c;
+}
+#wiz-finish:hover, #adopt-finish:hover {
+  background: color-mix(in srgb, var(--ok) 88%, white);
+  border-color: color-mix(in srgb, var(--ok) 88%, white);
+}
 /* The folder you have chosen, with the button that lets you take it back.
    A row so the button sits beside the text rather than under it, and wraps
    under it on a narrow screen instead of overflowing. */

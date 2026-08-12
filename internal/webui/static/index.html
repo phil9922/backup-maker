@@ -136,6 +136,10 @@
         <input id="pick-manual" placeholder="/home/you/code" autocomplete="off">
         <button type="button" id="pick-manual-go" class="primary">Use this</button>
       </div>
+      <!-- Says what a press just did when it did something other than the
+           obvious — folded a folder into a parent, or refused one already
+           covered. Empty and hidden the rest of the time. -->
+      <p id="pick-note" class="notice subtle" hidden></p>
       <!-- A div, not a p: it holds a list of the folders picked, and a ul inside
            a p is not something a parser will keep. -->
       <div id="pick-chosen" class="chosen" hidden></div>

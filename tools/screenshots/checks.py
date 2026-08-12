@@ -26,17 +26,51 @@ save a shot that fails these, and the guards live here rather than in one of the
 # a distance as a guard that passes.
 import os
 
-# Text whose colour matches the surface behind it. Catches the whole family:
-# invisible labels, and states that lost their colour and fell back to the body's.
+# Text that cannot be read against the surface behind it.
+#
+# THIS USED TO TEST ONLY FOR AN EXACT MATCH, and an exact match is the easy half.
+# #wiz-finish — the button that starts the backup — was mid-green on mid-blue for
+# releases: an id rule set the text colour green back when the button had no
+# fill, the button was later given class="primary" which fills it accent blue,
+# and green is not equal to blue, so this guard waved it through. It shipped in
+# the README's own tour of the wizard and was found by a person squinting at it.
+#
+# Contrast ratio, then, not equality — WCAG's formula, 3:1, which is the large-
+# text threshold. Deliberately lenient: the point is to catch labels nobody can
+# read, not to hold this dashboard to AA on every muted hint.
 INVISIBLE_TEXT = """() => {
+  const lum = (c) => {
+    const [r, g, b] = c.match(/[\\d.]+/g).slice(0, 3).map(Number).map((v) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ratio = (a, b) => {
+    const x = lum(a), y = lum(b);
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  };
+  // The nearest ancestor that actually paints something, since a transparent
+  // background means the text sits on whatever is behind its parent.
+  const behind = (e) => {
+    for (let n = e; n; n = n.parentElement) {
+      const bg = getComputedStyle(n).backgroundColor;
+      if (bg && bg !== 'rgba(0, 0, 0, 0)' && !bg.startsWith('rgba(0, 0, 0, 0')) return bg;
+    }
+    return 'rgb(11, 15, 20)';
+  };
   const bad = [];
   for (const e of document.querySelectorAll('button, a, input, label, td, th, span, p, h1, h2, h3')) {
     if (!e.offsetParent) continue;
-    if (!e.textContent.trim()) continue;
+    const own = [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    if (!own) continue; // a wrapper is judged by its own words, not its children's
     const s = getComputedStyle(e);
-    if (s.color === s.backgroundColor && s.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+    const bg = behind(e);
+    const r = ratio(s.color, bg);
+    if (r < 3) {
       bad.push((e.id ? '#' + e.id : e.tagName) +
-               ' "' + e.textContent.trim().slice(0, 40) + '" ' + s.color);
+               ' "' + e.textContent.trim().slice(0, 40) + '" ' +
+               s.color + ' on ' + bg + ' = ' + r.toFixed(2) + ':1');
     }
   }
   return bad;
@@ -47,9 +81,10 @@ def no_invisible_text(page, out):
     found = page.evaluate(INVISIBLE_TEXT)
     if found:
         raise SystemExit(
-            f"{out}: text is the same colour as what is behind it: {found}. "
+            f"{out}: text cannot be read against what is behind it: {found}. "
             "Refusing to publish a shot with an unreadable label — this is the "
-            "failure mode that shipped twice already.")
+            "failure mode that shipped three times already, most recently the "
+            "wizard's own \"Start backing up\" button in green on blue.")
 
 
 def nothing_local_leaked(page, out, repo):

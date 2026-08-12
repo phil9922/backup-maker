@@ -911,7 +911,29 @@ async function reportAndRefresh(resp) {
   } catch { said = (await resp.text()).trim(); }
   if (!resp.ok) alert(said || 'That did not work.');
   else if (said) alert(said);
+  refreshAfterConfigChange();
+}
+
+// A CHANGE TO config.toml IS NOT VISIBLE THE INSTANT THE REQUEST RETURNS.
+//
+// Everything here writes config.toml and returns; the daemon picks the change
+// up from a 2-second file watcher (watchConfigFile), and /api/status is built
+// from what the daemon currently holds. So the refresh fired the moment the
+// response lands can still be answered with the OLD configuration — the deleted
+// schedule still listed, the removed destination still there.
+//
+// That alone would be a flicker, except this page is EVENT-DRIVEN: it repaints
+// when the daemon publishes, and the daemon publishes when something changed.
+// If the stale answer is the last one the page ever receives, the row stays on
+// screen indefinitely — and pressing its button again is answered "no snapshot
+// schedule called that", because the daemon deleted it the first time and the
+// page never found out.
+//
+// So: ask again after the watcher has certainly ticked. Cheap, bounded, and it
+// fixes the whole family rather than the one action somebody noticed.
+function refreshAfterConfigChange() {
   refresh();
+  setTimeout(refresh, 2600);
 }
 
 // Inline editor for one folder's excludes. Comma-separated, matching the
@@ -1178,7 +1200,7 @@ async function removeFolder(f) {
     `It moves to "No longer protected" below, where you can turn it back on or delete its backups later.\n\n` +
     `Nothing is deleted now — the copies already on your destinations are left exactly where they are.`)) return;
   const resp = await mutate('/api/folders/' + encodeURIComponent(f.id), { method: 'DELETE' });
-  if (!resp.ok) alert(await resp.text()); else refresh();
+  if (!resp.ok) alert(await resp.text()); else refreshAfterConfigChange();
 }
 
 // openTargetEditor edits a destination's identity: what it is called, and which
@@ -1345,6 +1367,27 @@ async function loadDestDir(t, path, ui) {
   renderDestCrumbs(t, data.path || '', ui);
 
   const entries = data.entries || [];
+
+  // A LEVEL THAT OFFERS NO CHOICE IS NOT WORTH A CLICK. Every root on a
+  // destination is organised by machine, so on a drive only this computer backs
+  // up to, both stores hold exactly one directory and it is always called the
+  // same thing:
+  //
+  //     .backup-maker-versions  ->  my-laptop  ->  Development
+  //     backup-maker-archives   ->  my-laptop  ->  pk-probook-desktop
+  //     my-laptop               ->  Development
+  //
+  // which makes all three top-level rows appear to lead to the same place, and
+  // buries the snapshots three clicks down. Where a machine directory is the
+  // only thing in a root, step through it. Nothing is hidden: the breadcrumb
+  // still shows the full path, and a destination shared by two computers has two
+  // entries here and stops. Guarded on the path growing, so a backend that
+  // somehow answered with itself cannot spin.
+  if (entries.length === 1 && entries[0].dir && entries[0].kind === 'machine' &&
+      entries[0].rel && entries[0].rel.length > (data.path || '').length) {
+    return loadDestDir(t, entries[0].rel, ui);
+  }
+
   ui.list.replaceChildren();
   if (entries.length === 0) {
     ui.list.appendChild(el('li', 'muted', 'Nothing here.'));
@@ -1421,7 +1464,7 @@ async function deleteDestPath(t, e, ui) {
 async function removeTarget(t) {
   if (!confirm(`Stop backing up to ${t.name}?\n\nThe backups already on it are left exactly where they are — this only stops future copying.`)) return;
   const resp = await mutate('/api/targets/' + encodeURIComponent(t.name), { method: 'DELETE' });
-  if (!resp.ok) alert(await resp.text()); else refresh();
+  if (!resp.ok) alert(await resp.text()); else refreshAfterConfigChange();
 }
 
 function renderArchives(st) {
@@ -2989,7 +3032,7 @@ async function setArchivePaused(a, paused) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paused }),
   });
-  if (!resp.ok) alert(await resp.text()); else refresh();
+  if (!resp.ok) alert(await resp.text()); else refreshAfterConfigChange();
 }
 
 // Changing how often it runs and how many are kept. Deliberately does NOT
