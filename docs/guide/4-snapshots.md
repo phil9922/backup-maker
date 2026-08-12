@@ -45,36 +45,27 @@ subfolders within them.
   (Windows Explorer's built-in viewer can't read AES encryption).
 - Missed schedules (machine asleep/off) catch up when the daemon next runs.
 
-## Verification space
+## How verification works
 
 Verifying that an archive is restorable means reading the whole thing back off
-the destination and decrypting every entry. A zip file cannot be read as a
-stream — it needs random access to its central directory — so the archive is
-copied to a temporary file on your computer first. A 57GB snapshot needs ~57GB
-free space on that disk.
+the destination and decrypting every entry. That is done as a **stream**: the
+archive is read once, forwards, and nothing is copied to this computer and
+nothing is held in memory, so checking a 57GB snapshot of 400,000 files costs
+the same memory as checking two files. It needs no free space on your own disk.
 
-By default that temp file goes wherever your system puts temporary files —
-usually `/tmp`, which on many machines sits on the same disk as your home
-directory. That is the awkward case: verifying a snapshot of your home folder
-then needs a full-sized copy of it on the very disk it came from. Setting
-`TMPDIR` is not a reliable way round it, because the background service runs
-without one. Use `verify_spool_dir` in `config.toml` instead, pointing at
-another drive:
+What it proves: the archive opens with your stored password, every entry's data
+is present, decrypts and passes its own integrity check, the archive holds
+exactly the number of files that were packed, and the index at the end of the
+zip is intact and lists those same files. What it doesn't prove: that each index
+entry's recorded position points at the right bytes — following those positions
+is what would need the whole archive at once.
 
-```toml
-[defaults]
-verify_spool_dir = "/mnt/external-disk/spool"
-```
-
-The path must be absolute, existing, writable, and **never inside a folder
-being backed up** (a spool file there would be packed into the next snapshot
-and copied to every destination). An invalid path is refused rather than used
-anyway.
-
-If there is not enough room to verify, the snapshot is still written — backup-maker
-will not throw away hours of packing. Verification is skipped and reported as
-"written but not checked" on the dashboard and in `backup-maker status`. A
-backup that exists unverified is more valuable than no backup at all.
+If the destination stops responding part way through — a share that drops, a
+drive unplugged — the snapshot is still written and kept, and reported as
+"written but not checked" on the dashboard and in `backup-maker status`. It is
+not deleted: a backup that exists unverified is more valuable than no backup at
+all. An archive that is actually damaged is a different matter — that run fails
+and the bad archive is removed.
 
 ## Changing a schedule after it exists
 

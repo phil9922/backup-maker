@@ -136,27 +136,6 @@ ignore = [
   ".cache",
 ]
 
-# Directory where timed snapshots are verified. After writing an archive to a
-# destination, backup-maker reads the whole thing back and decrypts every entry
-# to prove it's restorable. A zip archive needs random access to its index, so
-# it cannot be checked as a stream — the archive is spooled to a temporary file
-# on this computer first. That needs free space equal to the archive size: a
-# 57GB snapshot needs ~57GB free.
-#
-# By default, that temp file goes wherever the OS puts temporary files
-# (usually the same disk as your files). If this disk does not have enough room
-# to verify, the snapshot is still written, but verification is skipped and
-# reported as "written but not checked" in the dashboard and status.
-#
-# Point this to an external disk or other location with more free space. Must
-# be an absolute path to an existing, writable directory, and MUST NOT be
-# inside a folder being backed up — a spool file there would be packed into the
-# next snapshot and copied to every destination. An invalid path is refused
-# rather than silently ignored. Unset means today's behaviour.
-#
-# Example: verify_spool_dir = "/mnt/external-disk/backup-spool"
-# verify_spool_dir = ""
-
 # ---------------------------------------------------------------------------
 # Folders to back up — one [[folder]] block per folder.
 # Usually created with:  backup-maker add-folder /home/you/code

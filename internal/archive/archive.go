@@ -84,12 +84,13 @@ type Result struct {
 	// VERIFICATION IS THE PROMISE, so its absence has to travel with the result.
 	// A finished snapshot is normally read back off the destination and every
 	// entry decrypted, which is what lets this program say the backup can
-	// actually be restored. That read spools the whole archive to a local temp
-	// file, and when there is not room for it the snapshot is still written —
-	// tens of gigabytes of somebody's files are worth far more than the check —
-	// but a run that quietly did less than it claims is exactly the thing this
-	// project alerts about. status turns this into a flag on the schedule's row,
-	// and the daemon into a notification.
+	// actually be restored. What stops that is the DESTINATION not handing the
+	// archive back — a share that drops, a disk that will not answer — and a
+	// snapshot written successfully minutes ago is not made bad by a network
+	// blink, so it is kept rather than deleted. A run that quietly did less than
+	// it claims is exactly the thing this project alerts about, so it says so
+	// here: status turns this into a flag on the schedule's row, and the daemon
+	// into a notification.
 	Unverified string `json:"unverified,omitempty"`
 	Err        string `json:"err,omitempty"`
 }
@@ -100,8 +101,10 @@ const maxUnstableNamed = 20
 
 // Run builds one encrypted snapshot for the job and writes it to the backend.
 // The password is mandatory: this function refuses to write an unprotected
-// archive. Every entry is re-read from the target and decrypted afterwards
-// to verify the archive is actually restorable.
+// archive. Every entry is then re-read from the target and decrypted to verify
+// the archive is actually restorable — as a stream, holding none of it and
+// copying none of it here, so a snapshot of four hundred thousand files costs
+// the same to check as one of two (see verifyZip).
 //
 // report, if non-nil, is called as the snapshot is packed — first with the
 // totals from the pre-pass, then once per file. It is what lets the dashboard
@@ -153,15 +156,6 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 		return fail(err)
 	}
 
-	// AND WHETHER THERE IS ROOM TO CHECK IT AFTERWARDS — asked here, before
-	// packing, and not at the point it is needed. Verification spools the whole
-	// archive to a LOCAL temp file, and packing 57GB over wifi takes two hours:
-	// discovering at the end that the spool will not fit throws all of that away,
-	// and doing it anyway fills the disk the source folders live on. A shortfall
-	// does not fail the run — the snapshot is written and kept, and says on its
-	// Result that it was not checked.
-	spoolDir, unverified := planSpool(cfg, job, need, log)
-
 	w, err := b.OpenWrite(tmp)
 	if err != nil {
 		return fail(err)
@@ -189,27 +183,27 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 		_ = b.Remove(tmp)
 		return fail(err)
 	}
-	if unverified == "" {
-		err := verifyZip(b, tmp, password, files, spoolDir, func(read int64) {
-			if report != nil {
-				report(Progress{
-					Phase: PhaseVerifying, DoneFiles: files, TotalFiles: files,
-					DoneBytes: read, TotalBytes: stored.n,
-				})
-			}
-		})
-		// THE LOCAL DISK RUNNING SHORT IS NOT A FAILED SNAPSHOT. The zip on the
-		// destination is complete; only the reading back was abandoned, and it was
-		// abandoned precisely so the disk holding the source folders is not filled.
-		// Throwing the archive away here would destroy hours of work to punish a
-		// shortage somewhere else entirely.
-		var full *spoolFullError
-		switch {
-		case errors.As(err, &full):
-			unverified = "the snapshot was written but not checked: " + full.Error()
-			log.Warn("this snapshot was written but NOT checked: the disk it was being read back onto was running out of room",
-				"archive", job.Name, "spool_dir", full.dir, "free_bytes", full.free)
-		case err != nil:
+	var unverified string
+	if err := verifyZip(b, tmp, password, files, func(read int64) {
+		if report != nil {
+			report(Progress{
+				Phase: PhaseVerifying, DoneFiles: files, TotalFiles: files,
+				DoneBytes: read, TotalBytes: stored.n,
+			})
+		}
+	}); err != nil {
+		// A DESTINATION THAT WILL NOT READ BACK IS NOT A FAILED SNAPSHOT. The zip
+		// on it is complete and was written seconds ago; only the reading was
+		// lost. Throwing the archive away here would destroy hours of work to
+		// punish a network that blinked. Anything else — an entry that will not
+		// decrypt, a missing index, the wrong number of entries — is the archive
+		// itself failing, and that snapshot must not be kept.
+		var unreadable *destUnreadableError
+		if errors.As(err, &unreadable) {
+			unverified = "the snapshot was written but not checked: " + unreadable.Error()
+			log.Warn("this snapshot was written but NOT checked: the destination stopped handing it back",
+				"archive", job.Name, "file", tmp, "err", unreadable.Unwrap())
+		} else {
 			_ = b.Remove(tmp)
 			return fail(fmt.Errorf("verification: %w", err))
 		}
@@ -245,21 +239,6 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 		log.Warn("archive retention prune failed", "archive", job.Name, "err", err)
 	}
 	return res
-}
-
-// countingReader reports how much of the archive has been read back, so the
-// verification phase can show progress instead of a full bar that does not move.
-type countingReader struct {
-	r      io.Reader
-	n      int64
-	report func(int64)
-}
-
-func (c *countingReader) Read(p []byte) (int, error) {
-	n, err := c.r.Read(p)
-	c.n += int64(n)
-	c.report(c.n)
-	return n, err
 }
 
 // countingWriter totals the bytes handed to the destination, so the size of the
@@ -429,66 +408,6 @@ func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []con
 		return files, total, unstable, unstableCount, werr
 	}
 	return files, total, unstable, unstableCount, zw.Close()
-}
-
-// verifyZip re-reads the written archive from the target (spooled to a local
-// temp file so memory use stays flat), checks the entry count, and fully
-// decrypts every entry — proof the backup is restorable with the password
-// before we keep it.
-//
-// spoolDir is where that local copy goes, chosen by planSpool before packing
-// started and never blank in a real run. THE SPOOL IS THE WHOLE ARCHIVE, so the
-// disk under it is measured as it is written and the copy is abandoned rather
-// than allowed to fill it — a *spoolFullError, which the caller treats as an
-// unchecked snapshot rather than a failed one.
-func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int, spoolDir string, onRead func(int64)) error {
-	src, err := b.OpenRead(relPath)
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-	spool, err := os.CreateTemp(spoolDir, "backup-maker-verify-*.zip")
-	if err != nil {
-		return err
-	}
-	// Removed on every path out, including the one where the disk ran short:
-	// leaving tens of gigabytes of abandoned spool behind on a disk that is
-	// already running out is the failure this is guarding against.
-	defer os.Remove(spool.Name())
-	defer spool.Close()
-	// Same reason the write side is buffered: reading back over SMB in the
-	// default 32KB chunks is 32 round trips per megabyte, and verification
-	// re-reads the WHOLE archive — for a 3.4GB snapshot that was the slower
-	// half of the job.
-	var r io.Reader = src
-	if onRead != nil {
-		r = &countingReader{r: src, report: onRead}
-	}
-	size, err := io.CopyBuffer(newSpoolGuard(spool, filepath.Dir(spool.Name()), minFreeFloorBytes),
-		r, make([]byte, writeBufferSize))
-	if err != nil {
-		return err
-	}
-	zr, err := zip.NewReader(spool, size)
-	if err != nil {
-		return err
-	}
-	if len(zr.File) != wantFiles {
-		return fmt.Errorf("archive has %d entries, expected %d", len(zr.File), wantFiles)
-	}
-	for _, zf := range zr.File {
-		zf.SetPassword(password)
-		rc, err := zf.Open()
-		if err != nil {
-			return fmt.Errorf("cannot decrypt %s: %w", zf.Name, err)
-		}
-		_, err = io.Copy(io.Discard, rc)
-		rc.Close()
-		if err != nil {
-			return fmt.Errorf("cannot decrypt %s: %w", zf.Name, err)
-		}
-	}
-	return nil
 }
 
 // sweepStrandedTemps removes part-written zips left by runs that never finished,

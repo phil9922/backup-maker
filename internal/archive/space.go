@@ -101,10 +101,8 @@ func estimateSnapshotBytes(cfg *config.Config, job config.Archive, folders []con
 // non-empty Err the state "failed", and alerts.go announces that) — a snapshot
 // that cannot run is exactly what that alert is for.
 //
-// zips and need are worked out by the caller and shared with the spool
-// pre-flight beside it (see planSpool): both questions are "how big is this
-// snapshot going to be", and measuring the source twice to answer it twice would
-// be a second walk of every folder for no gain.
+// zips and need are worked out by the caller: measuring the source here as well
+// would be a second walk of every folder for no gain.
 func ensureRoomFor(b localmirror.Backend, cfg *config.Config, job config.Archive,
 	zips []snapshotZip, need uint64, log *slog.Logger) error {
 	reporter, ok := b.(localmirror.SpaceReporter)

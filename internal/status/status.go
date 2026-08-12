@@ -308,10 +308,10 @@ type ArchiveRow struct {
 	// thing worth telling somebody about, so the daemon alerts on it too.
 	//
 	// The bool survives on the read-only network view and UnverifiedReason does
-	// not: the reason names the local directory the check would have spooled
-	// into and how full that disk is, which is the same reconnaissance
-	// RedactForNetwork strips from every destination. "This snapshot was not
-	// checked" is a health fact somebody in another room can act on.
+	// not: the reason quotes the destination's own error, which names paths and
+	// shares — the same reconnaissance RedactForNetwork strips from every
+	// destination. "This snapshot was not checked" is a health fact somebody in
+	// another room can act on.
 	Unverified       bool   `json:"unverified,omitempty"`
 	UnverifiedReason string `json:"unverified_reason,omitempty"`
 	// Phase is "packing" or "verifying". Verification re-reads the whole

@@ -56,33 +56,6 @@ func SelfExcludes(root string) []string {
 	return out
 }
 
-// PathWithin reports whether target is base itself or lies inside it.
-//
-// DIRECTIONAL, unlike relInside above, which also answers true when base sits
-// inside target — right for the exclusion it serves, wrong for the question
-// asked here. Its caller is asking "would a file written at target end up
-// inside this backed-up folder", and a directory that merely CONTAINS a
-// backed-up folder holds nothing that gets copied.
-//
-// Compared both resolved and plain, for the reason SelfExcludes compares both:
-// /tmp is a symlink on some systems and a home directory can be reached by more
-// than one route, so a single spelling would miss the match that matters.
-func PathWithin(base, target string) bool {
-	for _, pair := range [][2]string{
-		{resolvePath(base), resolvePath(target)},
-		{absPath(base), absPath(target)},
-	} {
-		rel, err := filepath.Rel(pair[0], pair[1])
-		if err != nil {
-			continue // unrelated volumes on Windows
-		}
-		if rel == "." || !outside(rel) {
-			return true
-		}
-	}
-	return false
-}
-
 // relInside returns target's location relative to base, slash-separated, when
 // target is base or lies inside it. A base that sits inside target reports the
 // empty string: the whole of base is then part of the configuration directory.

@@ -1627,8 +1627,9 @@ function renderArchives(st) {
         cell.appendChild(el('div', 'muted small', a.unverified_reason));
       }
       cell.appendChild(el('div', 'muted small',
-        'The zip is on the destination and is very probably fine. The next run checks itself again ' +
-        'once there is room — free some space on this computer, or set a spool directory on another disk.'));
+        'The zip is on the destination and is very probably fine. Checking it needs nothing on this ' +
+        'computer — the destination stopped answering while it was being read back, and the next run ' +
+        'checks itself again.'));
       warn.appendChild(cell);
       body.appendChild(tr);
       body.appendChild(warn);
