@@ -138,6 +138,10 @@ tr + tr td { border-top: 1px solid #1a212b; }
    column keeps its width even while empty so the destinations stay aligned. */
 tr.grouped td { border-top: none; }
 .folder-cell { min-width: 14rem; }
+/* The folder's own controls, under its name and path. Empty on a continuation
+   row, where it collapses to nothing. */
+.folder-actions { display: flex; gap: 0.35rem; margin-top: var(--s2); }
+.folder-actions:empty { display: none; }
 .folder-cell strong { display: block; }
 .folder-cell .small { font-size: var(--fs-small); }
 /* The path can be long and is the one cell worth letting wrap rather than

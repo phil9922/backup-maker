@@ -161,7 +161,17 @@ function buildRow(key) {
   const folder = el('td', 'folder-cell');
   const folderName = el('strong');
   const folderPath = el('div', 'muted mono small');
-  folder.append(folderName, folderPath);
+  // The FOLDER's own controls live with the folder's name.
+  //
+  // Edit-excludes and stop-backing-this-up apply to the folder across every
+  // destination; run and pause apply to one folder→destination pair. They used
+  // to sit in one cluster on a row that names a single destination, in the same
+  // style, with nothing to say which was which — so "pause the Development
+  // folder" turned out to mean "pause Development → laptopcard", and the folder
+  // controls appeared to belong to whichever destination led the group.
+  // Position says the scope now: beside the name means the whole folder.
+  const folderActions = el('div', 'folder-actions');
+  folder.append(folderName, folderPath, folderActions);
   const target = el('td');
   const state = el('td');
 
@@ -187,7 +197,7 @@ function buildRow(key) {
   progress.dataset.label = 'Progress';
   seen.dataset.label = 'Last sync';
   tr.append(folder, target, state, progress, seen, actions);
-  tr._cells = { folder, folderName, folderPath, target, state, fill, label, seen, actions };
+  tr._cells = { folder, folderName, folderPath, folderActions, target, state, fill, label, seen, actions };
   return tr;
 }
 
@@ -204,7 +214,8 @@ function updateRow(tr, r, folder, first) {
   tr.dataset.folder = r.folder_label || r.folder_id || '';
   setText(c.folderPath, first && folder && folder.path ? folder.path : '');
   tr.classList.toggle('grouped', !first);
-  renderRowActions(c.actions, first ? folder : null, tr, r);
+  renderFolderActions(c.folderActions, first ? folder : null, tr);
+  renderRowActions(c.actions, r);
   setText(c.target, r.target_name || '—');
   // The dot goes on an inner span rather than the cell itself. A cell has one
   // ::before, and on a narrow screen that is spent on the "State" label — with
@@ -364,6 +375,14 @@ function renderRows(st) {
   for (const [id, f] of folders) {
     const rows = byFolder.get(id);
     if (rows && rows.length) {
+      // BY NAME, NOT BY WHATEVER ORDER THE DAEMON HAPPENED TO SEND. A paused
+      // pair has no engine, so pausing one destination changed a folder's row
+      // order — and since a folder's own controls are drawn on the row that
+      // leads its group, they moved to a different destination the moment you
+      // paused something. Controls that move when you use them are their own
+      // bug. Sorted here, the order depends on the names alone and nothing
+      // shifts because a state changed.
+      rows.sort((a, b) => String(a.target_name || '').localeCompare(String(b.target_name || '')));
       ordered.push(...rows);
       continue;
     }
@@ -414,38 +433,37 @@ function renderRows(st) {
 // destination, not to the folder, because a folder with three destinations has
 // three separate mirrors that can each be behind on their own. So every row
 // gets one, and it goes first so the column lines up down a grouped block.
-function renderRowActions(cell, folder, tr, r) {
-  const want = folder && !readOnly ? folder.id : '';
-  if (cell.dataset.for !== want) {
-    cell.dataset.for = want;
-    cell.replaceChildren();
-    // EVERY CACHED BUTTON IN THIS CELL, or the ones that are missed come back
-    // as references to elements no longer on the page. That is what happened to
-    // pause: replaceChildren emptied the cell, _backNow was cleared so Back up
-    // now rebuilt itself, and _pause went on pointing at the removed button —
-    // so renderMirrorPause found a button it thought was fine and never put one
-    // back. Pausing and resuming rebuilds these cells, so the control vanished
-    // the moment it was used.
-    cell._backNow = null;
-    cell._pause = null;
-    if (want) {
-      const edit = iconButton('edit', 'Edit what this folder leaves out');
-      edit.onclick = () => openIgnoreEditor(tr, folder, lastModel);
-      cell.appendChild(edit);
-      // THE TRASH REMOVES THE TASK, NOT THE BACKUPS, and the label says so
-      // before it is pressed rather than only in the confirmation. A folder that
-      // stops being backed up moves to "No longer protected" with every copy it
-      // already has; deleting those copies is a separate, deliberate action
-      // there that makes you type the folder's name back.
-      const remove = iconButton('remove', folder.snapshotted
-        ? 'Stop backing up this folder — choose which kind. Every copy already made is kept.'
-        : 'Stop backing up this folder. Every copy already made is kept.', 'danger');
-      remove.onclick = () => (folder.snapshotted ? openStopChooser(tr, folder) : removeFolder(folder));
-      cell.appendChild(remove);
-    }
-  }
+// The controls that belong to ONE folder→destination pair: run it now, and
+// pause or resume it. The folder's own controls are in the folder cell — see
+// renderFolderActions.
+function renderRowActions(cell, r) {
   renderBackUpNow(cell, r);
   renderMirrorPause(cell, r);
+}
+
+// The controls that belong to the FOLDER, drawn beside its name and only on the
+// row that carries it. `folder` is null on a continuation row, which leaves the
+// area empty — a folder has one set of these however many destinations it has.
+function renderFolderActions(cell, folder, tr) {
+  const want = folder && !readOnly ? folder.id : '';
+  if (cell.dataset.for === want) return;
+  cell.dataset.for = want;
+  cell.replaceChildren();
+  if (!want) return;
+
+  const edit = iconButton('edit', 'Edit what this folder leaves out — applies wherever it is backed up.');
+  edit.onclick = () => openIgnoreEditor(tr, folder, lastModel);
+  cell.appendChild(edit);
+  // THE TRASH REMOVES THE TASK, NOT THE BACKUPS, and the label says so before it
+  // is pressed rather than only in the confirmation. A folder that stops being
+  // backed up moves to "No longer protected" with every copy it already has;
+  // deleting those copies is a separate, deliberate action there that makes you
+  // type the folder's name back.
+  const remove = iconButton('remove', folder.snapshotted
+    ? 'Stop backing up this folder, everywhere — choose which kind. Every copy already made is kept.'
+    : 'Stop backing up this folder, everywhere. Every copy already made is kept.', 'danger');
+  remove.onclick = () => (folder.snapshotted ? openStopChooser(tr, folder) : removeFolder(folder));
+  cell.appendChild(remove);
 }
 
 // Why this row's mirror cannot be run on demand, or '' when it can.
