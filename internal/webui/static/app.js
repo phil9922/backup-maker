@@ -419,7 +419,15 @@ function renderRowActions(cell, folder, tr, r) {
   if (cell.dataset.for !== want) {
     cell.dataset.for = want;
     cell.replaceChildren();
+    // EVERY CACHED BUTTON IN THIS CELL, or the ones that are missed come back
+    // as references to elements no longer on the page. That is what happened to
+    // pause: replaceChildren emptied the cell, _backNow was cleared so Back up
+    // now rebuilt itself, and _pause went on pointing at the removed button —
+    // so renderMirrorPause found a button it thought was fine and never put one
+    // back. Pausing and resuming rebuilds these cells, so the control vanished
+    // the moment it was used.
     cell._backNow = null;
+    cell._pause = null;
     if (want) {
       const edit = iconButton('edit', 'Edit what this folder leaves out');
       edit.onclick = () => openIgnoreEditor(tr, folder, lastModel);
@@ -528,6 +536,8 @@ function renderBackUpNow(cell, r) {
     return;
   }
   let btn = cell._backNow;
+  // Detached by a rebuild elsewhere: treat it as absent rather than as cached.
+  if (btn && !btn.isConnected) { cell._backNow = null; btn = null; }
   if (!btn) {
     btn = iconButton('run', 'Back up now');
     btn.onclick = () => backUpFolderNow(r, btn);
@@ -569,6 +579,7 @@ function renderMirrorPause(cell, r) {
   }
   const paused = !!r.paused;
   let btn = cell._pause;
+  if (btn && !btn.isConnected) { cell._pause = null; btn = null; }
   // The icon itself changes with the state, so the button is rebuilt when it
   // flips rather than being left showing the action it no longer offers.
   if (btn && btn.dataset.paused !== String(paused)) { btn.remove(); btn = null; }
