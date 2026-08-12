@@ -183,6 +183,29 @@ type Defaults struct {
 	// snapshots, never the live copy. 0 (the default) disables it entirely:
 	// deleting a user's backups is opt-in.
 	MinFreeGB int `toml:"min_free_gb"`
+	// VerifySpoolDir is where a finished snapshot is spooled while it is read
+	// back and decrypted, entry by entry, to prove it can be restored.
+	//
+	// WHY IT NEEDS A SETTING AT ALL. A zip is read through its central
+	// directory, which needs random access, so the archive is copied off the
+	// destination to a local temp file first — the WHOLE archive, tens of
+	// gigabytes of it. Unset, that lands wherever the operating system puts
+	// temporary files: $TMPDIR if there is one, and otherwise /tmp, which on a
+	// normal Linux install is the same disk as the home directory the snapshot
+	// was made FROM. A 57GB snapshot then fills the disk holding the originals,
+	// which is a far worse outcome than a backup that did not get checked.
+	//
+	// $TMPDIR IS NOT ENOUGH ON ITS OWN: the daemon runs from systemd, which
+	// starts it with no TMPDIR at all, so the environment variable can only be
+	// set by editing the unit file. This setting is the thing a person can
+	// change in the file they already edit.
+	//
+	// An absolute path to an existing, writable directory, and NEVER one inside
+	// a folder being backed up — a spool file there would be packed into the
+	// next snapshot and copied to every destination. A path that fails any of
+	// those is refused rather than quietly replaced with the default: see
+	// archive.resolveSpoolDir. Unset means today's behaviour.
+	VerifySpoolDir string `toml:"verify_spool_dir,omitempty"`
 }
 
 type Folder struct {

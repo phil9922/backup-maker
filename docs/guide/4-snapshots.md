@@ -45,6 +45,37 @@ subfolders within them.
   (Windows Explorer's built-in viewer can't read AES encryption).
 - Missed schedules (machine asleep/off) catch up when the daemon next runs.
 
+## Verification space
+
+Verifying that an archive is restorable means reading the whole thing back off
+the destination and decrypting every entry. A zip file cannot be read as a
+stream — it needs random access to its central directory — so the archive is
+copied to a temporary file on your computer first. A 57GB snapshot needs ~57GB
+free space on that disk.
+
+By default that temp file goes wherever your system puts temporary files —
+usually `/tmp`, which on many machines sits on the same disk as your home
+directory. That is the awkward case: verifying a snapshot of your home folder
+then needs a full-sized copy of it on the very disk it came from. Setting
+`TMPDIR` is not a reliable way round it, because the background service runs
+without one. Use `verify_spool_dir` in `config.toml` instead, pointing at
+another drive:
+
+```toml
+[defaults]
+verify_spool_dir = "/mnt/external-disk/spool"
+```
+
+The path must be absolute, existing, writable, and **never inside a folder
+being backed up** (a spool file there would be packed into the next snapshot
+and copied to every destination). An invalid path is refused rather than used
+anyway.
+
+If there is not enough room to verify, the snapshot is still written — backup-maker
+will not throw away hours of packing. Verification is skipped and reported as
+"written but not checked" on the dashboard and in `backup-maker status`. A
+backup that exists unverified is more valuable than no backup at all.
+
 ## Changing a schedule after it exists
 
 Every row under **Timed snapshots** on the dashboard carries three controls.

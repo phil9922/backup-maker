@@ -91,7 +91,13 @@ type health struct {
 	// whole feature exists to remove.
 	broken     map[string]bool
 	failedJobs map[string]bool
-	pending    map[string]bool // device id of a machine asking to pair
+	// unverifiedJobs names the jobs whose newest snapshot was written but never
+	// read back to prove it can be restored. Sticky and owed an all-clear like
+	// the two above, and separate from failedJobs because the two are different
+	// news: one says a backup did not happen, the other that one did and was not
+	// checked.
+	unverifiedJobs map[string]bool
+	pending        map[string]bool // device id of a machine asking to pair
 }
 
 func newAlerter(n notify.Notifier, log *slog.Logger, enabled bool) *alerter {
@@ -184,9 +190,10 @@ func (a *alerter) pending(m status.Model, now time.Time) []alert {
 	a.mu.Unlock()
 
 	cur := health{
-		broken:     make(map[string]bool, len(m.Targets)),
-		failedJobs: make(map[string]bool, len(m.Archives)),
-		pending:    make(map[string]bool, len(m.PendingSources)),
+		broken:         make(map[string]bool, len(m.Targets)),
+		failedJobs:     make(map[string]bool, len(m.Archives)),
+		unverifiedJobs: make(map[string]bool, len(m.Archives)),
+		pending:        make(map[string]bool, len(m.PendingSources)),
 	}
 
 	// Each category is read once, so a config reload mid-cycle cannot announce
@@ -248,6 +255,43 @@ func (a *alerter) pending(m status.Model, now time.Time) []alert {
 			})
 		default:
 			cur.failedJobs[j.Name] = wasFailed
+		}
+
+		// A SNAPSHOT THAT WAS WRITTEN AND NEVER CHECKED. Under the same category
+		// as a failed snapshot rather than a switch of its own — to the person
+		// being interrupted this is news about the same schedule, and every extra
+		// tri-state alert key is configuration surface kept for ever — but it is
+		// its own transition, so it is not swallowed by, and does not swallow, a
+		// failure of the same job.
+		//
+		// Critical, because both halves of it are: the backup has not been proved
+		// restorable, and the reason is a local disk with no room left on it,
+		// which is the disk the original files are on.
+		wasUnverified := prev != nil && prev.unverifiedJobs[j.Name]
+		switch {
+		case j.Unverified && !wasUnverified:
+			cur.unverifiedJobs[j.Name] = true
+			body := "The snapshot on " + j.Target +
+				" was written, but backup-maker could not read it back to prove it can be restored."
+			if j.UnverifiedReason != "" {
+				body += " " + j.UnverifiedReason
+			}
+			out = append(out, alert{
+				urgency: notify.Critical,
+				title:   "Snapshot " + j.Name + " was not checked",
+				body:    body,
+			})
+		case wasUnverified && !j.Unverified && j.State == "ok":
+			// The all-clear. "ok" and nothing else, for the same reason the
+			// failure's all-clear demands it: a later run has to have made a
+			// snapshot AND checked it before this is good news.
+			out = append(out, alert{
+				urgency: notify.Normal,
+				title:   "Snapshot " + j.Name + " was checked",
+				body:    "A later run of this scheduled snapshot was read back in full. " + j.Target + " has a snapshot proved to open again.",
+			})
+		default:
+			cur.unverifiedJobs[j.Name] = wasUnverified
 		}
 	}
 

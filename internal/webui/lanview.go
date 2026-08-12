@@ -191,8 +191,12 @@ func RedactForNetwork(v any) any {
 		m["pending_source_count"] = len(pend)
 	}
 	// An archive's detail line quotes the failing entry by folder and filename
-	// when verification fails.
-	stripEach(m["archives"], "detail")
+	// when verification fails. unverified_reason is the same kind of thing from
+	// the other direction: it names the local directory a snapshot would have
+	// been spooled into to check it, and how much room is left on that disk. The
+	// unverified FLAG stays — "this snapshot was not checked" is a health fact,
+	// like space_unknown, and somebody watching from another room is owed it.
+	stripEach(m["archives"], "detail", "unverified_reason")
 	// Which exact build this is tells whoever reads it which known bugs apply,
 	// and this view has no password. The owner can see it on the dashboard.
 	delete(m, "version")

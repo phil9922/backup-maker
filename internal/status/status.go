@@ -298,6 +298,22 @@ type ArchiveRow struct {
 	// for ever, so unlike a mirror — which fixes such a file on its next pass —
 	// this one keeps the bad copy until it is deleted.
 	Unstable []string `json:"unstable,omitempty"`
+	// Unverified marks the last snapshot as written but NOT proved restorable:
+	// it exists on the destination and nothing is known to be wrong with it, and
+	// the read-back that normally proves it can be opened again did not run.
+	//
+	// A FLAG SEPARATE FROM State, because the state is honestly "ok" — a
+	// snapshot was written on schedule — and this is the part of the promise
+	// that was not kept. A backup that quietly did less than it claims is the
+	// thing worth telling somebody about, so the daemon alerts on it too.
+	//
+	// The bool survives on the read-only network view and UnverifiedReason does
+	// not: the reason names the local directory the check would have spooled
+	// into and how full that disk is, which is the same reconnaissance
+	// RedactForNetwork strips from every destination. "This snapshot was not
+	// checked" is a health fact somebody in another room can act on.
+	Unverified       bool   `json:"unverified,omitempty"`
+	UnverifiedReason string `json:"unverified_reason,omitempty"`
 	// Phase is "packing" or "verifying". Verification re-reads the whole
 	// archive back off the destination, which for a multi-gigabyte snapshot is
 	// minutes of work that looked like a hang: the bar was full and the word
@@ -1144,6 +1160,19 @@ func (col *Collector) Collect() Model {
 			// undiscoverable until the day somebody tries to open it.
 			if hasResult {
 				row.Unstable = res.Unstable
+			}
+			// Same rule, for the same reason: a snapshot that was written but
+			// never read back is not "failed" — it exists, and it is very
+			// probably fine — but the one thing this program promises about it
+			// was not done, and nothing else on the page would ever say so.
+			// Detail carries it as well, so every surface that already renders a
+			// schedule's detail line says it without being taught to.
+			if hasResult && res.Err == "" && res.Unverified != "" {
+				row.Unverified = true
+				row.UnverifiedReason = res.Unverified
+				if row.Detail == "" {
+					row.Detail = res.Unverified
+				}
 			}
 			m.Archives = append(m.Archives, row)
 		}

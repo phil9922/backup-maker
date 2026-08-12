@@ -88,7 +88,11 @@ var statusCmd = &cobra.Command{
 			tw := newTable("SCHEDULED BACKUP", "TARGET", "EVERY", "STATE", "LAST RUN")
 			for _, a := range m.Archives {
 				mark := ""
-				if a.State == "failed" || a.State == "due" {
+				// A snapshot that was written but never read back gets the same
+				// mark as a failure, because the column beside it says "backed
+				// up" — truthfully — and that is exactly the reassurance this
+				// one run has not earned.
+				if a.State == "failed" || a.State == "due" || a.Unverified {
 					mark = "  !!"
 				}
 				tw.add(a.Name, a.Target, a.Every, archiveState(a)+mark, humanTime(a.LastRun))

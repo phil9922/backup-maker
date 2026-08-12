@@ -1610,6 +1610,31 @@ function renderArchives(st) {
       actions.appendChild(remove);
     }
     tr.appendChild(actions);
+    // WRITTEN BUT NOT PROVED RESTORABLE, said on the row for the same reason
+    // the torn-file warning below is: a snapshot that did less than it usually
+    // does must not look identical to one that did it all. Verification
+    // re-reads the whole archive back off the destination and decrypts every
+    // entry, which needs as much free space on THIS computer as the archive
+    // takes; when there was not room it is skipped so the backup still happens,
+    // and this is the only thing that says so.
+    if (a.unverified) {
+      const warn = el('tr', 'ignore-row');
+      const cell = el('td');
+      cell.colSpan = 8;
+      cell.appendChild(el('span', 'busy',
+        'This snapshot was written but not checked, so nothing has proved it opens with your password.'));
+      if (a.unverified_reason) {
+        cell.appendChild(el('div', 'muted small', a.unverified_reason));
+      }
+      cell.appendChild(el('div', 'muted small',
+        'The zip is on the destination and is very probably fine. The next run checks itself again ' +
+        'once there is room — free some space on this computer, or set a spool directory on another disk.'));
+      warn.appendChild(cell);
+      body.appendChild(tr);
+      body.appendChild(warn);
+      if (a.detail) tr.title = a.detail;
+      continue;
+    }
     // Files that were being written while the snapshot read them. Said on the
     // row rather than buried in a tooltip, because a zip is sealed for ever:
     // unlike the mirror, which recopies such a file on its next pass, this one

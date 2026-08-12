@@ -8,6 +8,7 @@ package archive
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -76,7 +77,21 @@ type Result struct {
 	// and it will not load. Naming it here is the difference between a backup
 	// that is imperfect and a backup that is imperfect AND silent.
 	Unstable []string `json:"unstable,omitempty"`
-	Err      string   `json:"err,omitempty"`
+	// Unverified is why this snapshot was written WITHOUT being proved
+	// restorable, and is empty on a run that was checked (and on one that
+	// failed, which wrote nothing to check).
+	//
+	// VERIFICATION IS THE PROMISE, so its absence has to travel with the result.
+	// A finished snapshot is normally read back off the destination and every
+	// entry decrypted, which is what lets this program say the backup can
+	// actually be restored. That read spools the whole archive to a local temp
+	// file, and when there is not room for it the snapshot is still written —
+	// tens of gigabytes of somebody's files are worth far more than the check —
+	// but a run that quietly did less than it claims is exactly the thing this
+	// project alerts about. status turns this into a flag on the schedule's row,
+	// and the daemon into a notification.
+	Unverified string `json:"unverified,omitempty"`
+	Err        string `json:"err,omitempty"`
 }
 
 // maxUnstableNamed bounds the list: a folder where everything is being
@@ -132,9 +147,20 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 	// stranded temp was holding is space this run can have. A snapshot that will
 	// not fit deletes this job's own oldest snapshots until it does, and if it
 	// still will not fit the run stops HERE, before a single byte is written.
-	if err := ensureRoomFor(b, cfg, job, folders, dir, log); err != nil {
+	zips := jobZips(b, dir)
+	need := uint64(estimateSnapshotBytes(cfg, job, folders, zips))
+	if err := ensureRoomFor(b, cfg, job, zips, need, log); err != nil {
 		return fail(err)
 	}
+
+	// AND WHETHER THERE IS ROOM TO CHECK IT AFTERWARDS — asked here, before
+	// packing, and not at the point it is needed. Verification spools the whole
+	// archive to a LOCAL temp file, and packing 57GB over wifi takes two hours:
+	// discovering at the end that the spool will not fit throws all of that away,
+	// and doing it anyway fills the disk the source folders live on. A shortfall
+	// does not fail the run — the snapshot is written and kept, and says on its
+	// Result that it was not checked.
+	spoolDir, unverified := planSpool(cfg, job, need, log)
 
 	w, err := b.OpenWrite(tmp)
 	if err != nil {
@@ -163,16 +189,30 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 		_ = b.Remove(tmp)
 		return fail(err)
 	}
-	if err := verifyZip(b, tmp, password, files, func(read int64) {
-		if report != nil {
-			report(Progress{
-				Phase: PhaseVerifying, DoneFiles: files, TotalFiles: files,
-				DoneBytes: read, TotalBytes: stored.n,
-			})
+	if unverified == "" {
+		err := verifyZip(b, tmp, password, files, spoolDir, func(read int64) {
+			if report != nil {
+				report(Progress{
+					Phase: PhaseVerifying, DoneFiles: files, TotalFiles: files,
+					DoneBytes: read, TotalBytes: stored.n,
+				})
+			}
+		})
+		// THE LOCAL DISK RUNNING SHORT IS NOT A FAILED SNAPSHOT. The zip on the
+		// destination is complete; only the reading back was abandoned, and it was
+		// abandoned precisely so the disk holding the source folders is not filled.
+		// Throwing the archive away here would destroy hours of work to punish a
+		// shortage somewhere else entirely.
+		var full *spoolFullError
+		switch {
+		case errors.As(err, &full):
+			unverified = "the snapshot was written but not checked: " + full.Error()
+			log.Warn("this snapshot was written but NOT checked: the disk it was being read back onto was running out of room",
+				"archive", job.Name, "spool_dir", full.dir, "free_bytes", full.free)
+		case err != nil:
+			_ = b.Remove(tmp)
+			return fail(fmt.Errorf("verification: %w", err))
 		}
-	}); err != nil {
-		_ = b.Remove(tmp)
-		return fail(fmt.Errorf("verification: %w", err))
 	}
 	if err := b.Rename(tmp, final); err != nil {
 		_ = b.Remove(tmp)
@@ -181,8 +221,17 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 
 	res.File, res.Files, res.Bytes, res.StoredBytes = final, files, bytes, stored.n
 	res.Unstable = unstable
+	res.Unverified = unverified
 	log.Info("archive written", "archive", job.Name, "file", final,
-		"files", files, "bytes", bytes, "stored_bytes", stored.n)
+		"files", files, "bytes", bytes, "stored_bytes", stored.n,
+		"checked", unverified == "")
+	if unverified != "" {
+		// Said again, at the end, next to the line that says the snapshot exists:
+		// the warning that decided this was logged before packing began, which on
+		// a real snapshot is hours earlier and thousands of lines away.
+		log.Warn("this snapshot has NOT been proved restorable", "archive", job.Name,
+			"file", final, "why", unverified)
+	}
 	if unstableCount > 0 {
 		log.Warn("some files were being written while this snapshot read them, so their copies may be incomplete",
 			"archive", job.Name, "count", unstableCount, "files", unstable)
@@ -386,16 +435,25 @@ func writeZip(w io.Writer, cfg *config.Config, job config.Archive, folders []con
 // temp file so memory use stays flat), checks the entry count, and fully
 // decrypts every entry — proof the backup is restorable with the password
 // before we keep it.
-func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int, onRead func(int64)) error {
+//
+// spoolDir is where that local copy goes, chosen by planSpool before packing
+// started and never blank in a real run. THE SPOOL IS THE WHOLE ARCHIVE, so the
+// disk under it is measured as it is written and the copy is abandoned rather
+// than allowed to fill it — a *spoolFullError, which the caller treats as an
+// unchecked snapshot rather than a failed one.
+func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int, spoolDir string, onRead func(int64)) error {
 	src, err := b.OpenRead(relPath)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	spool, err := os.CreateTemp("", "backup-maker-verify-*.zip")
+	spool, err := os.CreateTemp(spoolDir, "backup-maker-verify-*.zip")
 	if err != nil {
 		return err
 	}
+	// Removed on every path out, including the one where the disk ran short:
+	// leaving tens of gigabytes of abandoned spool behind on a disk that is
+	// already running out is the failure this is guarding against.
 	defer os.Remove(spool.Name())
 	defer spool.Close()
 	// Same reason the write side is buffered: reading back over SMB in the
@@ -406,7 +464,8 @@ func verifyZip(b localmirror.Backend, relPath, password string, wantFiles int, o
 	if onRead != nil {
 		r = &countingReader{r: src, report: onRead}
 	}
-	size, err := io.CopyBuffer(spool, r, make([]byte, writeBufferSize))
+	size, err := io.CopyBuffer(newSpoolGuard(spool, filepath.Dir(spool.Name()), minFreeFloorBytes),
+		r, make([]byte, writeBufferSize))
 	if err != nil {
 		return err
 	}
