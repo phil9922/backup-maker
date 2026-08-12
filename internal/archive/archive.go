@@ -128,6 +128,14 @@ func Run(b localmirror.Backend, cfg *config.Config, job config.Archive, password
 	// worst possible place to be spending the space.
 	sweepStrandedTemps(b, dir, tmp, log)
 
+	// AND ONLY THEN ASK WHETHER IT FITS — after the sweep, because the space a
+	// stranded temp was holding is space this run can have. A snapshot that will
+	// not fit deletes this job's own oldest snapshots until it does, and if it
+	// still will not fit the run stops HERE, before a single byte is written.
+	if err := ensureRoomFor(b, cfg, job, folders, dir, log); err != nil {
+		return fail(err)
+	}
+
 	w, err := b.OpenWrite(tmp)
 	if err != nil {
 		return fail(err)
