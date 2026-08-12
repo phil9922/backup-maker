@@ -34,11 +34,14 @@ TREE = {
     f"{HOME}/notes": [],
 }
 
+# Home alone, matching browse.Roots(). It used to list Documents, Desktop and
+# Pictures beside it, and so did the product — until the picker could choose
+# several folders and offering a parent next to its children became a way to
+# back the same files up twice. This mock is what the shipped screenshots are
+# taken from, so a stale copy of the old list here would publish a picker
+# nobody has.
 ROOTS = [
     {"name": "Home", "path": HOME},
-    {"name": "Documents", "path": f"{HOME}/Documents"},
-    {"name": "Desktop", "path": f"{HOME}/Desktop"},
-    {"name": "Pictures", "path": f"{HOME}/Pictures"},
 ]
 
 MACHINES = [

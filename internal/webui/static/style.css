@@ -792,6 +792,24 @@ button.link:active:not(:disabled) { transform: none; box-shadow: none; }
   border-color: color-mix(in srgb, var(--ok) 88%, white);
 }
 
+/* PROTECTED BECAUSE SOMETHING ABOVE IT IS. Still green — the answer to "is this
+   backed up?" should not change colour depending on which row you ask — but
+   dimmer and inert, because it is not a choice of its own.
+   Spelled out rather than left to button:disabled, which drops to 45% opacity
+   and, on hover, resets the background to the default face: near-black ink on a
+   near-black button, which is the exact fault the wizard's finish button
+   shipped with. */
+.picker-list .pick-use.pick-chosen:disabled,
+#pick-here.pick-chosen:disabled,
+.picker-list .pick-use.pick-chosen:disabled:hover,
+#pick-here.pick-chosen:disabled:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ok) 50%, #10141a);
+  border-color: color-mix(in srgb, var(--ok) 50%, #10141a);
+  color: #eef3f8;
+  cursor: default;
+}
+
 /* .chosen is a flex ROW, written when this said one line — "Protecting: /path"
    and a button. Holding a list of folders, that row put the heading, the list
    and Deselect all side by side across the step. It stacks here instead; the

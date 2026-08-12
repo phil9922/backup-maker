@@ -131,7 +131,24 @@ func Dirs(path string) (Listing, error) {
 	if err != nil {
 		return Listing{}, err
 	}
+	// HIDDEN FOLDERS SORT LAST, AND ARE STILL LISTED.
+	//
+	// Alphabetically a dot sorts before every letter, so opening a home
+	// directory answered with .cache, .config, .cursor and a dozen more before
+	// Desktop or Documents — about twenty rows of things nobody came here for,
+	// in front of the two everybody does. That only became the first thing the
+	// picker shows when Roots stopped listing Documents and Desktop beside Home.
+	//
+	// SORTED, NOT HIDDEN. This is a backup tool: ~/.ssh, ~/.config and ~/.gnupg
+	// are exactly the sort of thing somebody means to protect, and a picker that
+	// leaves them out by default would let a person set up a backup they believe
+	// is complete and is not. Ordering costs them nothing; concealment could
+	// cost them the files.
 	sort.Slice(names, func(i, j int) bool {
+		hi, hj := strings.HasPrefix(names[i], "."), strings.HasPrefix(names[j], ".")
+		if hi != hj {
+			return hj
+		}
 		return strings.ToLower(names[i]) < strings.ToLower(names[j])
 	})
 
@@ -177,19 +194,48 @@ func escapes(parent, child string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// Roots are the sensible starting points for the picker: the home directory
-// first, then the well-known folders inside it that actually exist.
+// Roots are the starting points for the picker: the home directory, and nothing
+// that lives inside it.
+//
+// IT USED TO LIST Documents, Desktop, Pictures, Music AND Videos BESIDE Home,
+// as shortcuts. They are not shortcuts once the picker can choose more than one
+// folder — they are a parent and five of its children presented as a flat list
+// of equals, and the step's question is which folders to protect. Choosing Home
+// and Documents there means copying those files twice to every destination, for
+// ever, and packing two copies of each into every snapshot. The wizard now
+// refuses that pairing, but a list that invites it and is then refused is a
+// worse answer than a list that never offered it: the folders inside home are
+// reached by opening home, which is what a folder picker is for.
+//
+// NO ROOT MAY CONTAIN ANOTHER, which is the rule rather than the current list —
+// so a mount point added here later cannot quietly recreate the same trap.
 func Roots() []Entry {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	roots := []Entry{{Name: "Home", Path: home}}
-	for _, name := range []string{"Documents", "Desktop", "Pictures", "Music", "Videos"} {
-		p := filepath.Join(home, name)
-		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-			roots = append(roots, Entry{Name: name, Path: p})
+	return withoutNested([]Entry{{Name: "Home", Path: home}})
+}
+
+// withoutNested drops any entry that sits inside another one.
+func withoutNested(in []Entry) []Entry {
+	out := make([]Entry, 0, len(in))
+	for i, e := range in {
+		nested := false
+		for j, other := range in {
+			if i == j {
+				continue
+			}
+			rel, err := filepath.Rel(other.Path, e.Path)
+			if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			nested = true
+			break
+		}
+		if !nested {
+			out = append(out, e)
 		}
 	}
-	return roots
+	return out
 }

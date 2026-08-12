@@ -69,7 +69,12 @@ def into_desktop(page):
     picker has something to show: a path bar, the "Protect this folder" action for
     the directory you are standing in, and entries with their own buttons.
     """
-    page.click("#wizard button:text-is('Desktop')")
+    # Through Home, because the roots list is Home alone now: the folders inside
+    # it are reached by opening it, which is the change this harness has to show
+    # rather than paper over.
+    page.click("#wizard button:text-is('Home')")
+    settle(page)
+    page.click("#wizard button:text-is('📁 Desktop')")
     settle(page)
 
 

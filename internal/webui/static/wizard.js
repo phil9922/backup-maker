@@ -63,6 +63,16 @@ const Wizard = (() => {
   function isPicked(path) {
     return picked.has(trimSlash(path));
   }
+
+  // The picked folder that already contains this one, or "" if none does.
+  function coveredBy(path) {
+    const want = trimSlash(path);
+    if (!want) return '';
+    for (const { path: have } of picked.values()) {
+      if (contains(trimSlash(have), want)) return trimSlash(have);
+    }
+    return '';
+  }
   const chosen = new Map();
 
   function mode() {
@@ -270,13 +280,25 @@ const Wizard = (() => {
   function syncPickButtons() {
     const mark = (btn, offLabel) => {
       if (!btn) return;
-      const on = isPicked(btn.dataset.path || '');
-      btn.classList.toggle('pick-chosen', on);
-      btn.textContent = on ? 'Protected' : offLabel;
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-      btn.title = on
-        ? 'Picked. Press again to leave it out. You can pick as many folders as you like.'
-        : 'Back up ' + (btn.dataset.path || 'this folder');
+      const path = btn.dataset.path || '';
+      const on = isPicked(path);
+      // COVERED BY A FOLDER ALREADY PICKED, which is protected just as surely
+      // as the one that was clicked: everything inside a backed-up folder is
+      // backed up. It read "Protect this" — inviting a press that was then
+      // refused — while sitting inside a folder drawn green two rows above.
+      // Green, so the answer to "is this protected?" is the same colour
+      // wherever it is asked; disabled, because it is not a choice of its own
+      // and the way to change it is to unpick the folder that covers it.
+      const cover = on ? '' : coveredBy(path);
+      btn.classList.toggle('pick-chosen', on || !!cover);
+      btn.disabled = !!cover;
+      btn.textContent = (on || cover) ? 'Protected' : offLabel;
+      btn.setAttribute('aria-pressed', on || cover ? 'true' : 'false');
+      btn.title = cover
+        ? `Already protected: it is inside ${cover}, which you have picked. Everything in there is backed up.`
+        : on
+          ? 'Picked. Press again to leave it out. You can pick as many folders as you like.'
+          : 'Back up ' + (path || 'this folder');
     };
     for (const b of document.querySelectorAll('#pick-list .pick-use')) mark(b, 'Protect this');
     mark($('pick-here'), 'Protect this folder');
