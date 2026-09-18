@@ -208,7 +208,9 @@ is never allowed to hide behind a collapsed section.
   described below. Switching it on starts the listener immediately and shows
   you the address; switching it off stops it a second later. If it is on but
   cannot listen — the port already taken, no network address — the panel says
-  which, rather than guessing.
+  which, rather than guessing, and keeps trying every 15 seconds. That covers
+  a laptop that boots before its wifi has an address: the view comes up on
+  its own once the network does.
 
   Once it is on, choose **who can open it**:
 

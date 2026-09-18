@@ -2629,7 +2629,8 @@ function renderSettings(st) {
     // reported as "no network address was found" — plainly untrue, and it sent
     // whoever read it looking at the wrong thing entirely.
     urlLine.textContent = 'Switched on, but not listening: ' +
-      (st.settings.lan_view_error || 'the reason was not reported.');
+      (st.settings.lan_view_error || 'the reason was not reported') +
+      '. It is tried again every 15 seconds, so this is current.';
     urlLine.className = 'small bad';
     urlLine.hidden = false;
   } else {

@@ -135,6 +135,10 @@ type daemon struct {
 	// than left in the log, because a panel that invents its own explanation
 	// for a switch that did not take is worse than one that says nothing.
 	lanErr string
+	// lanPrimary finds the address to bind the view to. nil means
+	// lanaddr.Primary; tests substitute one whose answer changes over time,
+	// because the whole point of retryLANView is that the answer does.
+	lanPrimary func() (lanaddr.Interface, error)
 
 	// newBackend opens a destination, and exists only so tests can substitute
 	// one that blocks. nil means the real one — the same "nil is the real
@@ -413,6 +417,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	d.lanMu.Unlock()
 	d.applyLANView(cfg)
 	defer d.stopLANView()
+	go d.retryLANView(ctx)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve() }()
@@ -906,16 +911,18 @@ func (d *daemon) applyLANView(cfg *config.Config) {
 	if d.lanView != nil {
 		return // already running
 	}
-	iface, err := lanaddr.Primary()
+	iface, err := d.primaryLAN()
 	if err != nil {
-		d.lanErr = "no network address was found on this machine"
-		d.log.Warn("network view requested but no LAN address found", "err", err)
+		// Logged once per distinct reason, not once per retry: a laptop
+		// booted away from any network would otherwise say the same thing
+		// every fifteen seconds for as long as the lid was open.
+		d.setLANProblem("no network address was found on this machine",
+			"network view requested but no LAN address found", err)
 		return
 	}
 	view, err := d.srv.StartLANView(iface.IP, cfg.LANViewPort())
 	if err != nil {
-		d.lanErr = err.Error()
-		d.log.Error("could not start the network view", "err", err)
+		d.setLANProblem(err.Error(), "could not start the network view", err)
 		return
 	}
 	d.lanErr = ""
@@ -926,6 +933,58 @@ func (d *daemon) applyLANView(cfg *config.Config) {
 	if !iface.Wired {
 		d.log.Warn("the network view is on wifi; a wired connection is steadier for a machine other devices watch")
 	}
+}
+
+// setLANProblem records why the view is not up, and logs it if it is news.
+// Called with d.lanMu held.
+func (d *daemon) setLANProblem(reason, msg string, err error) {
+	if d.lanErr != reason {
+		d.log.Warn(msg, "err", err)
+	}
+	d.lanErr = reason
+}
+
+func (d *daemon) primaryLAN() (lanaddr.Interface, error) {
+	if d.lanPrimary != nil {
+		return d.lanPrimary()
+	}
+	return lanaddr.Primary()
+}
+
+// lanViewRetryEvery is how often a switched-on view that failed to start is
+// tried again. Short enough that wifi coming up after boot is noticed before
+// anyone reaches for a phone; long enough to be free.
+const lanViewRetryEvery = 15 * time.Second
+
+// retryLANView keeps trying to bring up a view that is switched on but not
+// listening, until it is.
+//
+// It exists because the first attempt happens at boot, and on a laptop that is
+// usually before wifi has an address. Without this the view stayed down until
+// somebody edited a setting — and the dashboard kept reporting the reason from
+// boot as if it were still true, which on 2026-09-18 it had not been for two
+// days. A switch that says ON has to keep meaning it.
+func (d *daemon) retryLANView(ctx context.Context) {
+	ticker := time.NewTicker(lanViewRetryEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.retryLANViewOnce()
+		}
+	}
+}
+
+// retryLANViewOnce is one tick of retryLANView: a no-op unless the view is
+// wanted and not up. applyLANView is idempotent, so the only thing gained by
+// checking first is not taking lanMu every tick for a view that is fine.
+func (d *daemon) retryLANViewOnce() {
+	if d.lanViewProblem() == "" {
+		return
+	}
+	d.applyLANView(d.currentCfg())
 }
 
 func (d *daemon) stopLANView() {
