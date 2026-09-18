@@ -173,6 +173,15 @@ is never allowed to hide behind a collapsed section.
     backup-maker says so and says that a token is what is missing, rather than
     reporting a bare `403`.
 
+    **"The ntfy server is rate-limiting this address"** is ntfy.sh's `429`,
+    and it is almost always a **VPN**: ntfy.sh limits anonymous publishing per
+    source address, and a VPN exit address is shared with strangers who may
+    have used the allowance up. backup-maker waits once for as long as the
+    server asks (up to 30 seconds) and tries again, then reports it. The two
+    fixes that work are taking backup-maker out of the VPN (split tunnelling),
+    or an access token, so the limit applies to your account instead of the
+    address.
+
     Self-hosted works, including behind a reverse proxy on a sub-path —
     `https://example.com/ntfy/alerts` publishes to `https://example.com/ntfy/`,
     not to the domain root. Credentials in the address

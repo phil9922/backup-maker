@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Ntfy publishes alerts to an ntfy topic — ntfy.sh, or a self-hosted server —
@@ -54,7 +56,16 @@ type Ntfy struct {
 	// Client is the HTTP client to use; nil means a private one with the
 	// timeout above. Exists so tests can point at a recorder.
 	Client *http.Client
+	// Wait pauses for the server's Retry-After before the one retry; nil means
+	// a real, cancellable sleep. Exists so tests need not actually wait.
+	Wait func(ctx context.Context, d time.Duration) error
 }
+
+// ntfyMaxRetryWait bounds how long a rate-limited publish will wait for the
+// server's Retry-After before giving up instead. An alert is worth a short
+// pause; it is not worth holding a delivery goroutine — or the dashboard's
+// Test button — open for an hour.
+const ntfyMaxRetryWait = 30 * time.Second
 
 // ntfyMessage is ntfy's JSON publish format.
 //
@@ -116,11 +127,35 @@ func (n Ntfy) Notify(ctx context.Context, u Urgency, title, body string) error {
 	if err != nil {
 		return err
 	}
+	status, retryAfter, err := n.post(ctx, base, raw)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusTooManyRequests && retryAfter > 0 && retryAfter <= ntfyMaxRetryWait {
+		// ONE RETRY, ONLY WHEN THE SERVER SAID HOW LONG. ntfy.sh limits
+		// anonymous publishing per source address, and on a laptop whose
+		// traffic leaves through a VPN that address is shared with strangers,
+		// so a first 429 is often somebody else's doing and clears in seconds.
+		// Waiting once, for exactly what it asked, is the difference between
+		// an alert that arrives late and one that never arrives.
+		if err := n.wait(ctx, retryAfter); err != nil {
+			return fmt.Errorf("the ntfy server is rate-limiting this address; gave up waiting to retry: %w", err)
+		}
+		status, retryAfter, err = n.post(ctx, base, raw)
+		if err != nil {
+			return err
+		}
+	}
+	return ntfyStatusError(status, retryAfter)
+}
+
+// post publishes one message and reports the status and any Retry-After.
+func (n Ntfy) post(ctx context.Context, base *url.URL, raw []byte) (int, time.Duration, error) {
 	ctx, cancel := context.WithTimeout(ctx, httpNotifyTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base.String(), bytes.NewReader(raw))
 	if err != nil {
-		return fmt.Errorf("the ntfy address is not usable: %w", err)
+		return 0, 0, fmt.Errorf("the ntfy address is not usable: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "backup-maker")
@@ -141,20 +176,72 @@ func (n Ntfy) Notify(ctx context.Context, u Urgency, title, body string) error {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("could not reach the ntfy server: %w", err)
+		return 0, 0, fmt.Errorf("could not reach the ntfy server: %w", err)
 	}
 	defer resp.Body.Close()
 	// Drain a little so the connection can be reused; ignore what it said.
 	_, _ = resp.Body.Read(make([]byte, 512))
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+	return resp.StatusCode, retryAfter(resp.Header.Get("Retry-After")), nil
+}
+
+// ntfyStatusError turns a final status into the sentence the dashboard shows.
+func ntfyStatusError(status int, retryAfter time.Duration) error {
+	switch {
+	case status >= 200 && status < 300:
+		return nil
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		// Named rather than left as a bare status, because it is the commonest
 		// way this method is misconfigured and the fix is a specific one.
-		return fmt.Errorf("the ntfy server refused this topic (%s) — a protected topic needs an access token", resp.Status)
+		return fmt.Errorf("the ntfy server refused this topic (%d %s) — a protected topic needs an access token",
+			status, http.StatusText(status))
+	case status == http.StatusTooManyRequests:
+		// Also named, because the bare status sent somebody looking at their
+		// own settings for a fault that was in the shared address they were
+		// publishing from. The two remedies are the two that actually work.
+		msg := "the ntfy server is rate-limiting this address (429 Too Many Requests)"
+		if retryAfter > ntfyMaxRetryWait {
+			msg += fmt.Sprintf(", and asked for a %s wait", retryAfter.Round(time.Second))
+		}
+		return fmt.Errorf("%s — usual when this computer's traffic leaves through a VPN, whose exit address is shared; "+
+			"take backup-maker out of the VPN, or use an ntfy access token so the limit applies to your account instead", msg)
+	default:
+		return fmt.Errorf("the ntfy server answered %d %s", status, http.StatusText(status))
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("the ntfy server answered %s", resp.Status)
+}
+
+func (n Ntfy) wait(ctx context.Context, d time.Duration) error {
+	if n.Wait != nil {
+		return n.Wait(ctx, d)
 	}
-	return nil
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// retryAfter reads a Retry-After header, in either of its two forms. 0 means
+// absent or unreadable — never a guess, since the caller waits on it.
+func retryAfter(h string) time.Duration {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(h); err == nil {
+		if secs < 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if at, err := http.ParseTime(h); err == nil {
+		if d := time.Until(at); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // endpoint splits the topic URL into the server to post to and the topic to

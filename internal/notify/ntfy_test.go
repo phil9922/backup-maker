@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ntfyRecord is what a fake ntfy server saw: the path posted to, the decoded
@@ -236,5 +237,105 @@ func TestNtfyCarriesBasicAuthFromTheAddress(t *testing.T) {
 	}
 	if strings.Contains(seenURL, "hunter2") {
 		t.Errorf("the password was left in the request line: %q", seenURL)
+	}
+}
+
+// sequencedNtfy answers each request with the next status in turn, sending
+// Retry-After on every 429, and records how long the sender chose to wait.
+func sequencedNtfy(t *testing.T, retryAfter string, statuses ...int) (*Ntfy, *int, *[]time.Duration) {
+	t.Helper()
+	calls := 0
+	var waits []time.Duration
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		st := statuses[min(calls, len(statuses)-1)]
+		calls++
+		if st == http.StatusTooManyRequests && retryAfter != "" {
+			w.Header().Set("Retry-After", retryAfter)
+		}
+		w.WriteHeader(st)
+	}))
+	t.Cleanup(srv.Close)
+	n := &Ntfy{
+		TopicURL: srv.URL + "/backups-abc123",
+		Client:   srv.Client(),
+		Wait: func(_ context.Context, d time.Duration) error {
+			waits = append(waits, d)
+			return nil
+		},
+	}
+	return n, &calls, &waits
+}
+
+// THE SHARED-ADDRESS CASE. On 2026-09-18 a real alert and a Test both got 429
+// from ntfy.sh because the laptop's traffic left through a VPN exit that
+// strangers had already used up. The server says how long to wait; waiting
+// once, for exactly that, turns a lost alert into a late one.
+func TestNtfyRetriesOnceAfterTheServerAsksItToWait(t *testing.T) {
+	n, calls, waits := sequencedNtfy(t, "3", http.StatusTooManyRequests, http.StatusOK)
+	if err := n.Notify(context.Background(), Critical, "card is stale", ""); err != nil {
+		t.Fatalf("a publish that succeeded on retry was reported as failed: %v", err)
+	}
+	if *calls != 2 {
+		t.Errorf("made %d requests, want 2 (one retry)", *calls)
+	}
+	if len(*waits) != 1 || (*waits)[0] != 3*time.Second {
+		t.Errorf("waited %v, want exactly the server's 3s", *waits)
+	}
+}
+
+func TestNtfyNamesRateLimitingAndItsUsualCauseRatherThanTheBareStatus(t *testing.T) {
+	n, calls, _ := sequencedNtfy(t, "2", http.StatusTooManyRequests)
+	err := n.Notify(context.Background(), Normal, "card is stale", "")
+	if err == nil {
+		t.Fatal("two 429s in a row were reported as delivered")
+	}
+	if *calls != 2 {
+		t.Errorf("made %d requests, want 2: one retry and no more", *calls)
+	}
+	for _, want := range []string{"rate-limiting", "VPN", "access token"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// The server may ask for an hour. A delivery goroutine — or the dashboard's
+// Test button — is not held open for that: the wait is reported instead.
+func TestNtfyDoesNotWaitLongerThanAnAlertIsWorth(t *testing.T) {
+	n, calls, waits := sequencedNtfy(t, "3600", http.StatusTooManyRequests, http.StatusOK)
+	err := n.Notify(context.Background(), Normal, "card is stale", "")
+	if err == nil {
+		t.Fatal("reported delivered without ever retrying")
+	}
+	if *calls != 1 || len(*waits) != 0 {
+		t.Errorf("made %d requests and waited %v; want 1 request and no wait", *calls, *waits)
+	}
+	if !strings.Contains(err.Error(), "1h0m0s wait") {
+		t.Errorf("error %q does not say how long the server asked for", err)
+	}
+}
+
+// Without a Retry-After there is nothing honest to wait for, so no retry.
+func TestNtfyDoesNotGuessAWaitTheServerDidNotGive(t *testing.T) {
+	n, calls, waits := sequencedNtfy(t, "", http.StatusTooManyRequests, http.StatusOK)
+	if err := n.Notify(context.Background(), Normal, "card is stale", ""); err == nil {
+		t.Fatal("reported delivered without ever retrying")
+	}
+	if *calls != 1 || len(*waits) != 0 {
+		t.Errorf("made %d requests and waited %v; want 1 request and no wait", *calls, *waits)
+	}
+}
+
+func TestRetryAfterReadsBothForms(t *testing.T) {
+	if d := retryAfter("5"); d != 5*time.Second {
+		t.Errorf("seconds form: got %v", d)
+	}
+	if d := retryAfter(time.Now().Add(20 * time.Second).UTC().Format(http.TimeFormat)); d < 15*time.Second || d > 20*time.Second {
+		t.Errorf("date form: got %v", d)
+	}
+	for _, bad := range []string{"", "soon", "-3", time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat)} {
+		if d := retryAfter(bad); d != 0 {
+			t.Errorf("retryAfter(%q) = %v, want 0", bad, d)
+		}
 	}
 }
