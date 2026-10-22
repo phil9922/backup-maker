@@ -60,7 +60,15 @@ func (e *Engine) propagate(rels []string) (copied int) {
 	// "syncing" rather than "scanning": there is nothing to scan, and the state
 	// column answers whether the files are safe — which, on a folder that has
 	// completed a pass before, they are.
-	e.setState("syncing")
+	//
+	// Except on a destination already known to refuse writes. "syncing" reads
+	// "backed up", and only a write that lands may take that state away.
+	e.mu.Lock()
+	wasReadOnly := e.state == "read-only"
+	if !wasReadOnly {
+		e.state = "syncing"
+	}
+	e.mu.Unlock()
 	for _, rel := range rels {
 		info, ok := e.fastPathCandidate(rel)
 		if !ok {
@@ -78,6 +86,14 @@ func (e *Engine) propagate(rels []string) (copied int) {
 				// the full pass reclaim space with the whole picture in front of it.
 				e.log.Warn("destination is full; leaving it to the next full pass", "err", err)
 				break
+			}
+			if IsReadOnly(err) {
+				// Said here and not left to the end of the loop, which would
+				// call this destination "in sync" having written nothing to it.
+				e.setState("read-only")
+				e.log.Error("destination refuses writes: it is read-only or write-protected", "err", err)
+				e.endScan()
+				return copied
 			}
 			continue
 		}
@@ -98,7 +114,9 @@ func (e *Engine) propagate(rels []string) (copied int) {
 			"considered", len(rels))
 	}
 	e.mu.Lock()
-	e.state = "in sync"
+	if !wasReadOnly || copied > 0 {
+		e.state = "in sync"
+	}
 	e.mu.Unlock()
 	e.endScan()
 	return copied

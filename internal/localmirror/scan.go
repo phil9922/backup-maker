@@ -111,9 +111,10 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 
 	for _, rel := range pending {
 		err := e.copyOne(rel, sourceFiles[rel].Size(), now)
-		if IsNoSpace(err) {
-			// Still full after making room: stop the pass rather than grinding
-			// through every remaining file failing identically.
+		if IsNoSpace(err) || IsReadOnly(err) {
+			// Still full after making room, or refusing writes outright: stop the
+			// pass rather than grinding through every remaining file failing
+			// identically.
 			return copied, removed, err
 		}
 		if err != nil {
@@ -148,6 +149,9 @@ func (e *Engine) reconcile() (copied, removed int, err error) {
 			continue
 		}
 		if err := keepVersion(e.backend, path.Join(e.destRoot, rel), now); err != nil {
+			if IsReadOnly(err) {
+				return copied, removed, err
+			}
 			e.addFileError(rel, err)
 			continue
 		}
@@ -202,7 +206,9 @@ func (e *Engine) copyOne(rel string, size int64, now time.Time) error {
 		}
 	}
 	if err != nil {
-		if !IsNoSpace(err) {
+		// Neither is a fault of this file, and both stop the pass, which reports
+		// them once against the whole destination.
+		if !IsNoSpace(err) && !IsReadOnly(err) {
 			e.addFileError(rel, err)
 		}
 		e.advanceTransfer(size)

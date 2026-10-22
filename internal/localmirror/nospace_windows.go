@@ -12,8 +12,14 @@ import (
 const (
 	errorDiskFull       syscall.Errno = 112
 	errorHandleDiskFull syscall.Errno = 39
+	// ERROR_WRITE_PROTECT: the volume refuses writes.
+	errorWriteProtect syscall.Errno = 19
 )
 
 func isSystemNoSpace(err error) bool {
 	return errors.Is(err, errorDiskFull) || errors.Is(err, errorHandleDiskFull)
+}
+
+func isSystemReadOnly(err error) bool {
+	return errors.Is(err, errorWriteProtect)
 }

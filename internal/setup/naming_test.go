@@ -270,6 +270,7 @@ func TestEveryMapInStateIsClassifiedAsDestinationKeyedOrNot(t *testing.T) {
 		"LANDevices":       true, // the token that view issued
 		"ArchivePasswords": true, // archive job name
 		"ArchiveLastRun":   true, // archive job name
+		"ArchiveFailing":   true, // archive job name
 		// Keyed by OS-keyring account name, and a share account does embed the
 		// destination name ("share/pi-drive1") — so this is here on purpose and
 		// only because of what a non-empty entry means. An account is listed only

@@ -154,6 +154,10 @@ const (
 	// the reclaimer only ever fires on a genuinely full destination.
 	ntDiskFull      = 0xC000007F
 	ntQuotaExceeded = 0xC0000044
+	// The server's volume refuses writes. Samba answers this when the disk it
+	// shares has been remounted read-only — which is what a USB disk on a
+	// Raspberry Pi becomes after an I/O error aborts its journal.
+	ntMediaWriteProtected = 0xC00000A2
 )
 
 // opErr normalizes an op failure: connection-class errors reset the session,
@@ -170,6 +174,8 @@ func (f *FS) opErr(err error) error {
 			return fmt.Errorf("%w: %w", fs.ErrNotExist, err)
 		case ntDiskFull, ntQuotaExceeded:
 			return fmt.Errorf("%w: %w", localmirror.ErrNoSpace, err)
+		case ntMediaWriteProtected:
+			return fmt.Errorf("%w: %w", localmirror.ErrReadOnly, err)
 		}
 		return err // a server answer, not a connection problem
 	}

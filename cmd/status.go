@@ -85,7 +85,7 @@ var statusCmd = &cobra.Command{
 
 		if len(m.Archives) > 0 {
 			fmt.Println()
-			tw := newTable("SCHEDULED BACKUP", "TARGET", "EVERY", "STATE", "LAST RUN")
+			tw := newTable("SCHEDULED BACKUP", "TARGET", "EVERY", "STATE", "LAST SUCCESS")
 			for _, a := range m.Archives {
 				mark := ""
 				// A snapshot that was written but never read back gets the same

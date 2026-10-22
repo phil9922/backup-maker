@@ -12,6 +12,12 @@ import (
 	"unicode/utf8"
 )
 
+// ArchiveFailure is a run of consecutive failed attempts of one schedule.
+type ArchiveFailure struct {
+	Since    time.Time `json:"since"`
+	Attempts int       `json:"attempts"`
+}
+
 // State is machine-owned runtime data, distinct from the user-editable
 // config.toml. The CLI reads it to find and authenticate to the daemon.
 type State struct {
@@ -129,6 +135,16 @@ type State struct {
 	// ArchiveLastRun tracks when each archive job last completed, so
 	// schedules survive daemon restarts and overdue jobs catch up.
 	ArchiveLastRun map[string]time.Time `json:"archive_last_run,omitempty"`
+	// ArchiveFailing records a schedule that has failed every attempt since its
+	// last success: when the first of those failures happened and how many there
+	// have been. Removed by the next success.
+	//
+	// PERSISTED because the answer it gives is "how long has this been broken",
+	// and a restart must not shorten it. Without it the row offered only the
+	// last success, and "24d ago" beside "failed" did not say whether the job
+	// had failed once or forty thousand times — it had, retrying every thirty
+	// seconds against a disk that had locked itself read-only.
+	ArchiveFailing map[string]ArchiveFailure `json:"archive_failing,omitempty"`
 	// MirrorLastSync tracks when each folder last completed a sync to each
 	// drive/share destination — folder id -> target name -> time — so those
 	// clocks survive a daemon restart too. Without it a reboot resets every

@@ -201,7 +201,7 @@ var tmpl = template.Must(template.New("status").Parse(`<!doctype html>
 {{if .Snapshots}}
 <h1>Timed snapshots</h1>
 <table>
-<thead><tr><th>Name</th><th>Destination</th><th>State</th><th>Last run</th></tr></thead>
+<thead><tr><th>Name</th><th>Destination</th><th>State</th><th>Last success</th></tr></thead>
 <tbody>
 {{range .Snapshots}}<tr>
  <td>{{.Folder}}</td><td>{{.Destination}}</td>

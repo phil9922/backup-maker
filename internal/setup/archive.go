@@ -112,6 +112,7 @@ func RemoveArchive(name string) error {
 	state, err := config.UpdateState(func(s *config.State) error {
 		delete(s.ArchivePasswords, name)
 		delete(s.ArchiveLastRun, name)
+		delete(s.ArchiveFailing, name)
 		return nil
 	})
 	if err != nil {

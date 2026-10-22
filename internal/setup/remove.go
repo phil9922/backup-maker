@@ -186,6 +186,7 @@ func RemoveTarget(name string) error {
 		for _, an := range orphaned {
 			delete(s.ArchivePasswords, an)
 			delete(s.ArchiveLastRun, an)
+			delete(s.ArchiveFailing, an)
 		}
 		return nil
 	})

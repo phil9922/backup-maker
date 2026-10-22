@@ -44,7 +44,7 @@ function stateClass(state, row) {
   // A machine that has never paired is waiting on a person, not broken; red
   // would send someone hunting a fault that doesn't exist.
   if (state === 'awaiting-pair') return 'busy';
-  return 'bad'; // offline, stale, full, wrong-drive, name-clash, error
+  return 'bad'; // offline, stale, full, read-only, wrong-drive, name-clash, error
 }
 
 // The states whose internal names aren't what you'd say out loud.
@@ -87,6 +87,14 @@ function stateHelp(state) {
       'was set up against — it has been replaced, reformatted, or something ' +
       'else is mounted there. Nothing is being written to it, not even status ' +
       'information. If you meant to replace it, set the destination up again.';
+  }
+  // Not "offline": the destination answers, it just will not take anything.
+  // Nothing on it is lost, but nothing saved since is reaching it.
+  if (state === 'read-only') {
+    return 'This destination is answering but refuses to be written to. It is ' +
+      'read-only or write-protected — most often a disk that hit an error and ' +
+      'was locked by the computer it is plugged into. What is already there is ' +
+      'still there; changes since are not being copied until it is repaired.';
   }
   if (state !== 'name-clash') return '';
   return 'Another computer already backs up to this destination under the same ' +
@@ -1550,13 +1558,21 @@ function renderArchives(st) {
       btn.onclick = () => openArchivePasswordForm(tr, a);
       state.appendChild(btn);
     }
+    // Said on the row, not left to the tooltip: "failed" beside a last success
+    // weeks ago does not say whether it failed once or has failed ever since.
+    if (a.state === 'failed' && a.failing_since) {
+      const since = new Date(a.failing_since);
+      const when = since.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+      const tries = a.attempts > 1 ? `, ${a.attempts.toLocaleString()} attempts` : '';
+      state.appendChild(el('span', 'state-since', `since ${when}${tries}`));
+    }
     state.dataset.label = 'State';
     tr.appendChild(state);
     const prog = archiveProgressCell(a);
     prog.dataset.label = 'Progress';
     tr.appendChild(prog);
     const last = el('td', undefined, humanTime(a.last_run));
-    last.dataset.label = 'Last run';
+    last.dataset.label = 'Last success';
     tr.appendChild(last);
 
     // Pause, edit, stop. Without these the only way to change a schedule was

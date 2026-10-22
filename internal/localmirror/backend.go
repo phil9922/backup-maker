@@ -129,6 +129,23 @@ func (l *localFS) WalkDir(root string, fn fs.WalkDirFunc) error {
 	})
 }
 
+// ErrReadOnly reports a write that failed because the destination refuses all
+// writes: a disk the kernel remounted read-only after it failed, or a share
+// whose server says its volume is write-protected.
+//
+// Distinct from every other write error for the same reason as ErrNoSpace, in
+// the other direction: it is a fault of the WHOLE destination, not of one file.
+// Left as a per-file error it was invisible — every copy failed, every pass
+// still reached the end, and the row said "backed up" for three weeks while the
+// Pi's disk accepted nothing.
+var ErrReadOnly = errors.New("destination refuses writes (read-only or write-protected)")
+
+// IsReadOnly reports whether err means the destination will not accept writes
+// at all — whether that came from the local filesystem or from an SMB server.
+func IsReadOnly(err error) bool {
+	return err != nil && (errors.Is(err, ErrReadOnly) || isSystemReadOnly(err))
+}
+
 // IsNoSpace reports whether err means the destination ran out of room —
 // whether that came from the local filesystem or from an SMB server.
 func IsNoSpace(err error) bool {

@@ -75,7 +75,7 @@ type Engine struct {
 	asked atomic.Bool
 
 	mu           sync.Mutex
-	state        string // scanning | in sync | syncing | offline | wrong-drive | name-clash
+	state        string // scanning | in sync | syncing | offline | full | read-only | wrong-drive | name-clash
 	lastSync     time.Time
 	fileErrors   map[string]string
 	symlinkCount int
@@ -442,6 +442,17 @@ func (e *Engine) sync() {
 	if !e.readyToWrite() {
 		return
 	}
+	// ASKED BEFORE THE PASS, NOT LEARNED FROM IT. A read-only destination is
+	// otherwise only discovered by a copy failing — and a pass with nothing to
+	// copy reaches the end and says "in sync" about a disk that would refuse the
+	// next change saved. This is also what clears the state once the disk is
+	// repaired, whether or not anything has changed since.
+	if err := e.probeWritable(); IsReadOnly(err) {
+		e.setState("read-only")
+		e.log.Error("destination refuses writes: it is read-only or write-protected, usually because the disk failed and was remounted read-only",
+			"err", err)
+		return
+	}
 
 	// Make room before copying rather than discovering the problem mid-file.
 	e.ensureHeadroom(0)
@@ -473,6 +484,17 @@ func (e *Engine) sync() {
 			// can't be written must never look healthy.
 			e.setState("full")
 			e.log.Error("destination is full and could not be cleared",
+				"took", time.Since(e.passStart).Round(time.Millisecond), "err", err)
+			return
+		}
+		if IsReadOnly(err) {
+			// NOT "offline", which is what it fell into before: offline is a
+			// state the program waits out quietly, and this one does not end on
+			// its own. A disk the kernel has remounted read-only stays that way
+			// until somebody repairs it, and every change saved meanwhile is
+			// going nowhere.
+			e.setState("read-only")
+			e.log.Error("destination refuses writes: it is read-only or write-protected, usually because the disk failed and was remounted read-only",
 				"took", time.Since(e.passStart).Round(time.Millisecond), "err", err)
 			return
 		}
@@ -818,6 +840,24 @@ func (e *Engine) endScan() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.phase = ""
+}
+
+// probeWritable writes and removes a scratch file, reporting the write's error.
+// Only a read-only answer is acted on; anything else is left for the pass to
+// meet and report in its own terms.
+func (e *Engine) probeWritable() error {
+	const probe = ".backup-maker-writable" + tmpSuffix
+	w, err := e.backend.OpenWrite(probe)
+	if err != nil {
+		return err
+	}
+	_, werr := w.Write([]byte("probe"))
+	cerr := w.Close()
+	_ = e.backend.Remove(probe)
+	if werr != nil {
+		return werr
+	}
+	return cerr
 }
 
 // calibrateMtime probes whether the target honors Chtimes: write a scratch

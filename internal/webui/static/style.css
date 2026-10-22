@@ -1678,3 +1678,6 @@ body.docs .brand { color: var(--fg); font-weight: 700; text-decoration: none; fo
   tr.ignore-row td { display: block; }
   tr.ignore-row td::before { content: none; }
 }
+
+/* How long a failing snapshot has been failing, under the word "failed". */
+.state-since { display: block; font-size: var(--fs-hint); color: var(--hint); }

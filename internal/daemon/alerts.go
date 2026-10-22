@@ -483,9 +483,10 @@ func (a *alerter) send(al alert) {
 // a day and a NAS sleeps every night; interrupting the user for that would
 // train them to ignore the one alert that matters. Only sustained failure —
 // unreachable past stale_after_days, or full with nothing left that may be
-// deleted — is worth a screen.
+// deleted — is worth a screen. So is "read-only" from the first moment: a disk
+// that has been remounted read-only does not recover by being waited for.
 func brokenState(state string) bool {
-	return state == "stale" || state == "full"
+	return state == "stale" || state == "full" || state == "read-only"
 }
 
 // workingState reports a destination that is actually backing up again, as
@@ -500,6 +501,13 @@ func targetBrokenAlert(t status.TargetInfo, now time.Time) alert {
 			urgency: notify.Critical,
 			title:   t.Name + " is full",
 			body:    "There is no room left and no old backup history that may be deleted. Changes are no longer being backed up there.",
+		}
+	}
+	if t.State == "read-only" {
+		return alert{
+			urgency: notify.Critical,
+			title:   t.Name + " refuses writes",
+			body:    "The storage is read-only or write-protected — usually a disk that failed and was locked by its computer. Changes are no longer being backed up there until it is repaired.",
 		}
 	}
 	body := "This destination has not been reachable for long enough that backups there are out of date."

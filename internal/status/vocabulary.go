@@ -2,6 +2,12 @@
 
 package status
 
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
 // The words every surface uses for a state, and the colour that goes with them.
 //
 // WHY THIS IS ONE PLACE. The same translation was written out separately for the
@@ -121,7 +127,7 @@ func RowHealth(r Row) string {
 		// of a page with nothing wrong on it.
 		return "muted"
 	}
-	return "bad" // offline, stale, full, wrong-drive, name-clash, error
+	return "bad" // offline, stale, full, read-only, wrong-drive, name-clash, error
 }
 
 // ArchiveLabel answers for a snapshot schedule what RowLabel answers for a
@@ -178,4 +184,28 @@ func ArchiveHealth(a ArchiveRow) string {
 		return "busy" // waiting on a person, not broken
 	}
 	return "bad"
+}
+
+// FailingSummary says how long a failing schedule has been failing, how often,
+// and when it will be tried again — the sentence every surface puts before the
+// latest error. Empty unless the row records when its failures began.
+func FailingSummary(a ArchiveRow) string {
+	if a.FailingSince.IsZero() {
+		return ""
+	}
+	out := "failing since " + a.FailingSince.Local().Format("2 Jan 15:04")
+	if a.Attempts == 1 {
+		out += " (1 attempt)"
+	} else if a.Attempts > 1 {
+		out += fmt.Sprintf(" (%d attempts)", a.Attempts)
+	}
+	if !a.NextAttempt.IsZero() {
+		if d := time.Until(a.NextAttempt); d > 0 {
+			// "30m", not Duration's "30m0s".
+			out += "; trying again in " + strings.TrimSuffix(d.Round(time.Minute).String(), "0s")
+		} else {
+			out += "; trying again now"
+		}
+	}
+	return out
 }

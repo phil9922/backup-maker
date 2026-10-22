@@ -14,3 +14,9 @@ import (
 func isSystemNoSpace(err error) bool {
 	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
 }
+
+// isSystemReadOnly recognises a local filesystem that refuses writes — most
+// often one the kernel remounted read-only after the disk under it failed.
+func isSystemReadOnly(err error) bool {
+	return errors.Is(err, syscall.EROFS)
+}

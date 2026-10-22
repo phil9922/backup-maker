@@ -93,6 +93,15 @@ type Result struct {
 	// into a notification.
 	Unverified string `json:"unverified,omitempty"`
 	Err        string `json:"err,omitempty"`
+
+	// FailingSince, Attempts and NextAttempt describe the run of failures this
+	// result belongs to, and are set only on a failed result. Not facts about
+	// one run: the daemon fills them in from its record across runs, so a
+	// failure says how long the schedule has been broken and when it will be
+	// tried again rather than only how the latest attempt went.
+	FailingSince time.Time `json:"failing_since,omitzero"`
+	Attempts     int       `json:"attempts,omitempty"`
+	NextAttempt  time.Time `json:"next_attempt,omitzero"`
 }
 
 // maxUnstableNamed bounds the list: a folder where everything is being

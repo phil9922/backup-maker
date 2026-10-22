@@ -266,6 +266,17 @@ type ArchiveRow struct {
 	NextDue        time.Time       `json:"next_due,omitzero"`
 	State          string          `json:"state"` // ok | due | failed | never run | needs password
 	Detail         string          `json:"detail,omitempty"`
+	// FailingSince is when the failures this "failed" row reports began, and
+	// Attempts how many there have been: every attempt since the last success
+	// has failed. NextAttempt is when it will be tried again. All zero unless
+	// the state is "failed".
+	//
+	// LastRun alone could not say this. It is the last SUCCESS, so beside
+	// "failed" it read as "ran 24 days ago and failed", when the job had been
+	// failing every thirty seconds for all of those days.
+	FailingSince time.Time `json:"failing_since,omitzero"`
+	Attempts     int       `json:"attempts,omitempty"`
+	NextAttempt  time.Time `json:"next_attempt,omitzero"`
 	// NeedsPassword marks a job with no stored zip password — it cannot run
 	// until one is entered (an adoption may leave jobs in this state).
 	NeedsPassword bool `json:"needs_password,omitempty"`
@@ -1131,6 +1142,10 @@ func (col *Collector) Collect() Model {
 			case hasResult && res.Err != "":
 				row.State = "failed"
 				row.Detail = res.Err
+				row.FailingSince, row.Attempts, row.NextAttempt = res.FailingSince, res.Attempts, res.NextAttempt
+				if !res.FailingSince.IsZero() {
+					row.Detail = FailingSummary(row) + ". Last error: " + res.Err
+				}
 			case running[job.Name]:
 				// Running now. Ranked above "never run" and "due" because both
 				// of those describe a job that is NOT running, which is exactly
@@ -1307,7 +1322,7 @@ func TargetLocation(t config.Target) string { return config.TargetLocation(t) }
 var stateRank = map[string]int{
 	"paused":  -1,
 	"in sync": 0, "syncing": 1, "scanning": 1,
-	"offline": 2, "awaiting-pair": 2, "stale": 3, "full": 4, "wrong-drive": 5, "name-clash": 5, "error": 6,
+	"offline": 2, "awaiting-pair": 2, "stale": 3, "full": 4, "read-only": 4, "wrong-drive": 5, "name-clash": 5, "error": 6,
 }
 
 // applyRefusal folds a destination-level refusal into the state rolled up from

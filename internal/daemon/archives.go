@@ -45,6 +45,14 @@ func (d *daemon) runDueArchives() {
 		if !last.IsZero() && time.Since(last) < every {
 			continue
 		}
+		// A schedule that is failing waits before trying again. It used to
+		// retry on every tick, so a destination that had locked itself
+		// read-only took 44,000 attempts in three weeks — each one a full
+		// connection and a refused write, and each one a line in the log
+		// burying whatever else was in it.
+		if next := d.nextArchiveAttempt(job.Name); time.Now().Before(next) {
+			continue
+		}
 		// Skipped rather than waited for: a manual "Back up now" of this same
 		// schedule is already writing it, and the next tick is 30 seconds away.
 		if !d.claimArchiveRun(job.Name) {
@@ -196,6 +204,45 @@ func (d *daemon) runArchive(cfg *config.Config, job config.Archive) {
 	d.recordArchiveResult(res, res.Err == "")
 }
 
+// Retry waits after a failed snapshot: the first retry comes a minute later,
+// each one after that waits twice as long, and none waits longer than
+// archiveRetryMax.
+//
+// THE CAP IS SHORT ON PURPOSE. Most failures are a destination that was away —
+// a laptop out of the house, a NAS asleep — and the snapshot should follow it
+// home within the half hour. Half an hour against a broken disk is still under
+// fifty attempts a day where it was nearly three thousand.
+const (
+	archiveRetryFirst = time.Minute
+	archiveRetryMax   = 30 * time.Minute
+)
+
+// archiveRetryDelay is how long to wait after the attempts-th consecutive
+// failure.
+func archiveRetryDelay(attempts int) time.Duration {
+	delay := archiveRetryFirst
+	for i := 1; i < attempts && delay < archiveRetryMax; i++ {
+		delay *= 2
+	}
+	return min(delay, archiveRetryMax)
+}
+
+// nextArchiveAttempt is the earliest the scheduler may run a failing job
+// again; the zero time for a job that is not failing.
+//
+// Keyed on the in-memory result, not on the persisted record: a restart tries
+// again straight away, which is what somebody who has just restarted the
+// program to fix it wants.
+func (d *daemon) nextArchiveAttempt(name string) time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	res, ok := d.archiveResults[name]
+	if !ok || res.Err == "" {
+		return time.Time{}
+	}
+	return res.NextAttempt
+}
+
 // recordArchiveResult stores the outcome for status displays, and on success
 // persists the run time so the schedule survives restarts.
 //
@@ -213,16 +260,33 @@ func (d *daemon) recordArchiveResult(res archive.Result, ok bool) {
 	if d.archiveResults == nil {
 		d.archiveResults = map[string]archive.Result{}
 	}
-	d.archiveResults[res.ArchiveName] = res
 	if ok {
+		d.archiveResults[res.ArchiveName] = res
 		_ = d.updateState(func(s *config.State) error {
 			if s.ArchiveLastRun == nil {
 				s.ArchiveLastRun = map[string]time.Time{}
 			}
 			s.ArchiveLastRun[res.ArchiveName] = res.When
+			delete(s.ArchiveFailing, res.ArchiveName)
 			return nil
 		})
+		return
 	}
+	failing := d.state.ArchiveFailing[res.ArchiveName]
+	if failing.Since.IsZero() {
+		failing.Since = res.When
+	}
+	failing.Attempts++
+	res.FailingSince, res.Attempts = failing.Since, failing.Attempts
+	res.NextAttempt = time.Now().Add(archiveRetryDelay(failing.Attempts))
+	d.archiveResults[res.ArchiveName] = res
+	_ = d.updateState(func(s *config.State) error {
+		if s.ArchiveFailing == nil {
+			s.ArchiveFailing = map[string]config.ArchiveFailure{}
+		}
+		s.ArchiveFailing[res.ArchiveName] = failing
+		return nil
+	})
 }
 
 // archiveStatus snapshots job state for the status collector.

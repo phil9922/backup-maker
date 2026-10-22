@@ -24,6 +24,10 @@ notification urgency — every mainstream Linux one does):
 - a destination has been unreachable long enough to go **stale** (past
   `stale_after_days`)
 - a destination is **full** and there is no old history left that may be deleted
+- a destination **refuses writes** — it answers but is read-only or
+  write-protected, most often a disk that hit an error and was locked by the
+  computer it is plugged into. This one does not wait for `stale_after_days`,
+  because it does not fix itself
 - a **scheduled snapshot failed**
 - **unrecognised storage** is mounted where a destination should be — a
   reformatted card, or a different drive at the same mount point. Nothing is
