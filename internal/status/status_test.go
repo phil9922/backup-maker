@@ -920,6 +920,30 @@ func TestARunningSnapshotDoesNotReportItselfAsNeverRun(t *testing.T) {
 	}
 }
 
+// A retry of a failing schedule is running, not failed. The failure is still
+// the latest RESULT while the retry works, and it used to win: a two-hour
+// snapshot to a repaired destination said "failed" beside a moving bar.
+func TestARetryOfAFailingSnapshotSaysItIsRunning(t *testing.T) {
+	cfg := &config.Config{
+		General:  config.General{MachineName: "my-laptop"},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/alex/Desktop", Label: "Desktop"}},
+		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
+	}
+	col := setupCollector(cfg, func() bool { return true })
+	col.Archives = func() ([]archive.Result, map[string]time.Time) {
+		return []archive.Result{{ArchiveName: "nightly", When: time.Now(), Err: "target offline"}},
+			map[string]time.Time{"nightly": time.Now().Add(-24 * 24 * time.Hour)}
+	}
+	col.ArchiveRunning = func() map[string]time.Time {
+		return map[string]time.Time{"nightly": time.Now()}
+	}
+
+	if got := col.Collect().Archives[0].State; got != "running" {
+		t.Fatalf("a retry being written reports %q, want %q", got, "running")
+	}
+}
+
 // THE GUARANTEE: a folder that nothing backs up is reported as unprotected, so
 // no part of the UI can go on describing it as protected.
 //
@@ -1028,5 +1052,68 @@ func TestAnIdleDestinationThatNeverSyncedStillSaysNever(t *testing.T) {
 		if rows[0].FirstBackup {
 			t.Errorf("state %q: FirstBackup = true, which hides a destination that never started", state)
 		}
+	}
+}
+
+// A schedule a week behind stays flagged while its retry runs. The flag used to
+// be read off State == "due", so starting the retry cleared it: the CLI printed
+// "backed up" with no mark beside a last success seven days old.
+func TestARunningSnapshotThatIsWeeksBehindStillSaysItIsOverdue(t *testing.T) {
+	cfg := &config.Config{
+		General:  config.General{MachineName: "my-laptop"},
+		Folders:  []config.Folder{{ID: "f1", Path: "/home/alex/Desktop", Label: "Desktop"}},
+		Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+		Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card"}},
+	}
+	col := setupCollector(cfg, func() bool { return true })
+	col.Archives = func() ([]archive.Result, map[string]time.Time) {
+		return []archive.Result{{ArchiveName: "nightly", When: time.Now(), Err: "target offline"}},
+			map[string]time.Time{"nightly": time.Now().Add(-7 * 24 * time.Hour)}
+	}
+	col.ArchiveRunning = func() map[string]time.Time {
+		return map[string]time.Time{"nightly": time.Now()}
+	}
+
+	row := col.Collect().Archives[0]
+	if row.State != "running" {
+		t.Fatalf("state = %q, want running", row.State)
+	}
+	if !row.Overdue {
+		t.Fatal("a retry running a week late is not flagged overdue")
+	}
+	if !strings.Contains(row.Detail, "newest finished one is from") {
+		t.Fatalf("detail %q does not say how old the newest snapshot is", row.Detail)
+	}
+}
+
+// The other side: a running snapshot that is on time, and a paused one that is
+// old, are not overdue. Paused is a deliberate stop, not a schedule falling
+// behind.
+func TestOnlyALateUnpausedScheduleIsOverdue(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		age     time.Duration
+		paused  bool
+		overdue bool
+	}{
+		{"on time", 2 * time.Hour, false, false},
+		{"late", 3 * 24 * time.Hour, false, true},
+		{"late but paused", 3 * 24 * time.Hour, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				General:  config.General{MachineName: "my-laptop"},
+				Folders:  []config.Folder{{ID: "f1", Path: "/home/alex/Desktop", Label: "Desktop"}},
+				Targets:  []config.Target{{Type: "drive", Name: "card", Path: "/media/card"}},
+				Archives: []config.Archive{{Name: "nightly", Folders: []string{"f1"}, Every: "daily", Target: "card", Paused: tc.paused}},
+			}
+			col := setupCollector(cfg, func() bool { return true })
+			col.Archives = func() ([]archive.Result, map[string]time.Time) {
+				return nil, map[string]time.Time{"nightly": time.Now().Add(-tc.age)}
+			}
+			if got := col.Collect().Archives[0].Overdue; got != tc.overdue {
+				t.Fatalf("overdue = %v, want %v", got, tc.overdue)
+			}
+		})
 	}
 }

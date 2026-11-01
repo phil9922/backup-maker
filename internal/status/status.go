@@ -264,7 +264,7 @@ type ArchiveRow struct {
 	Every          string          `json:"every"`
 	LastRun        time.Time       `json:"last_run,omitzero"`
 	NextDue        time.Time       `json:"next_due,omitzero"`
-	State          string          `json:"state"` // ok | due | failed | never run | needs password
+	State          string          `json:"state"` // ok | due | running | preparing | failed | never run | needs password | paused
 	Detail         string          `json:"detail,omitempty"`
 	// FailingSince is when the failures this "failed" row reports began, and
 	// Attempts how many there have been: every attempt since the last success
@@ -325,6 +325,15 @@ type ArchiveRow struct {
 	// another room can act on.
 	Unverified       bool   `json:"unverified,omitempty"`
 	UnverifiedReason string `json:"unverified_reason,omitempty"`
+	// Overdue says the newest finished snapshot is older than the schedule
+	// promises (one interval plus the hour of grace "due" uses).
+	//
+	// A FLAG SEPARATE FROM State for the same reason as Unverified: state says
+	// what the job is doing, and a job can be running AND a week behind. It used
+	// to be read off State == "due", so the moment a retry started after a week
+	// of failures the warning vanished — "backed up" with no mark, beside a last
+	// success seven days old, for the whole two hours the retry took.
+	Overdue bool `json:"overdue,omitempty"`
 	// Phase is "packing" or "verifying". Verification re-reads the whole
 	// archive back off the destination, which for a multi-gigabyte snapshot is
 	// minutes of work that looked like a hang: the bar was full and the word
@@ -1126,6 +1135,10 @@ func (col *Collector) Collect() Model {
 			if !row.LastRun.IsZero() && every > 0 {
 				row.NextDue = row.LastRun.Add(every)
 			}
+			// Paused is excluded: a deliberate stop is not a schedule falling
+			// behind, and the row already says why it is not running.
+			row.Overdue = !job.Paused && !row.LastRun.IsZero() && every > 0 &&
+				time.Since(row.LastRun) > every+time.Hour
 			res, hasResult := resultByName[job.Name]
 			switch {
 			case job.Paused:
@@ -1139,6 +1152,20 @@ func (col *Collector) Collect() Model {
 				row.NeedsPassword = true
 				row.State = "needs password"
 				row.Detail = "enter this snapshot's password to resume it"
+			case running[job.Name]:
+				// Running now. Ranked above "never run" and "due" because both
+				// of those describe a job that is NOT running, which is exactly
+				// the wrong thing to say about one that is. And above "failed":
+				// a retry in progress said "failed" for the whole of a two-hour
+				// run, beside a bar that was visibly moving.
+				row.State = "running"
+				row.Detail = "writing a snapshot now"
+				if row.Overdue {
+					// Say how far behind, because "backed up" beside a moving
+					// bar otherwise reads as current.
+					row.Detail = "writing a snapshot now; the newest finished one is from " +
+						row.LastRun.Local().Format("2 Jan 15:04")
+				}
 			case hasResult && res.Err != "":
 				row.State = "failed"
 				row.Detail = res.Err
@@ -1146,12 +1173,6 @@ func (col *Collector) Collect() Model {
 				if !res.FailingSince.IsZero() {
 					row.Detail = FailingSummary(row) + ". Last error: " + res.Err
 				}
-			case running[job.Name]:
-				// Running now. Ranked above "never run" and "due" because both
-				// of those describe a job that is NOT running, which is exactly
-				// the wrong thing to say about one that is.
-				row.State = "running"
-				row.Detail = "writing a snapshot now"
 			case row.LastRun.IsZero() && (row.CoversEverything || len(row.Folders) > 0):
 				// Created but not yet started. The scheduler checks for due
 				// jobs every 30 seconds, so a brand-new schedule sits here for
