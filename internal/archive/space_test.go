@@ -58,6 +58,13 @@ func sparseFile(t *testing.T, path string, size int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// NTFS allocates every byte of a truncated file unless the file is marked
+	// sparse first, so on Windows this asked the runner for 40GB of real disk
+	// and failed with "not enough space". Elsewhere this is a no-op.
+	if err := markSparse(f); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
 	if err := f.Truncate(size); err != nil {
 		f.Close()
 		t.Fatal(err)
@@ -302,7 +309,7 @@ func TestTheEstimateUsesThePreviousZipRatherThanTheUncompressedSource(t *testing
 func TestTheDestinationsOwnMinFreeSettingWinsOverTheFloor(t *testing.T) {
 	cfg, job, _, _ := testSetup(t)
 	if got := snapshotFloor(cfg, job); got != minFreeFloorBytes {
-		t.Errorf("with no target configured the floor is %d, want %d", got, minFreeFloorBytes)
+		t.Errorf("with no target configured the floor is %d, want %d", got, uint64(minFreeFloorBytes))
 	}
 
 	ten := 10
