@@ -33,6 +33,16 @@ installs on the computer being protected:
 
 - **Share a folder from it** (Samba on a Pi, or a NAS's built-in sharing) and
   add it as a network drive. Nothing else to install.
+
+  **Address it by name, not number:** `//backup-pi.local/backups` rather than
+  `//192.168.1.50/backups`. Routers hand out new addresses when they feel like
+  it, and a share addressed by number simply goes offline the day that
+  happens. The `.local` name is the one the box announces on your network (a
+  Pi, a Mac and most NAS boxes do this out of the box), and it follows the box
+  to whatever address it is given. If the box runs Samba with
+  `bind interfaces only = yes`, it also needs telling when its address
+  changes — the [Raspberry Pi guide](../setup/raspberry-pi.md) has the
+  five-line hook that does it.
 - **Or run backup-maker on it too** and pair the two machines, for block-level
   verified transfers. Stronger, at the cost of a second install to maintain.
 

@@ -596,6 +596,39 @@ smbclient //<pi-address>/backups -U <user> -c 'put /etc/hostname test.txt'
 # NT_STATUS_ACCESS_DENIED  ← correct while unmounted
 ```
 
+### When the router gives the Pi a new address
+
+`bind interfaces only` has one cost. Samba binds the address the Pi had when
+Samba started, and never notices a new one. Routers do hand out new leases —
+one moved a Pi from `.20` to `.37` while it was running — and from then on
+Samba refuses every connection, and every backup to the Pi stops, until
+somebody restarts it. Pinning the address in your router fixes it, if you can
+get at the router. If you can't, this hook restarts Samba whenever it is no
+longer listening on the Pi's current address, and does nothing otherwise, so
+the lease renewal every few hours never interrupts a backup that is being
+written:
+
+```sh
+sudo tee /etc/NetworkManager/dispatcher.d/90-samba-follow-address >/dev/null <<'EOF'
+#!/bin/sh
+# Restart Samba when it is no longer listening on this interface's address.
+case "$2" in up|dhcp4-change) ;; *) exit 0 ;; esac
+systemctl -q is-active smbd || exit 0
+for addr in $(ip -4 -o addr show dev "$1" scope global | awk '{split($4, a, "/"); print a[1]}'); do
+  if ! ss -Hltn "sport = :445" | awk '{print $4}' | grep -qxE "($addr|0\.0\.0\.0|\*):445"; then
+    logger -t samba-follow-address "smbd not listening on $addr ($1 $2); restarting"
+    systemctl restart smbd
+    exit 0
+  fi
+done
+EOF
+sudo chmod 755 /etc/NetworkManager/dispatcher.d/90-samba-follow-address
+```
+
+That keeps Samba answering. The other half is the computer being backed up
+finding the Pi: add the share by name, `//backup-pi.local/backups`, rather than
+by number, and backup-maker follows the Pi to whatever address it is given.
+
 ## Step 6 — Serve the status page over HTTP (optional)
 
 backup-maker writes a small `backup-maker-status.html` to each destination, so

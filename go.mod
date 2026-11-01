@@ -12,6 +12,7 @@ require (
 	github.com/yeka/zip v0.0.0-20231116150916-03d6312748a9
 	github.com/yuin/goldmark v1.8.5
 	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/net v0.10.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 )
@@ -31,5 +32,4 @@ require (
 	github.com/jcmturner/rpc/v2 v2.0.3 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/crypto v0.9.0 // indirect
-	golang.org/x/net v0.10.0 // indirect
 )

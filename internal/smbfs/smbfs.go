@@ -105,7 +105,7 @@ func (f *FS) conn() (*smb2.Share, error) {
 	d := &smb2.Dialer{
 		Initiator: &smb2.NTLMInitiator{User: f.user, Password: f.pass},
 	}
-	sess, err := d.Dial(ctx, f.addr)
+	sess, err := dial(ctx, d, f.addr)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to %s: %w", f.addr, err)
 	}
@@ -439,7 +439,7 @@ func ListShares(ctx context.Context, addr, username, password string) ([]string,
 		addr = net.JoinHostPort(addr, "445")
 	}
 	d := &smb2.Dialer{Initiator: &smb2.NTLMInitiator{User: username, Password: password}}
-	sess, err := d.Dial(ctx, addr)
+	sess, err := dial(ctx, d, addr)
 	if err != nil {
 		return nil, err
 	}
