@@ -1,0 +1,64 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# Bring the backup disk back after it drops off the USB bus.
+#
+# What happens without this: the enclosure stops answering, the kernel drops it
+# mid-write, and it re-appears a moment later under a new name (sda -> sdb).
+# The mount at MOUNTPOINT stays attached to the device that no longer exists,
+# every read of it fails, and Samba keeps serving that dead mount until a
+# person notices. Backups to this box stop until then.
+#
+# It acts ONLY on that exact signature — the mounted device node is gone, or
+# the disk's UUID now lives on a different node — or on the disk being present
+# and not mounted at all. Never on slowness: unmounting a disk that is merely
+# busy would break the very backup being written.
+#
+# The repair is `e2fsck -p`, which makes only the fixes that are safe without a
+# person (journal replay, counts). Anything it will not fix, it reports with
+# exit code 4 or more, and then this stops and leaves the disk unmounted.
+#
+# Usage: backup-disk-recover [--check]   (--check says what it would do)
+set -u
+MOUNTPOINT=${MOUNTPOINT:-/mnt/backups}
+FSTAB=${FSTAB:-/etc/fstab}   # both overridable, for rehearsing on a scratch image
+CHECK=0; [ "${1:-}" = "--check" ] && CHECK=1
+say() {
+  logger -t backup-disk-recover "$*"
+  if [ -t 1 ] || [ $CHECK = 1 ]; then echo "$*"; fi
+  return 0   # never let a log line decide control flow
+}
+
+uuid=$(awk -v mp="$MOUNTPOINT" '$2 == mp && $1 ~ /^UUID=/ { sub(/^UUID=/, "", $1); print $1 }' "$FSTAB")
+[ -n "$uuid" ] || { say "no UUID= line for $MOUNTPOINT in $FSTAB; doing nothing"; exit 1; }
+dev=$(blkid -U "$uuid" 2>/dev/null) || dev=""
+if [ -z "$dev" ]; then
+  [ $CHECK = 1 ] && echo "disk $uuid is not attached; nothing to do"
+  exit 0   # unplugged: the laptop reports that; nothing here can fix it
+fi
+
+if mountpoint -q "$MOUNTPOINT"; then
+  src=$(findmnt -no SOURCE "$MOUNTPOINT")
+  if [ -b "$src" ] && [ "$src" = "$dev" ]; then
+    [ $CHECK = 1 ] && echo "healthy: $MOUNTPOINT is mounted from $dev"
+    exit 0
+  fi
+  say "$MOUNTPOINT is mounted from $src, but the disk is now $dev: detaching the dead mount"
+  [ $CHECK = 1 ] && exit 0
+  umount -l "$MOUNTPOINT" || { say "could not detach $MOUNTPOINT"; exit 1; }
+else
+  say "disk $dev is attached but $MOUNTPOINT is not mounted"
+  [ $CHECK = 1 ] && exit 0
+fi
+
+e2fsck -p "$dev" >/dev/null 2>&1
+rc=$?
+if [ $rc -ge 4 ]; then
+  say "e2fsck -p on $dev left errors it would not fix safely (exit $rc); NOT mounting. Run: sudo e2fsck -f $dev"
+  exit 1
+fi
+if mount -T "$FSTAB" "$MOUNTPOINT"; then
+  say "recovered: $MOUNTPOINT mounted from $dev (e2fsck exit $rc)"
+else
+  say "mount $MOUNTPOINT failed"
+  exit 1
+fi

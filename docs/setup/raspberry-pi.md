@@ -474,6 +474,42 @@ If `df` names the card rather than the SSD, the drive is **not** mounted and
 you are looking at the bare directory underneath. Step 5 makes that failure
 loud rather than silent; do not skip it.
 
+### When the drive drops off the USB bus
+
+USB enclosures sometimes stop answering. The kernel resets the link, gives up,
+and drops the disk mid-write; a moment later it comes back under a **new name**
+(`sda` becomes `sdb`). The mount at `/mnt/backups` stays attached to the device
+that no longer exists, every read of it fails, and nothing puts it right — on
+the machine this guide was written on, that was sixteen hours of backups going
+nowhere. backup-maker notices within the minute and refuses to write, but
+refusing is all it can do from the other end of the network.
+
+[`tools/pi/backup-disk-recover`](../../tools/pi/backup-disk-recover) puts it
+right on the Pi. Once a minute it checks one thing: **is `/mnt/backups` still
+mounted from the device your disk's UUID points at?** If not — or if the disk
+is attached and not mounted at all — it detaches the dead mount, runs
+`e2fsck -p` (only the repairs that are safe without a person: replaying the
+journal, fixing counts) and mounts it again. It never acts on a disk that is
+merely slow, because unmounting a busy disk would break the backup being
+written; and if `e2fsck -p` finds anything it will not fix, it stops and
+leaves the disk unmounted for you.
+
+```sh
+sudo install -m 755 backup-disk-recover /usr/local/sbin/
+sudo install -m 644 backup-disk-recover.service backup-disk-recover.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now backup-disk-recover.timer
+sudo backup-disk-recover --check     # "healthy: /mnt/backups is mounted from /dev/sda1"
+```
+
+It reads the UUID from your `/etc/fstab` line for `/mnt/backups`, so there is
+nothing to edit. What it did is in `journalctl -t backup-disk-recover`.
+
+This repairs the symptom. If it happens more than once, look at the cause:
+`lsusb -t` should show the enclosure at **5000M**. **480M** means a USB 2 port
+(the black ones) or a USB 2 cable — and the disk that dropped while this guide
+was being written was running at 480M.
+
 ## Step 5 — Share the drive on the network
 
 This is what lets backup-maker treat the Pi as a network drive, with nothing

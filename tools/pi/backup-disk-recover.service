@@ -1,0 +1,7 @@
+[Unit]
+Description=Bring the backup disk back after it drops off the USB bus
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/backup-disk-recover
