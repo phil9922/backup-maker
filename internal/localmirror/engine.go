@@ -412,12 +412,19 @@ func (e *Engine) pruneIfDue() {
 // chance to write somebody else's files. Both the full pass and the fast path
 // call it; do not inline it into a third caller.
 func (e *Engine) readyToWrite() bool {
-	switch checkPresence(e.backend, e.uuid) {
-	case wrongDrive:
+	// Recognize, not checkPresence alone: a location that answers but holds no
+	// marker we can read is storage that is not ours, not an absent one. The
+	// difference is only what the row SAYS — both refuse — but it is the
+	// difference between "plug it back in" and "something is wrong with it".
+	// Asking only for the marker called a backup box whose disk had dropped off
+	// its USB bus "offline" for sixteen hours, while the status writer, asking
+	// this same Recognize, already knew the storage behind it was not ours.
+	switch Recognize(e.backend, e.uuid) {
+	case Foreign:
 		e.setState("wrong-drive")
 		e.log.Warn("different storage at target location; refusing to write")
 		return false
-	case absent:
+	case Offline:
 		e.setState("offline")
 		return false
 	}

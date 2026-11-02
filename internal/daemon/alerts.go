@@ -202,6 +202,18 @@ func (a *alerter) pending(m status.Model, now time.Time) []alert {
 	wantSnapshots := a.wants(config.AlertKinds.SnapshotFailedOn)
 	wantPairs := a.wants(config.AlertKinds.PairRequestsOn)
 
+	// A row past stale_after_days keeps its Stale flag even when a refusal
+	// outranks "stale" in its state. Reading the flag rather than only the state
+	// is what keeps the backstop alive for a destination refused as unrecognised
+	// storage: "wrong-drive" outranks "stale", so with unrecognised-storage
+	// alerts switched off such a destination used to stay silent for ever.
+	stale := map[string]bool{}
+	for _, r := range m.Rows {
+		if r.Stale {
+			stale[r.TargetName] = true
+		}
+	}
+
 	var out []alert
 	for _, t := range m.Targets {
 		if !wantBroken {
@@ -209,7 +221,7 @@ func (a *alerter) pending(m status.Model, now time.Time) []alert {
 		}
 		wasBroken := prev != nil && prev.broken[t.Name]
 		switch {
-		case brokenState(t.State) && !wasBroken:
+		case (brokenState(t.State) || stale[t.Name]) && !wasBroken:
 			cur.broken[t.Name] = true
 			out = append(out, targetBrokenAlert(t, now))
 		case wasBroken && workingState(t.State):

@@ -4,7 +4,6 @@ package status
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -201,11 +200,29 @@ func FailingSummary(a ArchiveRow) string {
 	}
 	if !a.NextAttempt.IsZero() {
 		if d := time.Until(a.NextAttempt); d > 0 {
-			// "30m", not Duration's "30m0s".
-			out += "; trying again in " + strings.TrimSuffix(d.Round(time.Minute).String(), "0s")
+			out += "; trying again in " + roughDuration(d)
 		} else {
 			out += "; trying again now"
 		}
 	}
 	return out
+}
+
+// roughDuration says how long until something, to the minute: "30m", "1h5m",
+// "2h". Under a minute is said in words, because rounding it gives 0, which
+// Duration prints as "0s" — and trimming that "0s" (to turn "30m0s" into
+// "30m") left nothing at all: "trying again in ." in a real alert.
+func roughDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "under a minute"
+	}
+	d = d.Round(time.Minute)
+	h, m := int(d/time.Hour), int(d%time.Hour/time.Minute)
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%dm", m)
+	case m == 0:
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh%dm", h, m)
 }

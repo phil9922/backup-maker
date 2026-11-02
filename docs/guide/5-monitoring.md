@@ -21,17 +21,22 @@ desktop_alerts = true    # on by default
 **These stay on screen until you dismiss them** (on desktops that honour
 notification urgency — every mainstream Linux one does):
 
-- a destination has been unreachable long enough to go **stale** (past
-  `stale_after_days`)
+- nothing has been backed up to a destination for long enough to go **stale**
+  (past `stale_after_days`), whatever the reason — unreachable, or refused as
+  unrecognised storage. That last part means switching off the
+  *unrecognised storage* alert never leaves a destination silent for good
 - a destination is **full** and there is no old history left that may be deleted
 - a destination **refuses writes** — it answers but is read-only or
   write-protected, most often a disk that hit an error and was locked by the
   computer it is plugged into. This one does not wait for `stale_after_days`,
   because it does not fix itself
 - a **scheduled snapshot failed**
-- **unrecognised storage** is mounted where a destination should be — a
-  reformatted card, or a different drive at the same mount point. Nothing is
-  written there, so this is the only way you would find out
+- **unrecognised storage** is where a destination should be — a reformatted
+  card, a different drive at the same mount point, or a network share that
+  answers while the disk behind it has gone. Nothing is written there, and it
+  is said within the minute rather than after `stale_after_days`. This is the
+  alert that catches a backup box whose disk has dropped off; keep it on for
+  anything always-on
 
 **These appear and fade**, because they are good news rather than a problem:
 

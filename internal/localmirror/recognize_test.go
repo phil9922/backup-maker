@@ -54,8 +54,10 @@ func TestEngineWritesNothingToStorageWithoutOurMarker(t *testing.T) {
 	})
 	e.sync()
 
-	if st := e.Status(); st.State != "offline" {
-		t.Errorf("state = %q, want offline", st.State)
+	// Not "offline": the card is mounted and answering, and it is not ours.
+	// Calling it offline sent people looking for a cable.
+	if st := e.Status(); st.State != "wrong-drive" {
+		t.Errorf("state = %q, want wrong-drive", st.State)
 	}
 	entries, err := os.ReadDir(dst)
 	if err != nil {
