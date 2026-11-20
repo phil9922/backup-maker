@@ -12,6 +12,7 @@ import (
 
 	smb2 "github.com/cloudsoda/go-smb2"
 	"golang.org/x/net/dns/dnsmessage"
+	"golang.org/x/net/ipv4"
 )
 
 // WHY THIS FILE EXISTS. A share addressed by IP stops working the day the
@@ -116,6 +117,13 @@ func dial(ctx context.Context, d *smb2.Dialer, addr string) (*smb2.Session, erro
 // query (RFC 6762 §5.1): sent from an ephemeral port, so responders answer by
 // unicast straight back to it, and nothing has to bind 5353 — which avahi or
 // Bonjour usually holds already.
+//
+// The query is sent out of every LAN interface by name rather than wherever the
+// routing table points multicast. A VPN with a kill switch commonly routes
+// 224.0.0.0/4 into its tunnel, where the send fails with
+// "network is unreachable" — while ordinary traffic to the LAN, the SMB
+// connection itself, is still allowed. That took a Pi offline for a week the
+// first time it happened.
 func queryMDNS(ctx context.Context, host string) (net.IP, error) {
 	name, err := dnsmessage.NewName(strings.TrimSuffix(host, ".") + ".")
 	if err != nil {
@@ -126,6 +134,8 @@ func queryMDNS(ctx context.Context, host string) (net.IP, error) {
 		return nil, err
 	}
 	defer conn.Close()
+	pc := ipv4.NewPacketConn(conn)
+	ifaces := lanInterfaces()
 
 	for attempt := 0; attempt < mdnsAttempts; attempt++ {
 		id := uint16(time.Now().UnixNano())
@@ -133,7 +143,7 @@ func queryMDNS(ctx context.Context, host string) (net.IP, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := conn.WriteToUDP(q, mdnsGroup); err != nil {
+		if err := sendQuery(conn, pc, ifaces, q); err != nil {
 			return nil, err
 		}
 		deadline := time.Now().Add(mdnsTimeout)
@@ -156,6 +166,76 @@ func queryMDNS(ctx context.Context, host string) (net.IP, error) {
 		}
 	}
 	return nil, errors.New("nothing on the network answered to that name")
+}
+
+// sendQuery sends q out of each interface in ifaces, and succeeds if any send
+// does. With no LAN interface found it falls back to the routing table, which
+// is what a machine without a VPN would have used anyway.
+func sendQuery(conn *net.UDPConn, pc *ipv4.PacketConn, ifaces []net.Interface, q []byte) error {
+	var firstErr error
+	sent := false
+	for i := range ifaces {
+		if err := pc.SetMulticastInterface(&ifaces[i]); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if _, err := conn.WriteToUDP(q, mdnsGroup); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("sending on %s: %w", ifaces[i].Name, err)
+			}
+			continue
+		}
+		sent = true
+	}
+	if sent {
+		return nil
+	}
+	if _, err := conn.WriteToUDP(q, mdnsGroup); err != nil {
+		if firstErr != nil {
+			return firstErr
+		}
+		return err
+	}
+	return nil
+}
+
+// lanInterfaces lists the interfaces a .local name could be answered on.
+func lanInterfaces() []net.Interface {
+	all, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []net.Interface
+	for _, ifi := range all {
+		if !isLANInterface(ifi.Flags) || !hasIPv4(ifi) {
+			continue
+		}
+		out = append(out, ifi)
+	}
+	return out
+}
+
+// isLANInterface is true for an interface that is up, carries multicast, and
+// reaches a broadcast network. A VPN tunnel is point-to-point: multicast DNS
+// sent into it reaches the VPN provider, never the box on the next desk.
+func isLANInterface(f net.Flags) bool {
+	return f&net.FlagUp != 0 && f&net.FlagMulticast != 0 &&
+		f&net.FlagLoopback == 0 && f&net.FlagPointToPoint == 0
+}
+
+func hasIPv4(ifi net.Interface) bool {
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func buildQuery(id uint16, name dnsmessage.Name) ([]byte, error) {

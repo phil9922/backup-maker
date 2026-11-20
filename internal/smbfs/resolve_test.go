@@ -157,3 +157,24 @@ func TestAMulticastQueryRoundTrips(t *testing.T) {
 		t.Fatalf("queryMDNS = %v, %v", ip, err)
 	}
 }
+
+// A VPN routes multicast into its tunnel, where a .local query goes nowhere; the
+// query has to leave by the wifi or ethernet interface instead.
+func TestAMulticastQueryIsNotSentIntoAVPNTunnel(t *testing.T) {
+	cases := []struct {
+		name  string
+		flags net.Flags
+		want  bool
+	}{
+		{"wifi", net.FlagUp | net.FlagBroadcast | net.FlagMulticast | net.FlagRunning, true},
+		{"vpn tunnel with multicast", net.FlagUp | net.FlagPointToPoint | net.FlagMulticast, false},
+		{"vpn tunnel without multicast", net.FlagUp | net.FlagPointToPoint, false},
+		{"loopback", net.FlagUp | net.FlagLoopback | net.FlagMulticast, false},
+		{"wifi switched off", net.FlagBroadcast | net.FlagMulticast, false},
+	}
+	for _, c := range cases {
+		if got := isLANInterface(c.flags); got != c.want {
+			t.Errorf("%s: isLANInterface = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
